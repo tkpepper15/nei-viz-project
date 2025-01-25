@@ -619,7 +619,7 @@ export default function CircuitSimulator() {
             RPE Impedance Playground
           </h1>
           <p className="text-[#5B616B] text-sm mt-1">
-            Interactive Nyquist plot visualization of RPE impedance characteristics
+            Interactive graphical visualization of RPE impedance characteristics using a circuit model
           </p>
         </header>
 
