@@ -13,12 +13,6 @@ import {
 } from 'recharts';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
-import {
-  Panel,
-  PanelGroup,
-  PanelResizeHandle
-} from 'react-resizable-panels';
-import styles from './CircuitSimulator.module.css';
 
 // Add visualization type enum
 type VisualizationType = 'nyquist' | 'bode' | 'magnitude' | 'phase';
@@ -699,10 +693,10 @@ export default function CircuitSimulator() {
 
   // Add state name editing
   const updateStateName = (id: string, newName: string) => {
+    if (newName.trim() === '') return;
     setSnapshots(prev => prev.map(s => 
       s.id === id ? { ...s, name: newName } : s
     ));
-    setEditingName(null);
   };
 
   // Update tab toggle function
@@ -765,38 +759,352 @@ export default function CircuitSimulator() {
     };
   }, []);
 
-  // Update ResizeHandle component
-  const ResizeHandle = ({ className = '', orientation = 'vertical' }: { className?: string; orientation?: 'vertical' | 'horizontal' }) => (
-    <PanelResizeHandle 
-      className={`${orientation === 'vertical' ? styles.resizeHandleVertical : styles.resizeHandleHorizontal} ${className}`} 
-    />
-  );
-
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <header className="flex-none border-b border-[#E0E0E0] py-3 px-4 bg-white">
-        <h1 className="text-2xl font-medium text-[#205493]">
+      <header className="flex-none border-b border-[#E0E0E0] py-2 px-3 bg-white">
+        <h1 className="text-lg font-medium text-[#205493]">
           RPE Impedance Playground
         </h1>
-        <p className="text-[#5B616B] text-sm mt-0.5">
+        <p className="text-[#5B616B] text-xs">
           Interactive graphical visualization of RPE impedance characteristics using a circuit model
         </p>
       </header>
 
-      <div className="flex-1 min-h-0">
-        <PanelGroup direction="horizontal" className="h-full">
-          <Panel defaultSize={20} minSize={15} maxSize={40} className={styles.panel}>
-            <div className={`${styles.panelContent} border-r border-[#E0E0E0] bg-white flex flex-col`}>
-              {/* States Panel */}
-              <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 min-h-0 flex">
+        {/* Left States Panel - Fixed width */}
+        <div className="w-[350px] flex-none border-r border-[#E0E0E0] bg-white flex flex-col">
+          {/* States Panel */}
+          <div className="flex-1 flex flex-col min-h-0">
+            <button
+              onClick={() => setIsStatesExpanded(!isStatesExpanded)}
+              className="flex-none w-full flex items-center justify-between p-4 hover:bg-[#F8F9FA] transition-colors border-b border-[#E0E0E0] bg-white z-10"
+            >
+              <span className="text-sm font-medium text-[#112E51]">States</span>
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className={`w-4 h-4 text-[#5B616B] transition-transform ${isStatesExpanded ? 'transform rotate-180' : ''}`}
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+
+            {isStatesExpanded && (
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#FAFAFA] min-h-0">
+                {snapshots.map(snapshot => (
+                  <div 
+                    key={snapshot.id} 
+                    className={`border rounded-lg transition-all shadow-sm ${
+                      activeSnapshot === snapshot.id ? 'border-[#205493] bg-[#F1F9FF] ring-1 ring-[#205493]' : 'border-[#E0E0E0] bg-white hover:border-[#AEB0B5]'
+                    }`}
+                  >
+                    {/* State Header */}
+                    <div className="flex items-center gap-2 p-3">
+                      <div className="relative">
+                        {activeSnapshot === snapshot.id ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveColorPicker(activeColorPicker === snapshot.id ? null : snapshot.id);
+                            }}
+                            className={`w-6 h-6 rounded-full transition-all flex items-center justify-center group ${
+                              snapshot.isVisible ? 'bg-white' : 'bg-[#F5F5F5]'
+                            } hover:bg-[#F1F9FF] border border-[#E0E0E0]`}
+                            title="Change visibility and color"
+                          >
+                            <div
+                              className={`w-3 h-3 rounded-full transition-colors ring-1 ring-inset ${
+                                snapshot.isVisible ? `ring-${snapshot.color}` : 'ring-[#E0E0E0]'
+                              } group-hover:scale-110`}
+                              style={{ backgroundColor: snapshot.isVisible ? snapshot.color : '#FFF' }}
+                            />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSnapshotVisibility(snapshot.id);
+                            }}
+                            className="w-6 h-6 rounded-full transition-all flex items-center justify-center hover:bg-[#F1F9FF] border border-[#E0E0E0]"
+                            title={snapshot.isVisible ? "Hide from plot" : "Show in plot"}
+                          >
+                            <div
+                              className="w-3 h-3 rounded-full transition-transform hover:scale-110"
+                              style={{ backgroundColor: snapshot.color, opacity: snapshot.isVisible ? 1 : 0.3 }}
+                            />
+                          </button>
+                        )}
+                        {activeColorPicker === snapshot.id && (
+                          <div 
+                            id="color-picker"
+                            className="absolute left-0 top-full mt-1 z-20"
+                          >
+                            <div className="bg-white border border-[#E0E0E0] rounded-lg shadow-lg p-2">
+                              <div className="mb-2 pb-2 border-b border-[#E0E0E0]">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleSnapshotVisibility(snapshot.id);
+                                  }}
+                                  className={`w-full px-2 py-1 text-xs rounded flex items-center gap-2 ${
+                                    snapshot.isVisible 
+                                      ? 'text-[#981B1E] hover:bg-[#FDE4E4]' 
+                                      : 'text-[#205493] hover:bg-[#F1F9FF]'
+                                  }`}
+                                >
+                                  <svg 
+                                    xmlns="http://www.w3.org/2000/svg" 
+                                    className="w-3 h-3" 
+                                    viewBox="0 0 24 24" 
+                                    fill="none" 
+                                    stroke="currentColor" 
+                                    strokeWidth="2" 
+                                    strokeLinecap="round" 
+                                    strokeLinejoin="round"
+                                  >
+                                    {snapshot.isVisible ? (
+                                      <>
+                                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                                        <line x1="1" y1="1" x2="23" y2="23" />
+                                      </>
+                                    ) : (
+                                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                    )}
+                                  </svg>
+                                  {snapshot.isVisible ? 'Hide from plot' : 'Show in plot'}
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-5 gap-1 w-[120px]">
+                                {availableColors.map((color) => (
+                                  <button
+                                    key={color}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSnapshots(prev => prev.map(s => 
+                                        s.id === snapshot.id ? { ...s, color } : s
+                                      ));
+                                    }}
+                                    className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${
+                                      snapshot.color === color ? 'ring-2 ring-[#205493] ring-offset-1' : ''
+                                    }`}
+                                    style={{ backgroundColor: color }}
+                                    title="Change color"
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {editingName === snapshot.id ? (
+                        <input
+                          type="text"
+                          defaultValue={snapshot.name}
+                          onBlur={(e) => {
+                            if (e.target.value.trim() !== '') {
+                              updateStateName(snapshot.id, e.target.value);
+                            }
+                            setEditingName(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              if (e.currentTarget.value.trim() !== '') {
+                                updateStateName(snapshot.id, e.currentTarget.value);
+                              }
+                              setEditingName(null);
+                            }
+                            if (e.key === 'Escape') {
+                              setEditingName(null);
+                            }
+                          }}
+                          className="flex-1 min-w-0 px-2 py-1 text-sm bg-white border border-[#E0E0E0] rounded text-[#112E51] focus:outline-none focus:ring-1 focus:ring-[#205493] focus:border-[#205493]"
+                          autoFocus
+                        />
+                      ) : (
+                        <button 
+                          className="flex-1 min-w-0 text-left px-2 py-1 text-sm text-[#112E51] hover:text-[#205493] transition-colors truncate"
+                          onClick={() => setEditingName(snapshot.id)}
+                          title={snapshot.name}
+                        >
+                          {snapshot.name}
+                        </button>
+                      )}
+                      
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-1">
+                        {activeSnapshot === snapshot.id ? (
+                          <button
+                            onClick={() => saveChanges(snapshot)}
+                            className="p-1.5 text-xs bg-[#E1F3F8] text-[#205493] rounded-md hover:bg-[#D6E8F7]"
+                            title="Save changes"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                              <polyline points="17 21 17 13 7 13 7 21"/>
+                              <polyline points="7 3 7 8 15 8"/>
+                            </svg>
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => editSnapshot(snapshot)}
+                            className="p-1.5 text-xs bg-[#F1F1F1] text-[#5B616B] rounded-md hover:bg-[#E6E6E6]"
+                            title="Edit this state"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteSnapshot(snapshot.id)}
+                          className="p-1.5 text-xs bg-[#FDE4E4] text-[#981B1E] rounded-md hover:bg-[#FBD1D1]"
+                          title="Delete state"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            <line x1="10" y1="11" x2="10" y2="17"/>
+                            <line x1="14" y1="11" x2="14" y2="17"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expanded State Content */}
+                    {activeSnapshot === snapshot.id ? (
+                      <div className="p-3 bg-[#FAFAFA] space-y-3 border-t border-[#E0E0E0] rounded-b-lg">
+                        {/* Compact Controls */}
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                          <CompactControl
+                            label="Rblank"
+                            value={rBlank}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRBlank, value)}
+                          />
+                          <CompactControl
+                            label="Rs"
+                            value={rs}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRs, value)}
+                          />
+                          <CompactControl
+                            label="Ra"
+                            value={ra}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRa, value)}
+                          />
+                          <CompactControl
+                            label="Ca"
+                            value={ca}
+                            unit="µF"
+                            multiplier={1e6}
+                            onChange={(value) => updateParameter(setCa, value)}
+                          />
+                          <CompactControl
+                            label="Rb"
+                            value={rb}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRb, value)}
+                          />
+                          <CompactControl
+                            label="Cb"
+                            value={cb}
+                            unit="µF"
+                            multiplier={1e6}
+                            onChange={(value) => updateParameter(setCb, value)}
+                          />
+                        </div>
+
+                        {/* Sliders */}
+                        <div className="space-y-2">
+                          <ControlSlider
+                            label="Rblank"
+                            value={rBlank}
+                            min={10}
+                            max={50}
+                            step={1}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRBlank, value)}
+                          />
+                          <ControlSlider
+                            label="Rs"
+                            value={rs}
+                            min={100}
+                            max={10000}
+                            step={100}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRs, value)}
+                          />
+                          <ControlSlider
+                            label="Ra"
+                            value={ra}
+                            min={100}
+                            max={10000}
+                            step={100}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRa, value)}
+                          />
+                          <ControlSlider
+                            label="Ca"
+                            value={ca}
+                            min={0.1e-6}
+                            max={10e-6}
+                            step={0.1e-6}
+                            unit="µF"
+                            multiplier={1e6}
+                            onChange={(value) => updateParameter(setCa, value)}
+                          />
+                          <ControlSlider
+                            label="Rb"
+                            value={rb}
+                            min={100}
+                            max={10000}
+                            step={100}
+                            unit="Ω"
+                            onChange={(value) => updateParameter(setRb, value)}
+                          />
+                          <ControlSlider
+                            label="Cb"
+                            value={cb}
+                            min={0.1e-6}
+                            max={10e-6}
+                            step={0.1e-6}
+                            unit="µF"
+                            multiplier={1e6}
+                            onChange={(value) => updateParameter(setCb, value)}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xs border-t border-[#E0E0E0] bg-[#FAFAFA] rounded-b-lg divide-y divide-[#E0E0E0]">
+                        {getParameterDiff(snapshot).map((change, i) => (
+                          <div 
+                            key={i} 
+                            className="flex items-center justify-between px-3 py-1.5"
+                          >
+                            <span className="text-[#5B616B]">{change.param}</span>
+                            <span className="text-[#112E51] font-medium">{change.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                
+                {/* Add State Button */}
                 <button
-                  onClick={() => setIsStatesExpanded(!isStatesExpanded)}
-                  className="flex-none w-full flex items-center justify-between p-4 hover:bg-[#F8F9FA] transition-colors border-b border-[#E0E0E0] bg-white z-10"
+                  onClick={createNewState}
+                  className="w-full p-3 flex items-center justify-center gap-2 bg-white border border-dashed border-[#AEB0B5] rounded-lg text-[#5B616B] hover:border-[#205493] hover:text-[#205493] hover:bg-[#F1F9FF] transition-all group"
                 >
-                  <span className="text-sm font-medium text-[#112E51]">States</span>
                   <svg 
                     xmlns="http://www.w3.org/2000/svg" 
-                    className={`w-4 h-4 text-[#5B616B] transition-transform ${isStatesExpanded ? 'transform rotate-180' : ''}`}
+                    className="w-4 h-4" 
                     viewBox="0 0 24 24" 
                     fill="none" 
                     stroke="currentColor" 
@@ -804,669 +1112,349 @@ export default function CircuitSimulator() {
                     strokeLinecap="round" 
                     strokeLinejoin="round"
                   >
-                    <polyline points="6 9 12 15 18 9"></polyline>
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
                   </svg>
+                  <span className="text-sm font-medium">Add New State</span>
                 </button>
+              </div>
+            )}
+          </div>
+        </div>
 
-                {isStatesExpanded && (
-                  <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#FAFAFA] min-h-0">
-                    {snapshots.map(snapshot => (
-                      <div 
-                        key={snapshot.id} 
-                        className={`border rounded-lg transition-all shadow-sm ${
-                          activeSnapshot === snapshot.id ? 'border-[#205493] bg-[#F1F9FF] ring-1 ring-[#205493]' : 'border-[#E0E0E0] bg-white hover:border-[#AEB0B5]'
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Plot Area - Fixed ratio */}
+          <div className="flex-1 min-h-0 p-2">
+            <div className="h-full bg-white rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <div className="relative">
+                  <button
+                    id="visualization-button"
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    aria-haspopup="true"
+                    aria-expanded={isDropdownOpen}
+                    aria-controls="visualization-dropdown"
+                    className="flex items-center gap-2 text-sm font-medium text-[#112E51] hover:text-[#205493] transition-colors group"
+                  >
+                    <span className="flex items-center gap-1">
+                      {visualizationOptions.find(opt => opt.value === visualizationType)?.label}
+                      <span className="mx-1">-</span>
+                      <span>{visualizationOptions.find(opt => opt.value === visualizationType)?.description}</span>
+                    </span>
+                    <svg 
+                      xmlns="http://www.w3.org/2000/svg" 
+                      className={`w-4 h-4 text-[#5B616B] group-hover:text-[#205493] transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`}
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                  <div 
+                    id="visualization-dropdown"
+                    role="listbox"
+                    aria-label="Visualization options"
+                    className={`absolute top-full left-0 mt-1 bg-white border border-[#E0E0E0] rounded-lg shadow-lg z-10 min-w-[200px] ${isDropdownOpen ? 'block' : 'hidden'}`}
+                  >
+                    {visualizationOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        role="option"
+                        aria-selected={visualizationType === option.value}
+                        onClick={() => {
+                          setVisualizationType(option.value);
+                          setIsDropdownOpen(false);
+                        }}
+                        className={`w-full px-4 py-2 text-left hover:bg-[#F8F9FA] transition-colors ${
+                          visualizationType === option.value 
+                            ? 'bg-[#F1F9FF] text-[#205493]' 
+                            : 'text-[#112E51]'
                         }`}
                       >
-                        {/* State Header */}
-                        <div className="flex items-center gap-2 p-3">
-                          <div className="relative">
-                            {activeSnapshot === snapshot.id ? (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setActiveColorPicker(activeColorPicker === snapshot.id ? null : snapshot.id);
-                                }}
-                                className={`w-6 h-6 rounded-full transition-all flex items-center justify-center group ${
-                                  snapshot.isVisible ? 'bg-white' : 'bg-[#F5F5F5]'
-                                } hover:bg-[#F1F9FF] border border-[#E0E0E0]`}
-                                title="Change visibility and color"
-                              >
-                                <div
-                                  className={`w-3 h-3 rounded-full transition-colors ring-1 ring-inset ${
-                                    snapshot.isVisible ? `ring-${snapshot.color}` : 'ring-[#E0E0E0]'
-                                  } group-hover:scale-110`}
-                                  style={{ backgroundColor: snapshot.isVisible ? snapshot.color : '#FFF' }}
-                                />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleSnapshotVisibility(snapshot.id);
-                                }}
-                                className="w-6 h-6 rounded-full transition-all flex items-center justify-center hover:bg-[#F1F9FF] border border-[#E0E0E0]"
-                                title={snapshot.isVisible ? "Hide from plot" : "Show in plot"}
-                              >
-                                <div
-                                  className="w-3 h-3 rounded-full transition-transform hover:scale-110"
-                                  style={{ backgroundColor: snapshot.color, opacity: snapshot.isVisible ? 1 : 0.3 }}
-                                />
-                              </button>
-                            )}
-                            {activeColorPicker === snapshot.id && (
-                              <div 
-                                id="color-picker"
-                                className="absolute left-0 top-full mt-1 z-20"
-                              >
-                                <div className="bg-white border border-[#E0E0E0] rounded-lg shadow-lg p-2">
-                                  <div className="mb-2 pb-2 border-b border-[#E0E0E0]">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        toggleSnapshotVisibility(snapshot.id);
-                                      }}
-                                      className={`w-full px-2 py-1 text-xs rounded flex items-center gap-2 ${
-                                        snapshot.isVisible 
-                                          ? 'text-[#981B1E] hover:bg-[#FDE4E4]' 
-                                          : 'text-[#205493] hover:bg-[#F1F9FF]'
-                                      }`}
-                                    >
-                                      <svg 
-                                        xmlns="http://www.w3.org/2000/svg" 
-                                        className="w-3 h-3" 
-                                        viewBox="0 0 24 24" 
-                                        fill="none" 
-                                        stroke="currentColor" 
-                                        strokeWidth="2" 
-                                        strokeLinecap="round" 
-                                        strokeLinejoin="round"
-                                      >
-                                        {snapshot.isVisible ? (
-                                          <>
-                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                                            <line x1="1" y1="1" x2="23" y2="23" />
-                                          </>
-                                        ) : (
-                                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                        )}
-                                      </svg>
-                                      {snapshot.isVisible ? 'Hide from plot' : 'Show in plot'}
-                                    </button>
-                                  </div>
-                                  <div className="grid grid-cols-5 gap-1 w-[120px]">
-                                    {availableColors.map((color) => (
-                                      <button
-                                        key={color}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSnapshots(prev => prev.map(s => 
-                                            s.id === snapshot.id ? { ...s, color } : s
-                                          ));
-                                        }}
-                                        className={`w-4 h-4 rounded-full transition-transform hover:scale-110 ${
-                                          snapshot.color === color ? 'ring-2 ring-[#205493] ring-offset-1' : ''
-                                        }`}
-                                        style={{ backgroundColor: color }}
-                                        title="Change color"
-                                      />
-                                    ))}
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          {editingName === snapshot.id ? (
-                            <input
-                              type="text"
-                              value={snapshot.name}
-                              onChange={(e) => updateStateName(snapshot.id, e.target.value)}
-                              onBlur={() => setEditingName(null)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  updateStateName(snapshot.id, e.currentTarget.value);
-                                }
-                              }}
-                              className="flex-1 px-2 py-1 text-sm border border-[#E0E0E0] rounded-md focus:outline-none focus:ring-1 focus:ring-[#205493]"
-                              autoFocus
-                            />
-                          ) : (
-                            <span 
-                              className="flex-1 text-sm text-[#112E51] cursor-pointer hover:text-[#205493]"
-                              onClick={() => setEditingName(snapshot.id)}
-                            >
-                              {snapshot.name}
-                            </span>
-                          )}
-                          
-                          {/* Action Buttons */}
-                          <div className="flex items-center gap-1">
-                            {activeSnapshot === snapshot.id ? (
-                              <button
-                                onClick={() => saveChanges(snapshot)}
-                                className="p-1.5 text-xs bg-[#E1F3F8] text-[#205493] rounded-md hover:bg-[#D6E8F7]"
-                                title="Save changes"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-                                  <polyline points="17 21 17 13 7 13 7 21"/>
-                                  <polyline points="7 3 7 8 15 8"/>
-                                </svg>
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => editSnapshot(snapshot)}
-                                className="p-1.5 text-xs bg-[#F1F1F1] text-[#5B616B] rounded-md hover:bg-[#E6E6E6]"
-                                title="Edit this state"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                </svg>
-                              </button>
-                            )}
-                            <button
-                              onClick={() => deleteSnapshot(snapshot.id)}
-                              className="p-1.5 text-xs bg-[#FDE4E4] text-[#981B1E] rounded-md hover:bg-[#FBD1D1]"
-                              title="Delete state"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                                <line x1="10" y1="11" x2="10" y2="17"/>
-                                <line x1="14" y1="11" x2="14" y2="17"/>
-                              </svg>
-                            </button>
-                          </div>
+                        <div className="flex items-center gap-1">
+                          {option.label}
+                          <span className="mx-1">-</span>
+                          <span className="text-sm">{option.description}</span>
                         </div>
-
-                        {/* Expanded State Content */}
-                        {activeSnapshot === snapshot.id ? (
-                          <div className="p-3 bg-[#FAFAFA] space-y-3 border-t border-[#E0E0E0] rounded-b-lg">
-                            {/* Compact Controls */}
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                              <CompactControl
-                                label="Rblank"
-                                value={rBlank}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRBlank, value)}
-                              />
-                              <CompactControl
-                                label="Rs"
-                                value={rs}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRs, value)}
-                              />
-                              <CompactControl
-                                label="Ra"
-                                value={ra}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRa, value)}
-                              />
-                              <CompactControl
-                                label="Ca"
-                                value={ca}
-                                unit="µF"
-                                multiplier={1e6}
-                                onChange={(value) => updateParameter(setCa, value)}
-                              />
-                              <CompactControl
-                                label="Rb"
-                                value={rb}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRb, value)}
-                              />
-                              <CompactControl
-                                label="Cb"
-                                value={cb}
-                                unit="µF"
-                                multiplier={1e6}
-                                onChange={(value) => updateParameter(setCb, value)}
-                              />
-                            </div>
-
-                            {/* Sliders */}
-                            <div className="space-y-2">
-                              <ControlSlider
-                                label="Rblank"
-                                value={rBlank}
-                                min={10}
-                                max={50}
-                                step={1}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRBlank, value)}
-                              />
-                              <ControlSlider
-                                label="Rs"
-                                value={rs}
-                                min={100}
-                                max={10000}
-                                step={100}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRs, value)}
-                              />
-                              <ControlSlider
-                                label="Ra"
-                                value={ra}
-                                min={100}
-                                max={10000}
-                                step={100}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRa, value)}
-                              />
-                              <ControlSlider
-                                label="Ca"
-                                value={ca}
-                                min={0.1e-6}
-                                max={10e-6}
-                                step={0.1e-6}
-                                unit="µF"
-                                multiplier={1e6}
-                                onChange={(value) => updateParameter(setCa, value)}
-                              />
-                              <ControlSlider
-                                label="Rb"
-                                value={rb}
-                                min={100}
-                                max={10000}
-                                step={100}
-                                unit="Ω"
-                                onChange={(value) => updateParameter(setRb, value)}
-                              />
-                              <ControlSlider
-                                label="Cb"
-                                value={cb}
-                                min={0.1e-6}
-                                max={10e-6}
-                                step={0.1e-6}
-                                unit="µF"
-                                multiplier={1e6}
-                                onChange={(value) => updateParameter(setCb, value)}
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="text-xs border-t border-[#E0E0E0] bg-[#FAFAFA] rounded-b-lg divide-y divide-[#E0E0E0]">
-                            {getParameterDiff(snapshot).map((change, i) => (
-                              <div 
-                                key={i} 
-                                className="flex items-center justify-between px-3 py-1.5"
-                              >
-                                <span className="text-[#5B616B]">{change.param}</span>
-                                <span className="text-[#112E51] font-medium">{change.value}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      </button>
                     ))}
-                    
-                    {/* Add State Button */}
-                    <button
-                      onClick={createNewState}
-                      className="w-full p-3 flex items-center justify-center gap-2 bg-white border border-dashed border-[#AEB0B5] rounded-lg text-[#5B616B] hover:border-[#205493] hover:text-[#205493] hover:bg-[#F1F9FF] transition-all group"
-                    >
-                      <svg 
-                        xmlns="http://www.w3.org/2000/svg" 
-                        className="w-4 h-4" 
-                        viewBox="0 0 24 24" 
-                        fill="none" 
-                        stroke="currentColor" 
-                        strokeWidth="2" 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round"
-                      >
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                      </svg>
-                      <span className="text-sm font-medium">Add New State</span>
-                    </button>
                   </div>
-                )}
+                </div>
+                <span className="text-xs text-[#5B616B]">Impedance characteristics</span>
+              </div>
+              <div className="h-[calc(100%-24px)]">
+                <ResponsiveContainer width="100%" height="100%">
+                  {visualizationType === 'nyquist' ? (
+                    <ScatterChart 
+                      margin={{ top: 20, right: 30, bottom: 60, left: 60 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
+                      <XAxis
+                        dataKey="real"
+                        type="number"
+                        domain={realDomain}
+                        tickFormatter={value => value.toFixed(0)}
+                        tick={{ fontSize: 11, fill: '#5B616B' }}
+                        tickCount={6}
+                        label={{ 
+                          value: "Real Impedance (Ω)", 
+                          position: 'bottom', 
+                          offset: 40,
+                          style: { fontSize: 12, fill: '#112E51' }
+                        }}
+                        stroke="#AEB0B5"
+                      />
+                      <YAxis
+                        dataKey="imaginary"
+                        type="number"
+                        domain={imagDomain}
+                        tickFormatter={value => value.toFixed(0)}
+                        tick={{ fontSize: 11, fill: '#5B616B' }}
+                        tickCount={6}
+                        label={{ 
+                          value: "Imaginary Impedance (Ω)", 
+                          angle: -90, 
+                          position: 'left',
+                          offset: 40,
+                          style: { fontSize: 12, fill: '#112E51' }
+                        }}
+                        stroke="#AEB0B5"
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload as ImpedancePoint;
+                            return (
+                              <div className="bg-white p-3 border border-[#E0E0E0] shadow-lg rounded-lg text-xs">
+                                <p className="font-medium mb-1.5 text-[#112E51]">f = {data.frequency.toExponential(1)} Hz</p>
+                                <p className="text-[#5B616B]">
+                                  <InlineMath>{`Z'`}</InlineMath> = {formatValue(data.real, 'Ω')}
+                                </p>
+                                <p className="text-[#5B616B]">
+                                  <InlineMath>{`-Z''`}</InlineMath> = {formatValue(-data.imaginary, 'Ω')}
+                                </p>
+                                <p className="text-[#5B616B]">
+                                  <InlineMath>{`|Z|`}</InlineMath> = {formatValue(data.magnitude, 'Ω')}
+                                </p>
+                                <p className="text-[#5B616B]">
+                                  <InlineMath>{`\\phi`}</InlineMath> = {data.phase.toFixed(1)}°
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <ReferenceLine x={0} stroke="#AEB0B5" strokeWidth={1} />
+                      <ReferenceLine y={0} stroke="#AEB0B5" strokeWidth={1} />
+                      
+                      {snapshots
+                        .filter(s => s.isVisible)
+                        .map((snapshot) => (
+                          <Scatter
+                            key={snapshot.id}
+                            name={snapshot.name}
+                            data={generateStateData(snapshot.id)}
+                            fill={snapshot.color}
+                            line={{ 
+                              stroke: snapshot.color,
+                              strokeWidth: 1.5,
+                              strokeDasharray: activeSnapshot === snapshot.id ? undefined : '5 5'
+                            }}
+                            shape={(props: unknown) => {
+                              const { cx, cy, fill } = props as { cx: number; cy: number; fill: string };
+                              return (
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={2}
+                                  fill={fill}
+                                  stroke="none"
+                                />
+                              );
+                            }}
+                          />
+                      ))}
+                    </ScatterChart>
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-[#5B616B] mb-2">
+                          {visualizationType === 'bode' && (
+                            <InlineMath>{`|Z_{eq}(\\omega)|, \\phi(\\omega)`}</InlineMath>
+                          )}
+                          {visualizationType === 'magnitude' && (
+                            <InlineMath>{`|Z_{eq}(\\omega)|`}</InlineMath>
+                          )}
+                          {visualizationType === 'phase' && (
+                            <InlineMath>{`\\phi(\\omega)`}</InlineMath>
+                          )}
+                        </div>
+                        <p className="text-sm text-[#5B616B]">Plot coming soon</p>
+                      </div>
+                    </div>
+                  )}
+                </ResponsiveContainer>
               </div>
             </div>
-          </Panel>
+          </div>
 
-          <ResizeHandle orientation="horizontal" />
+          {/* Bottom Panel - Fixed height */}
+          <div className="h-[300px] flex flex-col min-h-0">
+            {/* Tabs */}
+            <div className="flex border-t border-b border-[#E0E0E0] bg-white px-4 flex-none">
+              <button
+                onClick={() => toggleTab('circuit')}
+                className={`px-4 py-2 text-sm font-medium transition-colors relative
+                  ${activeTab === 'circuit'
+                    ? 'text-[#205493]' 
+                    : 'text-[#5B616B] hover:text-[#112E51]'}`}
+              >
+                Circuit Model
+                {activeTab === 'circuit' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#205493]" />
+                )}
+              </button>
 
-          <Panel defaultSize={80} className={styles.panel}>
-            <PanelGroup direction="vertical" className="h-full">
-              <Panel defaultSize={60} minSize={30} className={styles.panel}>
-                <div className={`${styles.panelContent} p-3`}>
-                  <div className="h-full bg-white rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="relative">
-                        <button
-                          id="visualization-button"
-                          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                          aria-haspopup="true"
-                          aria-expanded={isDropdownOpen}
-                          aria-controls="visualization-dropdown"
-                          className="flex items-center gap-2 text-sm font-medium text-[#112E51] hover:text-[#205493] transition-colors group"
-                        >
-                          <span className="flex items-center gap-1">
-                            {visualizationOptions.find(opt => opt.value === visualizationType)?.label}
-                            <span className="mx-1">-</span>
-                            <span>{visualizationOptions.find(opt => opt.value === visualizationType)?.description}</span>
-                          </span>
-                          <svg 
-                            xmlns="http://www.w3.org/2000/svg" 
-                            className={`w-4 h-4 text-[#5B616B] group-hover:text-[#205493] transition-transform ${isDropdownOpen ? 'transform rotate-180' : ''}`}
-                            viewBox="0 0 24 24" 
-                            fill="none" 
-                            stroke="currentColor" 
-                            strokeWidth="2" 
-                            strokeLinecap="round" 
-                            strokeLinejoin="round"
-                            aria-hidden="true"
-                          >
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                          </svg>
-                        </button>
-                        <div 
-                          id="visualization-dropdown"
-                          role="listbox"
-                          aria-label="Visualization options"
-                          className={`absolute top-full left-0 mt-1 bg-white border border-[#E0E0E0] rounded-lg shadow-lg z-10 min-w-[200px] ${isDropdownOpen ? 'block' : 'hidden'}`}
-                        >
-                          {visualizationOptions.map((option) => (
-                            <button
-                              key={option.value}
-                              role="option"
-                              aria-selected={visualizationType === option.value}
-                              onClick={() => {
-                                setVisualizationType(option.value);
-                                setIsDropdownOpen(false);
-                              }}
-                              className={`w-full px-4 py-2 text-left hover:bg-[#F8F9FA] transition-colors ${
-                                visualizationType === option.value 
-                                  ? 'bg-[#F1F9FF] text-[#205493]' 
-                                  : 'text-[#112E51]'
-                              }`}
-                            >
-                              <div className="flex items-center gap-1">
-                                {option.label}
-                                <span className="mx-1">-</span>
-                                <span className="text-sm">{option.description}</span>
-                              </div>
-                            </button>
-                          ))}
+              <button
+                onClick={() => toggleTab('insights')}
+                className={`px-4 py-2 text-sm font-medium transition-colors relative
+                  ${activeTab === 'insights'
+                    ? 'text-[#205493]' 
+                    : 'text-[#5B616B] hover:text-[#112E51]'}`}
+              >
+                Insights
+                {activeTab === 'insights' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#205493]" />
+                )}
+              </button>
+            </div>
+            
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto bg-[#FAFAFA] p-4">
+              {activeTab === 'circuit' && (
+                <div className="space-y-4">
+                  <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
+                    <h3 className="text-sm font-medium text-[#112E51] mb-3">Equivalent Circuit Model</h3>
+                    <div className="max-w-full">
+                      <div style={{ fontSize: '0.85em', maxWidth: '100%', overflowX: 'hidden', color: '#000000' }}>
+                        <BlockMath>
+                          {`Z_{eq}(\\omega) = R_{blank} + \\frac{R_s(Z_a(\\omega) + Z_b(\\omega))}{R_s + Z_a(\\omega) + Z_b(\\omega)}`}
+                        </BlockMath>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        <div style={{ fontSize: '0.85em', color: '#000000' }}>
+                          <BlockMath>
+                            {`Z_a(\\omega) = R_a + \\frac{1}{j\\omega C_a}`}
+                          </BlockMath>
+                        </div>
+                        <div style={{ fontSize: '0.85em', color: '#000000' }}>
+                          <BlockMath>
+                            {`Z_b(\\omega) = R_b + \\frac{1}{j\\omega C_b}`}
+                          </BlockMath>
                         </div>
                       </div>
-                      <span className="text-xs text-[#5B616B]">Impedance characteristics</span>
                     </div>
-                    <div className="h-[calc(100%-24px)]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        {visualizationType === 'nyquist' ? (
-                          <ScatterChart 
-                            margin={{ top: 20, right: 30, bottom: 60, left: 60 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#E0E0E0" />
-                            <XAxis
-                              dataKey="real"
-                              type="number"
-                              domain={realDomain}
-                              tickFormatter={value => value.toFixed(0)}
-                              tick={{ fontSize: 11, fill: '#5B616B' }}
-                              tickCount={6}
-                              label={{ 
-                                value: "Real Impedance (Ω)", 
-                                position: 'bottom', 
-                                offset: 40,
-                                style: { fontSize: 12, fill: '#112E51' }
-                              }}
-                              stroke="#AEB0B5"
-                            />
-                            <YAxis
-                              dataKey="imaginary"
-                              type="number"
-                              domain={imagDomain}
-                              tickFormatter={value => value.toFixed(0)}
-                              tick={{ fontSize: 11, fill: '#5B616B' }}
-                              tickCount={6}
-                              label={{ 
-                                value: "Imaginary Impedance (Ω)", 
-                                angle: -90, 
-                                position: 'left',
-                                offset: 40,
-                                style: { fontSize: 12, fill: '#112E51' }
-                              }}
-                              stroke="#AEB0B5"
-                            />
-                            <Tooltip
-                              content={({ active, payload }) => {
-                                if (active && payload && payload.length) {
-                                  const data = payload[0].payload as ImpedancePoint;
-                                  return (
-                                    <div className="bg-white p-3 border border-[#E0E0E0] shadow-lg rounded-lg text-xs">
-                                      <p className="font-medium mb-1.5 text-[#112E51]">f = {data.frequency.toExponential(1)} Hz</p>
-                                      <p className="text-[#5B616B]">
-                                        <InlineMath>{`Z'`}</InlineMath> = {formatValue(data.real, 'Ω')}
-                                      </p>
-                                      <p className="text-[#5B616B]">
-                                        <InlineMath>{`-Z''`}</InlineMath> = {formatValue(-data.imaginary, 'Ω')}
-                                      </p>
-                                      <p className="text-[#5B616B]">
-                                        <InlineMath>{`|Z|`}</InlineMath> = {formatValue(data.magnitude, 'Ω')}
-                                      </p>
-                                      <p className="text-[#5B616B]">
-                                        <InlineMath>{`\\phi`}</InlineMath> = {data.phase.toFixed(1)}°
-                                      </p>
-                                    </div>
-                                  );
-                                }
-                                return null;
-                              }}
-                            />
-                            <ReferenceLine x={0} stroke="#AEB0B5" strokeWidth={1} />
-                            <ReferenceLine y={0} stroke="#AEB0B5" strokeWidth={1} />
-                            
-                            {snapshots
-                              .filter(s => s.isVisible)
-                              .map((snapshot) => (
-                                <Scatter
-                                  key={snapshot.id}
-                                  name={snapshot.name}
-                                  data={generateStateData(snapshot.id)}
-                                  fill={snapshot.color}
-                                  line={{ 
-                                    stroke: snapshot.color,
-                                    strokeWidth: 1.5,
-                                    strokeDasharray: activeSnapshot === snapshot.id ? undefined : '5 5'
-                                  }}
-                                  shape={(props: unknown) => {
-                                    const { cx, cy, fill } = props as { cx: number; cy: number; fill: string };
-                                    return (
-                                      <circle
-                                        cx={cx}
-                                        cy={cy}
-                                        r={2}
-                                        fill={fill}
-                                        stroke="none"
-                                      />
-                                    );
-                                  }}
-                                />
-                            ))}
-                          </ScatterChart>
-                        ) : (
-                          <div className="h-full w-full flex items-center justify-center">
-                            <div className="text-center">
-                              <div className="text-[#5B616B] mb-2">
-                                {visualizationType === 'bode' && (
-                                  <InlineMath>{`|Z_{eq}(\\omega)|, \\phi(\\omega)`}</InlineMath>
-                                )}
-                                {visualizationType === 'magnitude' && (
-                                  <InlineMath>{`|Z_{eq}(\\omega)|`}</InlineMath>
-                                )}
-                                {visualizationType === 'phase' && (
-                                  <InlineMath>{`\\phi(\\omega)`}</InlineMath>
-                                )}
-                              </div>
-                              <p className="text-sm text-[#5B616B]">Plot coming soon</p>
-                            </div>
-                          </div>
-                        )}
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-
-              <ResizeHandle orientation="vertical" />
-
-              <Panel defaultSize={40} className={styles.panel}>
-                <div className={`${styles.panelContent} flex flex-col`}>
-                  {/* Tabs */}
-                  <div className="flex border-b border-[#E0E0E0] bg-white px-4 flex-none">
-                    <button
-                      onClick={() => toggleTab('circuit')}
-                      className={`px-4 py-2 text-sm font-medium transition-colors relative
-                        ${activeTab === 'circuit'
-                          ? 'text-[#205493]' 
-                          : 'text-[#5B616B] hover:text-[#112E51]'}`}
-                    >
-                      Circuit Model
-                      {activeTab === 'circuit' && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#205493]" />
-                      )}
-                    </button>
-
-                    <button
-                      onClick={() => toggleTab('insights')}
-                      className={`px-4 py-2 text-sm font-medium transition-colors relative
-                        ${activeTab === 'insights'
-                          ? 'text-[#205493]' 
-                          : 'text-[#5B616B] hover:text-[#112E51]'}`}
-                    >
-                      Insights
-                      {activeTab === 'insights' && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#205493]" />
-                      )}
-                    </button>
                   </div>
                   
-                  {/* Scrollable Content */}
-                  <div className="flex-1 overflow-y-auto bg-[#FAFAFA] p-4">
-                    {activeTab === 'circuit' && (
-                      <div className="space-y-4">
-                        <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
-                          <h3 className="text-sm font-medium text-[#112E51] mb-3">Equivalent Circuit Model</h3>
-                          <div className="max-w-full">
-                            <div style={{ fontSize: '0.85em', maxWidth: '100%', overflowX: 'hidden' }}>
-                              <BlockMath>
-                                {`Z_{eq}(\\omega) = R_{blank} + \\frac{R_s(Z_a(\\omega) + Z_b(\\omega))}{R_s + Z_a(\\omega) + Z_b(\\omega)}`}
-                              </BlockMath>
-                            </div>
-                            <div className="mt-4 space-y-3">
-                              <div style={{ fontSize: '0.85em' }}>
-                                <BlockMath>
-                                  {`Z_a(\\omega) = R_a + \\frac{1}{j\\omega C_a}`}
-                                </BlockMath>
-                              </div>
-                              <div style={{ fontSize: '0.85em' }}>
-                                <BlockMath>
-                                  {`Z_b(\\omega) = R_b + \\frac{1}{j\\omega C_b}`}
-                                </BlockMath>
-                              </div>
-                            </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
+                      <h3 className="text-sm font-medium text-[#112E51] mb-3">Resistances</h3>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-black"><InlineMath>{`R_{blank}`}</InlineMath></span>
+                            <span className="text-sm text-[#5B616B]">Blank resistance</span>
                           </div>
+                          <span className="text-xs text-[#5B616B]">10-50 Ω</span>
                         </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
-                            <h3 className="text-sm font-medium text-[#112E51] mb-3">Resistances</h3>
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <InlineMath>{`R_{blank}`}</InlineMath>
-                                  <span className="text-sm text-[#5B616B]">Blank resistance</span>
-                                </div>
-                                <span className="text-xs text-[#5B616B]">10-50 Ω</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <InlineMath>{`R_s`}</InlineMath>
-                                  <span className="text-sm text-[#5B616B]">Shunt resistance</span>
-                                </div>
-                                <span className="text-xs text-[#5B616B]">10²-10⁴ Ω</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <InlineMath>{`R_a, R_b`}</InlineMath>
-                                  <span className="text-sm text-[#5B616B]">Apical & basal</span>
-                                </div>
-                                <span className="text-xs text-[#5B616B]">10²-10⁴ Ω</span>
-                              </div>
-                            </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-black"><InlineMath>{`R_s`}</InlineMath></span>
+                            <span className="text-sm text-[#5B616B]">Shunt resistance</span>
                           </div>
-                          <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
-                            <h3 className="text-sm font-medium text-[#112E51] mb-3">Capacitances</h3>
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <InlineMath>{`C_a`}</InlineMath>
-                                  <span className="text-sm text-[#5B616B]">Apical membrane</span>
-                                </div>
-                                <span className="text-xs text-[#5B616B]">0.1-10 µF</span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <InlineMath>{`C_b`}</InlineMath>
-                                  <span className="text-sm text-[#5B616B]">Basal membrane</span>
-                                </div>
-                                <span className="text-xs text-[#5B616B]">0.1-10 µF</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <InlineMath>{`\\omega`}</InlineMath>
-                                <span className="text-sm text-[#5B616B]">Angular frequency</span>
-                              </div>
-                            </div>
+                          <span className="text-xs text-[#5B616B]">10²-10⁴ Ω</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-black"><InlineMath>{`R_a, R_b`}</InlineMath></span>
+                            <span className="text-sm text-[#5B616B]">Apical & basal</span>
                           </div>
+                          <span className="text-xs text-[#5B616B]">10²-10⁴ Ω</span>
                         </div>
                       </div>
-                    )}
-
-                    {activeTab === 'insights' && (
-                      <div className="space-y-4">
-                        {/* TER Section */}
-                        <div className="bg-white p-3 rounded-lg border border-[#E0E0E0]">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-medium text-[#112E51]">
-                                Total Epithelial Resistance
-                              </h4>
-                              <p className="text-xs text-[#5B616B]">Membrane & shunt sum</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-base font-medium text-[#205493]">{formatValue(calculateTER(), 'Ω')}</p>
-                            </div>
+                    </div>
+                    <div className="bg-white rounded-lg border border-[#E0E0E0] p-4">
+                      <h3 className="text-sm font-medium text-[#112E51] mb-3">Capacitances</h3>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-black"><InlineMath>{`C_a`}</InlineMath></span>
+                            <span className="text-sm text-[#5B616B]">Apical membrane</span>
                           </div>
+                          <span className="text-xs text-[#5B616B]">0.1-10 µF</span>
                         </div>
-
-                        {/* Frequency Range Section */}
-                        <div className="bg-white p-3 rounded-lg border border-[#E0E0E0]">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="text-sm font-medium text-[#112E51]">Frequency Range</h4>
-                              <p className="text-xs text-[#5B616B]">Bandwidth</p>
-                            </div>
-                            <div className="text-right">
-                              <div className="flex items-center gap-1 text-sm text-[#5B616B]">
-                                <span>{formatValue(frequencyRange[0], 'Hz')}</span>
-                                <span className="text-[#AEB0B5]">→</span>
-                                <span>{formatValue(frequencyRange[1], 'Hz')}</span>
-                              </div>
-                            </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-black"><InlineMath>{`C_b`}</InlineMath></span>
+                            <span className="text-sm text-[#5B616B]">Basal membrane</span>
                           </div>
+                          <span className="text-xs text-[#5B616B]">0.1-10 µF</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-black"><InlineMath>{`\\omega`}</InlineMath></span>
+                          <span className="text-sm text-[#5B616B]">Angular frequency</span>
                         </div>
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
-              </Panel>
-            </PanelGroup>
-          </Panel>
-        </PanelGroup>
+              )}
+
+              {activeTab === 'insights' && (
+                <div className="space-y-4">
+                  {/* TER Section */}
+                  <div className="bg-white p-3 rounded-lg border border-[#E0E0E0]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-medium text-[#112E51]">
+                          Total Epithelial Resistance
+                        </h4>
+                        <p className="text-xs text-[#5B616B]">Membrane & shunt sum</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-base font-medium text-[#205493]">{formatValue(calculateTER(), 'Ω')}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Frequency Range Section */}
+                  <div className="bg-white p-3 rounded-lg border border-[#E0E0E0]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-medium text-[#112E51]">Frequency Range</h4>
+                        <p className="text-xs text-[#5B616B]">Bandwidth</p>
+                      </div>
+                      <div className="text-right">
+                        <div className="flex items-center gap-1 text-sm text-[#5B616B]">
+                          <span>{formatValue(frequencyRange[0], 'Hz')}</span>
+                          <span className="text-[#AEB0B5]">→</span>
+                          <span>{formatValue(frequencyRange[1], 'Hz')}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
