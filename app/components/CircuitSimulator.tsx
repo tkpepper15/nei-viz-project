@@ -10,12 +10,17 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  Radar,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
 } from 'recharts';
 import 'katex/dist/katex.min.css';
 import { InlineMath, BlockMath } from 'react-katex';
 
 // Add visualization type enum
-type VisualizationType = 'nyquist' | 'bode' | 'magnitude' | 'phase';
+type VisualizationType = 'nyquist' | 'spider';
 
 // Add available colors for states
 const availableColors = [
@@ -73,6 +78,22 @@ interface ParameterDiff {
   value: string;
   initialValue: string;
   percentChange: number;
+}
+
+interface SpiderDataPoint {
+  parameter: string;
+  [key: string]: string | number;
+}
+
+interface SpiderState {
+  name: string;
+  color: string;
+  dataKey: string;
+}
+
+interface SpiderData {
+  data: SpiderDataPoint[];
+  states: SpiderState[];
 }
 
 // Update the formatter function to use superscripts
@@ -275,6 +296,16 @@ export default function CircuitSimulator() {
   const [isStatesExpanded, setIsStatesExpanded] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [activeColorPicker, setActiveColorPicker] = useState<string | null>(null);
+
+  // Parameter ranges for basic visualization
+  const parameterRanges = {
+    rBlank: { min: 10, max: 50 },
+    rs: { min: 100, max: 10000 },
+    ra: { min: 100, max: 10000 },
+    ca: { min: 0.1e-6, max: 10e-6 },
+    rb: { min: 100, max: 10000 },
+    cb: { min: 0.1e-6, max: 10e-6 }
+  };
 
   // Load data from localStorage on initial render
   useEffect(() => {
@@ -704,7 +735,7 @@ export default function CircuitSimulator() {
     setActiveTab(tab);
   };
 
-  // Add visualization options
+  // Update visualization options to only include Nyquist and Spider plots
   const visualizationOptions: { value: VisualizationType; label: React.ReactNode; description: string }[] = [
     {
       value: 'nyquist',
@@ -712,19 +743,9 @@ export default function CircuitSimulator() {
       description: 'Nyquist Plot'
     },
     {
-      value: 'bode',
-      label: <InlineMath>{`|Z_{eq}(\\omega)|, \\phi(\\omega)`}</InlineMath>,
-      description: 'Bode Plot'
-    },
-    {
-      value: 'magnitude',
-      label: <InlineMath>{`|Z_{eq}(\\omega)|`}</InlineMath>,
-      description: 'Magnitude Plot'
-    },
-    {
-      value: 'phase',
-      label: <InlineMath>{`\\phi(\\omega)`}</InlineMath>,
-      description: 'Phase Plot'
+      value: 'spider',
+      label: <InlineMath>{`\\nabla Z_{eq}`}</InlineMath>,
+      description: 'Parameter Space'
     }
   ];
 
@@ -744,7 +765,7 @@ export default function CircuitSimulator() {
     };
   }, []);
 
-  // Add click outside handler for color picker
+  // Update click outside handler for color picker
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const colorPicker = document.getElementById('color-picker');
@@ -758,6 +779,84 @@ export default function CircuitSimulator() {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // Add helper functions for normalization
+  const normalizeLinear = (value: number, min: number, max: number): number => {
+    return (value - min) / (max - min);
+  };
+
+  const normalizeLog = (value: number, min: number, max: number): number => {
+    return (Math.log10(value) - Math.log10(min)) / (Math.log10(max) - Math.log10(min));
+  };
+
+  // Update spider data generation
+  function getSpiderData(snapshots: ModelSnapshot[]): SpiderData {
+    const parameters = [
+      'Rblank (Ω)',
+      'Rs (kΩ)',
+      'Ra (kΩ)',
+      'Ca (µF)',
+      'Rb (kΩ)',
+      'Cb (µF)'
+    ];
+
+    const baseData: SpiderDataPoint[] = parameters.map(param => ({ parameter: param }));
+
+    snapshots
+      .filter(s => s.isVisible)
+      .forEach((snapshot, idx) => {
+        const params = getParameterValues(snapshot.id);
+        const stateKey = `state${idx}`;
+        
+        // Linear normalization for Rblank (small range)
+        baseData[0][stateKey] = normalizeLinear(
+          params.rBlank,
+          parameterRanges.rBlank.min,
+          parameterRanges.rBlank.max
+        );
+        
+        // Log normalization for resistances with large ranges
+        baseData[1][stateKey] = normalizeLog(
+          params.rs,
+          parameterRanges.rs.min,
+          parameterRanges.rs.max
+        );
+        baseData[2][stateKey] = normalizeLog(
+          params.ra,
+          parameterRanges.ra.min,
+          parameterRanges.ra.max
+        );
+        
+        // Log normalization for capacitances
+        baseData[3][stateKey] = normalizeLog(
+          params.ca,
+          parameterRanges.ca.min,
+          parameterRanges.ca.max
+        );
+        
+        baseData[4][stateKey] = normalizeLog(
+          params.rb,
+          parameterRanges.rb.min,
+          parameterRanges.rb.max
+        );
+        baseData[5][stateKey] = normalizeLog(
+          params.cb,
+          parameterRanges.cb.min,
+          parameterRanges.cb.max
+        );
+      });
+
+    return {
+      data: baseData,
+      states: snapshots
+        .filter(s => s.isVisible)
+        .map((s, idx) => ({
+          name: s.name,
+          color: s.color,
+          dataKey: `state${idx}`
+        }))
+    };
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1282,6 +1381,66 @@ export default function CircuitSimulator() {
                           />
                       ))}
                     </ScatterChart>
+                  ) : visualizationType === 'spider' ? (
+                    <div className="w-full h-full flex items-center justify-center p-8">
+                      <div className="relative w-full h-full max-w-[800px] max-h-[800px]">
+                        <div className="absolute top-2 left-2 text-xs text-[#5B616B] bg-white/90 p-2 rounded-lg shadow-sm">
+                          <p className="font-medium mb-1">Parameter Ranges:</p>
+                          <div className="space-y-1">
+                            <p><InlineMath>{`R_{blank}`}</InlineMath>: 10 - 50 Ω</p>
+                            <p><InlineMath>{`R_s`}</InlineMath>: 0.1 - 10 kΩ</p>
+                            <p><InlineMath>{`R_a`}</InlineMath>: 0.1 - 10 kΩ</p>
+                            <p><InlineMath>{`C_a`}</InlineMath>: 0.1 - 10 µF</p>
+                            <p><InlineMath>{`R_b`}</InlineMath>: 0.1 - 10 kΩ</p>
+                            <p><InlineMath>{`C_b`}</InlineMath>: 0.1 - 10 µF</p>
+                          </div>
+                          <p className="mt-2 text-[11px] text-[#5B616B] border-t border-[#E0E0E0] pt-2">
+                            Values are normalized (0 = min, 1 = max)
+                          </p>
+                        </div>
+                        <div className="absolute top-2 right-2 text-xs text-[#5B616B] bg-white/90 p-2 rounded-lg shadow-sm">
+                          <p className="font-medium mb-1">Active States:</p>
+                          <div className="flex flex-col gap-1">
+                            {getSpiderData(snapshots).states.map((state, index) => (
+                              <div key={index} className="flex items-center gap-2">
+                                <div 
+                                  className="w-3 h-3 rounded-full" 
+                                  style={{ backgroundColor: state.color }}
+                                />
+                                <span>{state.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <RadarChart data={getSpiderData(snapshots).data}>
+                            <PolarGrid gridType="circle" />
+                            <PolarAngleAxis 
+                              dataKey="parameter" 
+                              tick={{ fontSize: 12, fill: '#5B616B' }}
+                              tickLine={{ stroke: '#E0E0E0' }}
+                            />
+                            <PolarRadiusAxis 
+                              angle={30} 
+                              domain={[0, 1]} 
+                              tick={{ fontSize: 10, fill: '#5B616B' }}
+                              tickFormatter={(value) => value.toFixed(2)}
+                              stroke="#E0E0E0"
+                            />
+                            {getSpiderData(snapshots).states.map((state, index) => (
+                              <Radar
+                                key={index}
+                                name={state.name}
+                                dataKey={state.dataKey}
+                                stroke={state.color}
+                                fill={state.color}
+                                fillOpacity={0.3}
+                              />
+                            ))}
+                          </RadarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
                   ) : (
                     <div className="h-full w-full flex items-center justify-center">
                       <div className="text-center">
