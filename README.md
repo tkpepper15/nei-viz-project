@@ -3,6 +3,9 @@
 [![Live Demo](https://img.shields.io/badge/demo-online-green.svg)](https://nei-viz-project.vercel.app/)
 [![Next.js](https://img.shields.io/badge/built%20with-Next.js-black)](https://nextjs.org)
 [![TailwindCSS](https://img.shields.io/badge/styled%20with-TailwindCSS-06B6D4)](https://tailwindcss.com)
+[![Version](https://img.shields.io/badge/version-1.0.0_alpha-blue.svg)](https://github.com/tkpepper15/nei-viz-project/releases/tag/v1.0.0-alpha)
+
+> 🎉 RPE Impedance Simulator Alpha Release - Foundation for interactive RPE electrical property visualization
 
 An interactive web application for simulating and visualizing retinal pigment epithelium (RPE) impedance characteristics using equivalent circuit models.
 
@@ -134,8 +137,8 @@ This project was created to support research in retinal physiology and provide a
 
 ## 📚 References
 
-1. [RPE Physiology and Function](https://pubmed.ncbi.nlm.nih.gov/)
-2. [Electrical Properties of Epithelial Tissues](https://pubmed.ncbi.nlm.nih.gov/)
+1. [New technique enhances quality control of lab-grown cells for AMD treatment](https://www.nei.nih.gov/about/news-and-events/news/new-technique-enhances-quality-control-lab-grown-cells-amd-treatment)
+2. [NEI Ocular and Stem Cell Translational Research Section](https://www.nei.nih.gov/research/research-labs-and-branches/ocular-and-stem-cell-translational-research-section)
 
 ---
 
