@@ -1,36 +1,118 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RPE Impedance Simulator
+
+An interactive web application for simulating and visualizing retinal pigment epithelium (RPE) impedance characteristics using equivalent circuit models.
+
+## Overview
+
+This simulator allows researchers and students to:
+- Explore RPE electrical properties through an equivalent circuit model
+- Visualize impedance characteristics using Nyquist plots
+- Analyze parameter relationships through spider plots
+- Compare multiple states and track changes
+- Export and save simulation states
+
+## Features
+
+### Circuit Model
+- Complete equivalent circuit model for RPE cells
+- Interactive parameter controls with real-time updates
+- Parameters include:
+  - Blank resistance (Rblank): 10-50 Ω
+  - Shunt resistance (Rs): 0.1-10 kΩ
+  - Apical resistance (Ra): 0.1-10 kΩ
+  - Apical capacitance (Ca): 0.1-10 µF
+  - Basal resistance (Rb): 0.1-10 kΩ
+  - Basal capacitance (Cb): 0.1-10 µF
+
+### Visualizations
+1. **Nyquist Plot**
+   - Real vs. imaginary impedance visualization
+   - Frequency response from 1 Hz to 10 kHz
+   - Interactive tooltips with detailed measurements:
+     - Frequency (Hz)
+     - Real impedance (Ω)
+     - Imaginary impedance (Ω)
+     - Magnitude (Ω)
+     - Phase (degrees)
+
+2. **Spider Plot**
+   - Parameter space visualization
+   - Normalized parameter comparison (0-1 scale)
+   - Multi-state overlay support
+   - Real-time parameter mapping
+
+### State Management
+- Save and load multiple simulation states
+- Compare parameter changes across states
+- Visual state tracking with customizable colors
+- Toggle state visibility in plots
+- Real-time parameter updates
+- Total Epithelial Resistance (TER) calculation
+
+## Mathematical Model
+
+The equivalent circuit model is described by the following equations:
+
+1. **Total Equivalent Impedance:**
+   ```
+   Zeq(ω) = Rblank + [Rs(Za(ω) + Zb(ω))] / [Rs + Za(ω) + Zb(ω)]
+   ```
+
+2. **Apical Impedance:**
+   ```
+   Za(ω) = Ra + 1/(jωCa)
+   ```
+
+3. **Basal Impedance:**
+   ```
+   Zb(ω) = Rb + 1/(jωCb)
+   ```
+
+Where:
+- ω is the angular frequency (2πf)
+- j is the imaginary unit
+- All resistances are in Ohms (Ω)
+- All capacitances are in Farads (F)
+
+## Technical Details
+
+Built with:
+- [Next.js](https://nextjs.org/) - React framework
+- [Recharts](https://recharts.org/) - Charting library
+- [KaTeX](https://katex.org/) - Math typesetting
+- [TailwindCSS](https://tailwindcss.com/) - Styling
 
 ## Getting Started
 
-First, run the development server:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/rpe-impedance-simulator.git
+   ```
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+2. Install dependencies:
+   ```bash
+   npm install
+   # or
+   yarn install
+   ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. Run the development server:
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   ```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+4. Open [http://localhost:3000](http://localhost:3000) with your browser to see the application.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+The main component is located at `/app/components/CircuitSimulator.tsx`. The page auto-updates as you edit the file.
 
-To learn more about Next.js, take a look at the following resources:
+## License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+MIT License - feel free to use this project for research, education, or any other purpose.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Acknowledgments
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+This project was created to support research in retinal physiology and provide an interactive tool for understanding RPE electrical properties.
