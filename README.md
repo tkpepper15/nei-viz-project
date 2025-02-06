@@ -140,5 +140,5 @@ This project was created to support research in retinal physiology and provide a
 ---
 
 <div align="center">
-  <sub>Built with ❤️ for the vision research community</sub>
+  <sub>Built with ❤️ to accelerate Vision Research</sub>
 </div>
