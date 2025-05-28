@@ -1,0 +1,100 @@
+                            }}
+                            className="absolute top-1/2 -translate-y-1/2 appearance-none w-full h-8 bg-transparent z-20"
+                          />
+                          
+                          {/* Tick marks at logarithmic intervals */}
+                          {[0.01, 0.1, 1, 10, 100, 1000, 10000].map((tick) => (
+                            <div key={tick} className="slider-marker" style={{ 
+                              left: `${logToLinearSlider(tick)}%` 
+                            }}>
+                              <span className="slider-marker-label">{tick < 1000 ? (tick < 1 ? tick.toFixed(2) : tick) : `${tick/1000}k`}</span>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        <div className="form_control flex justify-between mt-6">
+                          <div className="form_control_container">
+                            <div className="form_control_container__time text-[11px] text-neutral-400 mb-1">Min Frequency (Hz)</div>
+                            <input 
+                              className="form_control_container__time__input w-24 p-1.5 border rounded text-xs text-center" 
+                              type="number" 
+                              id="fromInput" 
+                              value={parseFloat(minFreq.toFixed(2))}
+                              min={0.01}
+                              max={maxFreq - 0.01}
+                              step={0.01}
+                              onChange={(e) => {
+                                const value = parseFloat(e.target.value);
+                                if (!isNaN(value) && value >= 0.01 && value < maxFreq) {
+                                  setMinFreq(value);
+                                  updateFrequencies(value, maxFreq, numPoints);
+                                  setParameterChanged(true);
+                                }
+                              }}
+                            />
+                          </div>
+                          <div className="form_control_container">
+                            <div className="form_control_container__time text-[11px] text-neutral-400 mb-1">Max Frequency (Hz)</div>
+                            <input 
+                              className="form_control_container__time__input w-24 p-1.5 border rounded text-xs text-center" 
+                              type="number" 
+                              id="toInput" 
+                              value={parseFloat(maxFreq.toFixed(1))}
+                              min={minFreq + 0.01}
+                              max={10000}
+                              step={0.1}
+                              onChange={(e) => {
+                                const value = parseFloat(e.target.value);
+                                if (!isNaN(value) && value > minFreq && value <= 10000) {
+                                  setMaxFreq(value);
+                                  updateFrequencies(minFreq, value, numPoints);
+                                  setParameterChanged(true);
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Frequency range impact message */}
+                      <div className="text-[11px] text-neutral-400 mt-3 italic pl-1"></div>
+                    
+                    {/* Frequency Points control */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="slider-label-text font-medium text-xs text-neutral-300">
+                          Frequency points:
+                        </label>
+                        <span className="text-xs font-mono text-neutral-300">
+                          {numPoints} points
+                        </span>
+                      </div>
+                      <div className="mt-2 relative h-8">
+                        <div className="slider-track"></div>
+                        <div className="slider-track-active" style={{ 
+                          left: '0%', 
+                          width: `${(numPoints - 10) / (200 - 10) * 100}%`
+                        }}></div>
+                        <input 
+                          type="range" 
+                          min={10} 
+                          max={200} 
+                          step={1}
+                          value={numPoints}
+                          onChange={(e) => {
+                            const points = parseInt(e.target.value);
+                            setNumPoints(points);
+                            updateFrequencies(minFreq, maxFreq, points);
+                            setParameterChanged(true);
+                          }}
+                          onMouseUp={() => {
+                            updateStatusMessage(`Frequency points set to ${numPoints}. Recompute grid to see effect.`);
+                          }}
+                          className="absolute top-1/2 -translate-y-1/2 appearance-none w-full h-8 bg-transparent" 
+                          style={{
+                            zIndex: 10
+                          }}
+                        />
+                        <div className="flex justify-between px-1 mt-4 text-[10px] text-neutral-500">
+                          <span>10</span>
+                          <span>100</span>

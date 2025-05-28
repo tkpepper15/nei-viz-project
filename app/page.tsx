@@ -1,11 +1,9 @@
-import CircuitSimulator from './components/CircuitSimulator';
+import { CircuitSimulator } from './components/circuit-simulator';
 
 export default function Home() {
   return (
-    <main className="h-[100vh] w-screen overflow-hidden">
-      <div className="h-full w-full max-w-[1920px] mx-auto">
-        <CircuitSimulator />
-      </div>
+    <main className="min-h-screen bg-gray-50">
+      <CircuitSimulator />
     </main>
   );
 }
