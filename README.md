@@ -1,3 +1,84 @@
+# Circuit Simulator & Spider Plot Visualization
+
+This project provides an interactive circuit simulator with visualization tools including spider plots, nyquist plots, and residual norm analytics.
+
+## Project Structure
+
+The project follows modern Next.js application architecture with a clear separation of concerns:
+
+```
+src/
+├── app/                  # Next.js app router
+│   ├── components/       # App-specific components
+│   ├── globals.css       # Global styles
+│   ├── layout.tsx        # Root layout
+│   └── page.tsx          # Homepage
+├── components/           # Shared React components
+│   └── circuit-simulator/ # Circuit simulator components
+│       ├── controls/     # UI controls
+│       ├── visualizations/ # Visualization components
+│       └── CircuitSimulator.tsx # Main component
+├── lib/                  # Shared libraries 
+│   └── python/           # Python backend code
+├── types/                # TypeScript type definitions
+│   └── circuit-simulator.ts # Circuit simulator types
+├── utils/                # Utility functions
+│   └── circuit-simulator/ # Circuit-specific utilities
+├── hooks/                # Custom React hooks
+├── services/             # API services
+└── styles/               # Shared styles
+```
+
+## Core Features
+
+- Interactive circuit simulation with RC-RC circuit model
+- Parameter visualization via spider plots
+- Nyquist plot for impedance visualization
+- Residual norm calculations for model comparison
+- Mathematical insights into impedance calculations
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+ 
+- Python 3.8+
+
+### Installation
+
+1. Clone the repository
+2. Install dependencies:
+
+```bash
+yarn install
+pip install -r requirements.txt
+```
+
+### Development
+
+Start the development server:
+
+```bash
+yarn dev
+```
+
+This will start both the Next.js frontend and the Python backend for circuit calculations.
+
+### Building for Production
+
+```bash
+yarn build
+```
+
+## Technologies
+
+- Next.js 14
+- React 18
+- TypeScript
+- Python for backend calculations
+- Material UI components
+- D3.js and Recharts for visualizations
+
 # RPE Impedance Simulator
 
 [![Live Demo](https://img.shields.io/badge/demo-online-green.svg)](https://nei-viz-project.vercel.app/)

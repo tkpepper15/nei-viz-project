@@ -1,0 +1,1805 @@
+"use client";
+
+/**
+ * CircuitSimulator Component
+ * 
+ * This component provides the core functionality for the circuit simulator.
+ * Some functions may appear unused in the linter but are intentionally kept as they are:
+ * 
+ * 1. Part of the component's API that may be used by subcomponents
+ * 2. Called from imported libraries or external modules
+ * 3. Used as callbacks or event handlers for UI elements
+ * 
+ * The component is now containerized to work with backend impedance and resnorm calculations
+ * rather than doing these calculations on the client side.
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
+import 'katex/dist/katex.min.css';
+import { ModelSnapshot, ImpedancePoint } from './circuit-simulator/types';
+import { SpiderPlot } from './circuit-simulator/visualizations';
+
+// Define the structure for grid results coming from the backend
+interface BackendMeshPoint {
+  parameters: {
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+    frequency_range: number[]; // Added frequency_range
+  };
+  resnorm: number;
+  alpha: number; // Added alpha
+}
+
+interface CircuitSimulatorProps {
+  groundTruthDataset?: ImpedancePoint[];
+}
+
+// Generate logarithmically spaced frequencies
+const generateFrequencies = (start: number, end: number, points: number): number[] => {
+  const frequencies: number[] = [];
+  const logStart = Math.log10(start);
+  const logEnd = Math.log10(end);
+  const step = (logEnd - logStart) / (points - 1);
+  
+  for (let i = 0; i < points; i++) {
+    frequencies.push(Math.pow(10, logStart + i * step));
+  }
+  return frequencies;
+};
+
+// Generate logarithmically spaced values between min and max
+const generateLogSpace = (min: number, max: number, count: number): number[] => {
+  const result: number[] = [];
+  const logMin = Math.log10(min);
+  const logMax = Math.log10(max);
+  
+  for (let i = 0; i < count; i++) {
+    // Log interpolation: 10^(logMin + i * (logMax - logMin) / (count - 1))
+    const logValue = logMin + i * (logMax - logMin) / (count - 1);
+    const value = Math.pow(10, logValue);
+    result.push(value);
+  }
+  
+  return result;
+};
+
+// Generate linear spaced values between min and max
+const generateLinSpace = (min: number, max: number, count: number): number[] => {
+  const result: number[] = [];
+  for (let i = 0; i < count; i++) {
+    // Linear interpolation: min + i * (max - min) / (count - 1)
+    const value = min + i * (max - min) / (count - 1);
+    result.push(value);
+  }
+  return result;
+};
+
+// Add proper impedance calculation functions after the existing utility functions
+
+// Calculate complex impedance of an RC element at a given frequency
+// Returns [real part, imaginary part]
+const calculateRCImpedance = (r: number, c: number, freq: number): [number, number] => {
+  const omega = 2 * Math.PI * freq; // Angular frequency
+  
+  // For a parallel RC circuit: Z = R / (1 + jωRC)
+  // Separate into real and imaginary parts by multiplying numerator and denominator by (1 - jωRC)
+  
+  if (c <= 0 || freq <= 0) {
+    // Handle edge cases to prevent NaN or division by zero
+    return [r, 0]; // Pure resistance if no capacitance
+  }
+  
+  const wRC = omega * r * c;
+  const denominator = 1 + wRC * wRC;
+  
+  // Real part: R / (1 + (ωRC)²)
+  const realPart = r / denominator;
+  
+  // Imaginary part: -ωR²C / (1 + (ωRC)²)
+  const imagPart = -wRC * r / denominator;
+  
+  return [realPart, imagPart];
+};
+
+// Calculate the total impedance of the Randles circuit model 
+// (RBlank in series with parallel Ra-Ca and parallel Rb-Cb)
+// Returns [real part, imaginary part]
+const calculateTotalImpedance = (params: {
+  Rs: number;
+  ra: number;
+  ca: number;
+  rb: number;
+  cb: number;
+}, freq: number): [number, number] => {
+  // Calculate parallel Ra-Ca impedance
+  const [realA, imagA] = calculateRCImpedance(params.ra, params.ca, freq);
+  
+  // Calculate parallel Rb-Cb impedance
+  const [realB, imagB] = calculateRCImpedance(params.rb, params.cb, freq);
+  
+  // Sum impedances in series (RBlank + Ra-Ca + Rb-Cb)
+  // For series circuit, real parts add and imaginary parts add
+  const realTotal = params.Rs + realA + realB;
+  const imagTotal = imagA + imagB;
+  
+  return [realTotal, imagTotal];
+};
+
+// Calculate the impedance spectrum across a frequency range
+const calculateImpedanceSpectrum = (params: {
+  Rs: number;
+  ra: number;
+  ca: number;
+  rb: number;
+  cb: number;
+}, frequencies: number[]): Array<{freq: number; real: number; imag: number; mag: number; phase: number}> => {
+  return frequencies.map(freq => {
+    const [real, imag] = calculateTotalImpedance(params, freq);
+    const mag = Math.sqrt(real * real + imag * imag); // Magnitude |Z|
+    const phase = Math.atan2(imag, real) * (180 / Math.PI); // Phase in degrees
+    
+    return { freq, real, imag, mag, phase };
+  });
+};
+
+// Calculate physically meaningful resnorm based on impedance spectrum differences
+const calculatePhysicalResnorm = (
+  testParams: {
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+  },
+  referenceParams: {
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+  },
+  frequencies: number[],
+  preCalculatedRefSpectrum?: Array<{freq: number; real: number; imag: number; mag: number; phase: number}>,
+  logFunction?: (message: string) => void
+): number => {
+  // Calculate impedance spectrum for test parameters
+  const testSpectrum = calculateImpedanceSpectrum(testParams, frequencies);
+  
+  // Use pre-calculated spectrum if provided, otherwise calculate it
+  const refSpectrum = preCalculatedRefSpectrum || calculateImpedanceSpectrum(referenceParams, frequencies);
+  
+  if (logFunction && testParams.Rs === referenceParams.Rs && 
+      testParams.ra === referenceParams.ra && testParams.ca === referenceParams.ca &&
+      testParams.rb === referenceParams.rb && testParams.cb === referenceParams.cb) {
+    // If this is the reference point, log detailed math for educational purposes
+    logFunction(`MATH DETAIL: Impedance calculation for reference parameters:`);
+    logFunction(`MATH DETAIL: For RC circuit, Z = R/(1+jωRC) where ω = 2πf`);
+    logFunction(`MATH DETAIL: For series components, Ztotal = Z1 + Z2 + ...`);
+    
+    const sampleFreqs = [frequencies[0], frequencies[Math.floor(frequencies.length/2)], frequencies[frequencies.length-1]];
+    sampleFreqs.forEach(freq => {
+      const [realA, imagA] = calculateRCImpedance(referenceParams.ra, referenceParams.ca, freq);
+      const [realB, imagB] = calculateRCImpedance(referenceParams.rb, referenceParams.cb, freq);
+      const realTotal = referenceParams.Rs + realA + realB;
+      const imagTotal = imagA + imagB;
+      
+      logFunction(`MATH DETAIL: At f=${freq.toFixed(2)}Hz:`);
+      logFunction(`MATH DETAIL:   Za = ${realA.toFixed(4)} ${imagA >= 0 ? '+' : ''}${imagA.toFixed(4)}j Ω`);
+      logFunction(`MATH DETAIL:   Zb = ${realB.toFixed(4)} ${imagB >= 0 ? '+' : ''}${imagB.toFixed(4)}j Ω`);
+      logFunction(`MATH DETAIL:   Ztotal = Rs + Za + Zb = ${referenceParams.Rs} + (${realA.toFixed(4)} ${imagA >= 0 ? '+' : ''}${imagA.toFixed(4)}j) + (${realB.toFixed(4)} ${imagB >= 0 ? '+' : ''}${imagB.toFixed(4)}j) = ${realTotal.toFixed(4)} ${imagTotal >= 0 ? '+' : ''}${imagTotal.toFixed(4)}j Ω`);
+    });
+  }
+  
+  // Calculate weighted normalized residuals across frequency spectrum
+  // Weight low frequencies higher as they're more important for cell characterization
+  let sumSquaredResiduals = 0;
+  let weightSum = 0;
+  
+  const residuals: Array<{freq: number; weight: number; residual: number}> = [];
+  
+  for (let i = 0; i < frequencies.length; i++) {
+    const freq = frequencies[i];
+    const logFreq = Math.log10(freq);
+    
+    // Compute weight as 1/log(f) to give more weight to lower frequencies
+    // This is biophysically relevant as lower frequencies probe deeper cell properties
+    const weight = 1 / Math.max(1, logFreq + 1);
+    weightSum += weight;
+    
+    // Calculate complex impedance differences for real and imaginary parts
+    const realDiff = Math.abs(testSpectrum[i].real - refSpectrum[i].real) / Math.max(1, Math.abs(refSpectrum[i].real));
+    const imagDiff = Math.abs(testSpectrum[i].imag - refSpectrum[i].imag) / Math.max(1, Math.abs(refSpectrum[i].imag));
+    
+    // Use Euclidean distance in complex plane (normalized)
+    const euclideanDist = Math.sqrt(realDiff*realDiff + imagDiff*imagDiff);
+    
+    // Also consider magnitude and phase differences
+    const magnitudeDiff = Math.abs(testSpectrum[i].mag - refSpectrum[i].mag) / refSpectrum[i].mag;
+    const phaseDiff = Math.abs(testSpectrum[i].phase - refSpectrum[i].phase) / 90; // Normalize to 90 degrees
+    
+    // Combine all metrics with appropriate weights reflecting their importance in EIS analysis
+    // Standard practice in EIS analysis weights magnitude more heavily than phase
+    const combinedDiff = (0.4 * euclideanDist) + (0.4 * magnitudeDiff) + (0.2 * phaseDiff);
+    
+    // Add weighted squared residual (standard form for resnorm calculation)
+    const residual = weight * combinedDiff * combinedDiff;
+    sumSquaredResiduals += residual;
+    
+    residuals.push({ freq, weight, residual });
+  }
+  
+  // Log detailed residual calculations for specific test points if requested
+  if (logFunction && 
+      (Math.abs(testParams.Rs - referenceParams.Rs) < 0.01 * referenceParams.Rs ||
+       Math.abs(testParams.ra - referenceParams.ra) < 0.01 * referenceParams.ra ||
+       Math.abs(testParams.ca - referenceParams.ca) < 0.01 * referenceParams.ca ||
+       Math.abs(testParams.rb - referenceParams.rb) < 0.01 * referenceParams.rb ||
+       Math.abs(testParams.cb - referenceParams.cb) < 0.01 * referenceParams.cb)) {
+    
+    // Log representative residuals (low, mid, high freq)
+    const lowIdx = 0;
+    const midIdx = Math.floor(residuals.length / 2);
+    const highIdx = residuals.length - 1;
+    
+    logFunction(`MATH DETAIL: Residual calculation for test point close to reference:`);
+    logFunction(`MATH DETAIL: Rs=${testParams.Rs.toFixed(2)}, Ra=${testParams.ra.toFixed(0)}, Ca=${(testParams.ca*1e6).toFixed(2)}μF, Rb=${testParams.rb.toFixed(0)}, Cb=${(testParams.cb*1e6).toFixed(2)}μF`);
+    logFunction(`MATH DETAIL: Low frequency (${residuals[lowIdx].freq.toFixed(2)}Hz): weight=${residuals[lowIdx].weight.toFixed(4)}, residual=${residuals[lowIdx].residual.toExponential(4)}`);
+    logFunction(`MATH DETAIL: Mid frequency (${residuals[midIdx].freq.toFixed(2)}Hz): weight=${residuals[midIdx].weight.toFixed(4)}, residual=${residuals[midIdx].residual.toExponential(4)}`);
+    logFunction(`MATH DETAIL: High frequency (${residuals[highIdx].freq.toFixed(2)}Hz): weight=${residuals[highIdx].weight.toFixed(4)}, residual=${residuals[highIdx].residual.toExponential(4)}`);
+  }
+  
+  // Normalize by sum of weights - this is standard practice in weighted least squares
+  const normalizedResnorm = Math.sqrt(sumSquaredResiduals / weightSum);
+  
+  return normalizedResnorm;
+};
+
+// Generate grid points for parameter space exploration
+const generateGridPoints = (
+  referenceParams: {
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+    frequency_range: number[];
+  }, 
+  paramRanges: {
+    Rs: { min: number; max: number };
+    ra: { min: number; max: number };
+    ca: { min: number; max: number };
+    rb: { min: number; max: number };
+    cb: { min: number; max: number };
+  }, 
+  gridSize: number,
+  updateLog: (message: string) => void
+): BackendMeshPoint[] => {
+  updateLog(`Starting grid generation with target size: ${gridSize}`);
+  updateLog(`MATH: Using reference parameters Rs=${referenceParams.Rs.toFixed(2)}, Ra=${referenceParams.ra.toFixed(0)}, Ca=${(referenceParams.ca*1e6).toFixed(2)}μF, Rb=${referenceParams.rb.toFixed(0)}, Cb=${(referenceParams.cb*1e6).toFixed(2)}μF`);
+  
+  // Instead of calculating points per dimension based on grid size, 
+  // we'll use gridSize directly as the number of points per dimension
+  const dimensions = 5; // Rs, ra, ca, rb, cb
+  
+  // Calculate number of points per dimension, ensuring it's at least 2
+  // This will be the number of values for each parameter from min to max
+  const pointsPerDim = Math.max(2, Math.round(gridSize));
+  
+  updateLog(`MATH: For ${dimensions}-dimensional grid, using ${pointsPerDim} points per dimension`);
+  
+  // Expected total points will be (pointsPerDim)^dimensions
+  const expectedTotal = Math.pow(pointsPerDim, dimensions);
+  updateLog(`MATH: Expected grid size = (points_per_dim)^dimensions = ${pointsPerDim}^${dimensions} = ${expectedTotal} points`);
+  
+  // Generate parameter values using logarithmic spacing for RC components
+  // and linear spacing for pure resistance (Rs)
+  const RsValues = generateLinSpace(paramRanges.Rs.min, paramRanges.Rs.max, pointsPerDim);
+  const raValues = generateLogSpace(paramRanges.ra.min, paramRanges.ra.max, pointsPerDim);
+  const caValues = generateLogSpace(paramRanges.ca.min, paramRanges.ca.max, pointsPerDim);
+  const rbValues = generateLogSpace(paramRanges.rb.min, paramRanges.rb.max, pointsPerDim);
+  const cbValues = generateLogSpace(paramRanges.cb.min, paramRanges.cb.max, pointsPerDim);
+  
+  updateLog(`Parameter values (${pointsPerDim} points per dimension):`);
+  updateLog(`Rs: ${RsValues.map(v => v.toFixed(2)).join(', ')} Ω (linear scale)`);
+  updateLog(`Ra: ${raValues.map(v => v.toFixed(0)).join(', ')} Ω (log scale)`);
+  updateLog(`Ca: ${caValues.map(v => (v * 1e6).toFixed(2)).join(', ')} μF (log scale)`);
+  updateLog(`Rb: ${rbValues.map(v => v.toFixed(0)).join(', ')} Ω (log scale)`);
+  updateLog(`Cb: ${cbValues.map(v => (v * 1e6).toFixed(2)).join(', ')} μF (log scale)`);
+  
+  const gridPoints: BackendMeshPoint[] = [];
+  
+  // Always include reference point first
+  gridPoints.push({
+    parameters: {
+      Rs: referenceParams.Rs,
+      ra: referenceParams.ra,
+      ca: referenceParams.ca,
+      rb: referenceParams.rb,
+      cb: referenceParams.cb,
+      frequency_range: referenceParams.frequency_range
+    },
+    resnorm: 0,
+    alpha: 1
+  });
+  
+  updateLog(`Added reference point as baseline`);
+  
+  // Generate the full combinatorial grid (Cartesian product of all parameter values)
+  let pointsAdded = 0;
+  
+  updateLog(`MATH: Generating full factorial grid with all parameter combinations`);
+  
+  // Generate all combinations
+  for (const Rs of RsValues) {
+    for (const ra of raValues) {
+      for (const ca of caValues) {
+        for (const rb of rbValues) {
+          for (const cb of cbValues) {
+            // Skip if identical to reference (already added)
+            if (Math.abs(Rs - referenceParams.Rs) < 1e-6 && 
+                Math.abs(ra - referenceParams.ra) < 1e-6 && 
+                Math.abs(ca - referenceParams.ca) < 1e-12 && 
+                Math.abs(rb - referenceParams.rb) < 1e-6 && 
+                Math.abs(cb - referenceParams.cb) < 1e-12) {
+              continue;
+            }
+            
+            gridPoints.push({
+              parameters: {
+                Rs,
+                ra,
+                ca,
+                rb,
+                cb,
+                frequency_range: referenceParams.frequency_range
+              },
+              resnorm: 0, // Will calculate later
+              alpha: 1
+            });
+            
+            pointsAdded++;
+            if (pointsAdded % 1000 === 0) {
+              updateLog(`Generated ${pointsAdded} grid points...`);
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  const totalPoints = gridPoints.length;
+  updateLog(`MATH: Generated complete grid with ${totalPoints} points`);
+  
+  // Calculate physical resnorm for each point against the reference
+  updateLog(`Calculating physical resnorm for each grid point...`);
+  
+  // Reference impedance spectrum - calculate once for efficiency
+  const refSpectrum = calculateImpedanceSpectrum(
+    referenceParams,
+    referenceParams.frequency_range
+  );
+  
+  // For large grids, we can't log every point or it will be too verbose
+  // Calculate how often to log based on grid size
+  const logFrequency = Math.max(1, Math.floor(gridPoints.length / 20));
+  
+  for (let i = 0; i < gridPoints.length; i++) {
+    const point = gridPoints[i];
+    
+    // Skip reference point (already has resnorm = 0)
+    if (i === 0) continue;
+    
+    // Calculate resnorm relative to reference parameters
+    const resnorm = calculatePhysicalResnorm(
+      point.parameters,
+      referenceParams,
+      referenceParams.frequency_range,
+      refSpectrum,
+      i % logFrequency === 0 ? updateLog : undefined
+    );
+    
+    point.resnorm = resnorm;
+    
+    // Update progress periodically
+    if (i % logFrequency === 0 || i === gridPoints.length - 1) {
+      updateLog(`Calculated resnorm for ${i+1}/${gridPoints.length} grid points (${Math.round((i+1)/gridPoints.length*100)}%)`);
+    }
+  }
+  
+  // Sort by resnorm (ascending order - best fits first)
+  gridPoints.sort((a, b) => a.resnorm - b.resnorm);
+  
+  updateLog(`Grid generation complete. Generated ${gridPoints.length} points with resnorm range: ${gridPoints[0].resnorm.toExponential(3)} to ${gridPoints[gridPoints.length-1].resnorm.toExponential(3)}`);
+  
+  return gridPoints;
+};
+
+// Define a type for the items in the resnorm groups
+interface ResnormGroupItem {
+  id: string;
+  name: string;
+  parameters: {
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+    [key: string]: number;
+  };
+  resnorm?: number;
+  color: string;
+  timestamp: number;
+  data: ImpedancePoint[];
+  isVisible: boolean;
+  opacity: number;
+  ter?: number;
+}
+
+// Define a type for the resnorm groups
+interface ResnormGroup {
+  range: [number, number];
+  color: string;
+  items: ResnormGroupItem[];
+}
+
+export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
+  // State for the circuit simulator
+  const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
+  const [logMessages, setLogMessages] = useState<{time: string; message: string}[]>([]);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [gridSettingsOpen, setGridSettingsOpen] = useState<boolean>(true);
+  const [circuitParamsOpen, setCircuitParamsOpen] = useState<boolean>(true);
+  const [gridSize, setGridSize] = useState<number>(3);
+  const [gridError, setGridError] = useState<string | null>(null);
+  const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
+  const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
+  const [currentTab, setCurrentTab] = useState<'toolbox' | 'activity'>('toolbox');
+  const [visibleRows, setVisibleRows] = useState<Record<string, boolean>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>({});
+  const [parameterChanged, setParameterChanged] = useState<boolean>(false);
+  const [referenceParams, setReferenceParams] = useState<{
+    Rs: number;
+    ra: number;
+    ca: number;
+    rb: number;
+    cb: number;
+  }>({
+    Rs: 24,
+    ra: 500,
+    ca: 3e-6,
+    rb: 500,
+    cb: 3e-6
+  });
+  
+  // Sorting state
+  const [sortConfig, setSortConfig] = useState<{
+    key: string;
+    direction: 'ascending' | 'descending';
+  }>({ key: 'resnorm', direction: 'ascending' });
+  
+  // Reference model state
+  const [referenceModelId, setReferenceModelId] = useState<string | null>(null);
+  const [referenceModelName, setReferenceModelName] = useState<string>('Reference Model');
+  
+  // Circuit parameters
+  const [Rs, setRs] = useState(24);
+  const [ra, setRa] = useState(500);
+  const [ca, setCa] = useState(3e-6);
+  const [rb, setRb] = useState(500);
+  const [cb, setCb] = useState(3e-6);
+  
+  // Add frequencies state
+  const [frequencies] = useState(() => generateFrequencies(0.1, 100000, 50));
+
+  // Update status message to also store in log history
+  const updateStatusMessage = useCallback((message: string) => {
+    setStatusMessage(message);
+    const timestamp = new Date().toLocaleTimeString();
+    // Categorize messages for better visibility in log
+    let formattedMessage = message;
+    
+    // Add category tags based on message content
+    if (message.includes('Comput') || message.includes('Grid')) {
+      formattedMessage = `[Grid] ${message}`;
+    } else if (message.includes('Parameters') || message.includes('parameter')) {
+      formattedMessage = `[Params] ${message}`;
+    } else if (message.includes('model') || message.includes('Model')) {
+      formattedMessage = `[Visual] ${message}`;
+    } else if (message.includes('Sort')) {
+      formattedMessage = `[Table] ${message}`;
+    }
+    
+    setLogMessages(prev => [...prev.slice(-49), { time: timestamp, message: formattedMessage }]);
+    
+    // Auto-switch to activity tab for certain important operations
+    if (message.includes('Grid computed successfully') || message.includes('Error')) {
+      setCurrentTab('activity');
+    }
+  }, []);
+
+  // Request sort handler
+  const requestSort = (key: string) => {
+    // Set up sorting configuration
+    let direction: 'ascending' | 'descending' = 'ascending';
+    
+    // If we're clicking the same column, toggle direction
+    if (sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    
+    setSortConfig({ key, direction });
+  };
+
+  // Function to get sorted model snapshots for display
+  const getSortedModels = () => {
+    // Create a copy of the grid results to avoid mutating the original
+    const sortableItems = [...gridResults.map((item, index) => mapBackendMeshToSnapshot(item, index))];
+    
+    // If there's no sort config or no items, return empty array
+    if (sortConfig.key === null || sortableItems.length === 0) {
+      return sortableItems;
+    }
+    
+    // Sort the array based on the sort config
+    return sortableItems.sort((a, b) => {
+      // Extract values for sorting based on the sort config key
+      const keys = sortConfig.key.split('.');
+      
+      // Extract the value from the nested property
+      let aValue: unknown = a;
+      let bValue: unknown = b;
+      
+      for (const key of keys) {
+        if (aValue && typeof aValue === 'object' && key in (aValue as Record<string, unknown>)) {
+          aValue = (aValue as Record<string, unknown>)[key];
+        } else {
+          aValue = undefined;
+        }
+        
+        if (bValue && typeof bValue === 'object' && key in (bValue as Record<string, unknown>)) {
+          bValue = (bValue as Record<string, unknown>)[key];
+        } else {
+          bValue = undefined;
+        }
+      }
+      
+      // Perform comparison
+      if (aValue === undefined && bValue === undefined) return 0;
+      if (aValue === undefined) return 1;
+      if (bValue === undefined) return -1;
+      
+      // Convert both to numbers or strings for comparison
+      if (typeof aValue === 'number' && typeof bValue === 'number') {
+        if (aValue < bValue) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aValue > bValue) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+      } else {
+        // Convert to strings for comparison
+        const aStr = String(aValue);
+        const bStr = String(bValue);
+        if (aStr < bStr) {
+          return sortConfig.direction === 'ascending' ? -1 : 1;
+        }
+        if (aStr > bStr) {
+          return sortConfig.direction === 'ascending' ? 1 : -1;
+        }
+      }
+      return 0;
+    });
+  };
+
+  // Function to toggle row visibility
+  const toggleRowVisibility = (id: string) => {
+    setVisibleRows(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+    updateStatusMessage(`${visibleRows[id] ? 'Hid' : 'Showed'} model ${id} in plot`);
+  };
+
+  // Function to toggle a group's expanded state
+  const toggleGroupExpanded = (groupIdx: number) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [groupIdx]: !prev[groupIdx]
+    }));
+  };
+
+  // Function to expand or collapse all groups
+  const setAllGroupsExpanded = (expanded: boolean) => {
+    const newState = {...expandedGroups};
+    for (let i = 0; i < resnormGroups.length; i++) {
+      newState[i] = expanded;
+    }
+    setExpandedGroups(newState);
+    updateStatusMessage(`${expanded ? 'Expanded' : 'Collapsed'} all groups`);
+  };
+
+  // Function to create a reference model from current slider values
+  }, [Rs, ra, ca, rb, cb, updateStatusMessage]);
+
+  // Initialize slider parameters
+  useEffect(() => {
+    // Set default starting values
+    setRs(24);
+    setRa(500);
+    setCa(3e-6);
+    setRb(500);
+    setCb(3e-6);
+    
+    // Initial reference params will be set after the state updates
+    updateStatusMessage('Initialized with default parameters');
+  }, []);
+
+  // Update reference parameters when slider values are initialized
+  useEffect(() => {
+    // Only create reference once on initial load
+    if (referenceParams.Rs === 24 && 
+        referenceParams.ra === 500 && 
+        referenceParams.ca === 3e-6 && 
+        referenceParams.rb === 500 && 
+        referenceParams.cb === 3e-6) {
+      // Create the reference object directly without calling the function
+      setReferenceParams({
+        Rs,
+        ra,
+        ca,
+        rb,
+        cb
+      });
+    }
+  }, [Rs, ra, ca, rb, cb, referenceParams]);
+
+  // Function to handle resetting parameters to reference values
+  const resetToReference = useCallback(() => {
+    // Use the stored reference parameters
+    setRs(referenceParams.Rs);
+    setRa(referenceParams.ra);
+    setCa(referenceParams.ca);
+    setRb(referenceParams.rb);
+    setCb(referenceParams.cb);
+    setParameterChanged(true);
+    updateStatusMessage('Parameters reset to reference values');
+    setTimeout(() => setStatusMessage(''), 3000);
+  }, [referenceParams, updateStatusMessage]);
+
+  // Function to update reference from current parameters
+  const updateReferenceFromCurrent = useCallback(() => {
+    // Set reference params directly
+    setReferenceParams({
+      Rs,
+      ra,
+      ca,
+      rb,
+      cb
+    });
+    setParameterChanged(true);
+    updateStatusMessage('Reference updated to current parameter values');
+  }, [Rs, ra, ca, rb, cb, updateStatusMessage]);
+
+  // Helper function to convert BackendMeshPoint to ModelSnapshot for GridTable/SpiderPlot
+  const mapBackendMeshToSnapshot = (meshPoint: BackendMeshPoint, index: number): ModelSnapshot => {
+    return {
+      id: `grid-result-${index}-${Date.now()}`,
+      name: `Grid Result ${index + 1}`,
+      timestamp: Date.now(),
+      parameters: {
+        Rs: meshPoint.parameters.Rs,
+        ra: meshPoint.parameters.ra,
+        ca: meshPoint.parameters.ca,
+        rb: meshPoint.parameters.rb,
+        cb: meshPoint.parameters.cb
+      },
+      data: [], // Grid results don't have Nyquist data
+      resnorm: meshPoint.resnorm,
+      // Use alpha for opacity, assign a default color (e.g., based on resnorm/alpha or fixed)
+      color: '#3B82F6', // Default color (e.g., blue-500), SpiderPlot will adjust opacity
+      opacity: meshPoint.alpha || 1, // Use alpha from backend if available, otherwise default to 1
+      isVisible: true, // Assume visible by default in the table
+      ter: meshPoint.parameters.ra + meshPoint.parameters.rb, // Calculate Total Electrode Resistance without rs/rShunt
+    };
+  };
+
+  // Update the processGridResults function to include impedance spectrum analysis and detailed logging
+  const processGridResults = (data: BackendMeshPoint[]) => {
+    updateStatusMessage(`Processing ${data.length} grid points with physical impedance analysis...`);
+    
+    // Ensure each item has a valid resnorm to prevent NaN issues
+    const validatedData = data.map(item => ({
+      ...item,
+      resnorm: Number.isFinite(item.resnorm) ? item.resnorm : Infinity
+    }));
+    
+    // Sort by resnorm (ascending) - best fits first
+    const sortedData = [...validatedData].sort((a, b) => a.resnorm - b.resnorm);
+
+    updateStatusMessage(`MATH: Sorted results by resnorm (low to high) - lower values indicate better impedance match`);
+    setGridResults(sortedData); // Store sorted results
+    
+    // Find reference point
+    const referencePoint = sortedData.find(point => 
+      Math.abs(point.parameters.Rs - Rs) < 1e-6 &&
+      Math.abs(point.parameters.ra - ra) < 1e-6 &&
+      Math.abs(point.parameters.ca - ca) < 1e-12 &&
+      Math.abs(point.parameters.rb - rb) < 1e-6 &&
+      Math.abs(point.parameters.cb - cb) < 1e-12
+    ) || sortedData[0];
+    
+    // Create reference model
+    const referenceModel = mapBackendMeshToSnapshot(referencePoint, -1);
+    referenceModel.id = `reference-${Date.now()}`;
+    referenceModel.name = referenceModelName;
+    referenceModel.color = "#000000";
+    
+    // Set as reference model for visualization
+    setReferenceModelId(referenceModel.id);
+    
+    updateStatusMessage(`Reference parameters: Rs=${Rs.toFixed(2)}Ω, Ra=${ra.toFixed(0)}Ω, Ca=${(ca*1e6).toFixed(2)}μF, Rb=${rb.toFixed(0)}Ω, Cb=${(cb*1e6).toFixed(2)}μF`);
+    
+    // Calculate reference time constants
+    const refTauA = referencePoint.parameters.ra * referencePoint.parameters.ca * 1000; // ms
+    const refTauB = referencePoint.parameters.rb * referencePoint.parameters.cb * 1000; // ms
+    
+    updateStatusMessage(`MATH: Reference time constants: τA = Ra×Ca = ${referencePoint.parameters.ra}×${(referencePoint.parameters.ca*1e6).toFixed(2)}μF = ${refTauA.toFixed(2)}ms`);
+    updateStatusMessage(`MATH: Reference time constants: τB = Rb×Cb = ${referencePoint.parameters.rb}×${(referencePoint.parameters.cb*1e6).toFixed(2)}μF = ${refTauB.toFixed(2)}ms`);
+    
+    // Calculate impedance metrics for the best matching points
+    const topResults = sortedData.slice(0, Math.min(5, sortedData.length));
+    
+    // Analyze impedance characteristics
+    updateStatusMessage(`Analyzing impedance characteristics of top ${topResults.length} results...`);
+    
+    // Calculate reference impedance spectrum
+    const refSpectrum = calculateImpedanceSpectrum(
+      referencePoint.parameters,
+      frequencies
+    );
+    
+    // Analyze reference impedance across frequency range
+    updateStatusMessage(`MATH: Impedance spectrum analysis for reference parameters:`);
+    
+    // Get key frequencies for analysis
+    const freqPoints = [
+      frequencies[0], // Lowest frequency
+      frequencies[Math.floor(frequencies.length / 4)], // Low-mid frequency
+      frequencies[Math.floor(frequencies.length / 2)], // Mid frequency
+      frequencies[Math.floor(3 * frequencies.length / 4)], // Mid-high frequency
+      frequencies[frequencies.length - 1] // Highest frequency
+    ];
+    
+    // Log reference impedance at key frequencies
+    updateStatusMessage(`MATH: For Randles circuit model (Rs + parallel RC + parallel RC):`);
+    
+    freqPoints.forEach(freq => {
+      const [real, imag] = calculateTotalImpedance(referencePoint.parameters, freq);
+      const mag = Math.sqrt(real * real + imag * imag);
+      const phase = Math.atan2(imag, real) * (180 / Math.PI);
+      
+      updateStatusMessage(`MATH: At f=${freq.toFixed(1)}Hz: Z = ${real.toFixed(2)} ${imag >= 0 ? '+' : ''}${imag.toFixed(2)}j Ω, |Z| = ${mag.toFixed(2)} Ω, θ = ${phase.toFixed(1)}°`);
+    });
+    
+    // Use the spectrum to calculate deviation metrics for top results
+    updateStatusMessage(`Analysis of top ${topResults.length} results by impedance spectrum:`);
+    
+    topResults.forEach((result, idx) => {
+      if (idx > 0) { // Skip reference
+        // Calculate test spectrum
+        const testSpectrum = calculateImpedanceSpectrum(result.parameters, frequencies);
+        
+        // Calculate average deviation from reference spectrum
+        let totalDeviation = 0;
+        testSpectrum.forEach((point, i) => {
+          const refPoint = refSpectrum[i];
+          const magDeviation = Math.abs((point.mag - refPoint.mag) / refPoint.mag);
+          const phaseDeviation = Math.abs((point.phase - refPoint.phase) / 90);
+          totalDeviation += (0.7 * magDeviation) + (0.3 * phaseDeviation);
+        });
+        
+        const avgDeviation = totalDeviation / testSpectrum.length;
+        
+        // Calculate time constants
+        const tauA = result.parameters.ra * result.parameters.ca * 1000;
+        const tauB = result.parameters.rb * result.parameters.cb * 1000;
+        
+        updateStatusMessage(`Result #${idx+1} (resnorm=${result.resnorm.toExponential(3)}): Rs=${result.parameters.Rs.toFixed(2)}, Ra=${result.parameters.ra.toFixed(0)}, Ca=${(result.parameters.ca*1e6).toFixed(2)}, Rb=${result.parameters.rb.toFixed(0)}, Cb=${(result.parameters.cb*1e6).toFixed(2)}`);
+        updateStatusMessage(`MATH: Result #${idx+1} time constants: τA=${tauA.toFixed(2)}ms (${((tauA-refTauA)/refTauA*100).toFixed(1)}% vs ref), τB=${tauB.toFixed(2)}ms (${((tauB-refTauB)/refTauB*100).toFixed(1)}% vs ref)`);
+        updateStatusMessage(`MATH: Result #${idx+1} average impedance deviation: ${(avgDeviation * 100).toFixed(2)}%`);
+      }
+    });
+    
+    // Calculate time constants for all points
+    const timeConstants = sortedData.map(point => {
+      const tauA = point.parameters.ra * point.parameters.ca * 1000; // ms
+      const tauB = point.parameters.rb * point.parameters.cb * 1000; // ms
+      return { tauA, tauB };
+    });
+    
+    // Find mean and standard deviation for time constants
+    const meanTauA = timeConstants.reduce((sum, tc) => sum + tc.tauA, 0) / timeConstants.length;
+    const meanTauB = timeConstants.reduce((sum, tc) => sum + tc.tauB, 0) / timeConstants.length;
+    const stdTauA = Math.sqrt(
+      timeConstants.reduce((sum, tc) => sum + Math.pow(tc.tauA - meanTauA, 2), 0) / timeConstants.length
+    );
+    const stdTauB = Math.sqrt(
+      timeConstants.reduce((sum, tc) => sum + Math.pow(tc.tauB - meanTauB, 2), 0) / timeConstants.length
+    );
+    
+    updateStatusMessage(`MATH: Statistical analysis across all grid points:`);
+    updateStatusMessage(`MATH: Time constant τA: mean=${meanTauA.toFixed(2)}ms, σ=${stdTauA.toFixed(2)}ms, CV=${(stdTauA/meanTauA*100).toFixed(1)}%`);
+    updateStatusMessage(`MATH: Time constant τB: mean=${meanTauB.toFixed(2)}ms, σ=${stdTauB.toFixed(2)}ms, CV=${(stdTauB/meanTauB*100).toFixed(1)}%`);
+    
+    // Find resnorm statistics
+    const minResnorm = sortedData[0].resnorm;
+    const maxResnorm = sortedData[sortedData.length - 1].resnorm;
+    const medianResnorm = sortedData[Math.floor(sortedData.length/2)].resnorm;
+    const meanResnorm = sortedData.reduce((sum, point) => sum + point.resnorm, 0) / sortedData.length;
+    
+    updateStatusMessage(`MATH: Impedance fit (resnorm) statistics: min=${minResnorm.toExponential(3)}, max=${maxResnorm.toExponential(3)}, median=${medianResnorm.toExponential(3)}, mean=${meanResnorm.toExponential(3)}`);
+    
+    // Group the results by resnorm using logarithmic binning for better distribution
+    updateStatusMessage(`MATH: Grouping results using logarithmic binning for better visualization`);
+    
+    // Skip binning if all points have the same resnorm
+    if (minResnorm === maxResnorm) {
+      updateStatusMessage('All grid points have the same impedance fit value. Using a single group.');
+      const groups = [{
+        range: [minResnorm, maxResnorm] as [number, number],
+        color: '#3B82F6',
+        items: sortedData.map((result, idx) => mapBackendMeshToSnapshot(result, idx))
+      }];
+      setResnormGroups(groups);
+    } else {
+      // Create logarithmic bin edges for better distribution
+      // Handle the case where minResnorm might be zero
+      const epsilon = 1e-12; // Small value to avoid log(0)
+      const adjustedMinResnorm = Math.max(epsilon, minResnorm);
+      const logMin = Math.log10(adjustedMinResnorm);
+      const logMax = Math.log10(maxResnorm);
+      
+      // Determine number of groups based on data size
+      // More points = more groups for better visualization
+      const numGroups = Math.min(10, Math.max(5, Math.ceil(Math.sqrt(sortedData.length) / 5)));
+      
+      updateStatusMessage(`MATH: Using logarithmic binning with ${numGroups} groups from ${adjustedMinResnorm.toExponential(3)} to ${maxResnorm.toExponential(3)}`);
+      
+      // Create bin edges in log space
+      const binEdges = Array.from({length: numGroups + 1}, (_, i) => {
+        return Math.pow(10, logMin + (logMax - logMin) * (i / numGroups));
+      });
+      
+      updateStatusMessage(`MATH: Bin edges: ${binEdges.map(v => v.toExponential(3)).join(', ')}`);
+      
+      // Initialize groups
+      const groups: { range: [number, number]; color: string; items: ModelSnapshot[] }[] = [];
+      
+      // Generate colors from green (best) to red (worst)
+      const getColorForIndex = (index: number, total: number): string => {
+        // Use a better color gradient: green->blue->purple->red
+        if (index < total / 3) {
+          // Green to blue gradient (120° to 240°)
+          const hue = 120 - (index / (total / 3)) * 120;
+          return `hsl(${hue}, 80%, 50%)`;
+        } else if (index < 2 * total / 3) {
+          // Blue to purple gradient (240° to 270°)
+          const normalizedIndex = (index - total / 3) / (total / 3);
+          const hue = 240 - normalizedIndex * 30;
+          return `hsl(${hue}, 80%, 50%)`;
+        } else {
+          // Purple to red gradient (270° to 0°)
+          const normalizedIndex = (index - 2 * total / 3) / (total / 3);
+          const hue = 270 - normalizedIndex * 270;
+          return `hsl(${hue}, 80%, 50%)`;
+        }
+      };
+      
+      // Create empty groups
+      for (let i = 0; i < numGroups; i++) {
+        groups.push({
+          range: [binEdges[i], binEdges[i+1]] as [number, number],
+          color: getColorForIndex(i, numGroups),
+          items: []
+        });
+      }
+      
+      // Make sure the reference point is always in a group
+      const refResnorm = referencePoint.resnorm;
+      let refGroupExists = false;
+      
+      for (const group of groups) {
+        if (refResnorm >= group.range[0] && refResnorm <= group.range[1]) {
+          refGroupExists = true;
+          break;
+        }
+      }
+      
+      // If reference point doesn't fit any group, adjust the first group
+      if (!refGroupExists && groups.length > 0) {
+        groups[0].range[0] = Math.min(groups[0].range[0], refResnorm);
+      }
+      
+      // Assign results to groups
+      sortedData.forEach((result, idx) => {
+        // Find which group this result belongs to
+        let groupIndex = groups.findIndex((g, i) => 
+          result.resnorm >= g.range[0] && 
+          (result.resnorm < g.range[1] || i === groups.length - 1)
+        );
+        
+        // If no group found (should be rare due to our binning), put in last group
+        if (groupIndex < 0) {
+          groupIndex = groups.length - 1;
+        }
+        
+        const snapshot = mapBackendMeshToSnapshot(result, idx);
+        snapshot.color = groups[groupIndex].color;
+        
+        // Set alpha based on position within group - makes visualization nicer
+        const groupRange = groups[groupIndex].range;
+        if (groupRange[1] > groupRange[0]) {
+          const normalizedPosition = (result.resnorm - groupRange[0]) / (groupRange[1] - groupRange[0]);
+          // Higher opacity for better fits (lower resnorm)
+          snapshot.opacity = Math.max(0.3, 1 - (normalizedPosition * 0.5));
+        }
+        
+        groups[groupIndex].items.push(snapshot);
+      });
+      
+      // Filter out empty groups
+      const nonEmptyGroups = groups.filter(group => group.items.length > 0);
+      
+      // Log group statistics
+      nonEmptyGroups.forEach((group, idx) => {
+        updateStatusMessage(`Group ${idx+1}: ${group.items.length} points, impedance fit range [${group.range[0].toExponential(2)}-${group.range[1].toExponential(2)}]`);
+        
+        // Calculate mean time constants for this group
+        if (group.items.length > 0) {
+          const groupTauA = group.items.reduce((sum, item) => sum + item.parameters.ra * item.parameters.ca * 1000, 0) / group.items.length;
+          const groupTauB = group.items.reduce((sum, item) => sum + item.parameters.rb * item.parameters.cb * 1000, 0) / group.items.length;
+          
+          updateStatusMessage(`MATH: Group ${idx+1} average time constants: τA=${groupTauA.toFixed(2)}ms, τB=${groupTauB.toFixed(2)}ms`);
+        }
+      });
+      
+      // Cast the items to ResnormGroupItem[] when setting resnormGroups
+      setResnormGroups(nonEmptyGroups as unknown as ResnormGroup[]);
+    }
+    
+    updateStatusMessage(`Grid computation complete. Analyzed ${sortedData.length} parameter combinations with physically accurate impedance model.`);
+    setIsComputingGrid(false);
+  };
+
+  // Collapsible section component
+  const CollapsibleSection = ({ 
+    title, 
+    isOpen, 
+    toggleOpen, 
+    children 
+  }: { 
+    title: string; 
+    isOpen: boolean; 
+    toggleOpen: () => void; 
+    children: React.ReactNode 
+  }) => {
+    return (
+      <div className="border rounded-md overflow-hidden">
+        <button
+          onClick={toggleOpen}
+          className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors"
+        >
+          <span>{title}</span>
+          <svg 
+            className={`w-3.5 h-3.5 text-gray-500 transition-transform ${isOpen ? 'transform rotate-180' : ''}`} 
+            fill="none" 
+            stroke="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        <div
+          className={`transition-all duration-200 ease-in-out ${
+            isOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0 overflow-hidden'
+          }`}
+        >
+          <div className="p-3 bg-white">
+            {children}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Function to update the dynamic reference model when parameters change
+  const updateDynamicReferenceModel = useCallback(() => {
+    // Create dynamic reference model with current parameters
+    const dynamicRefModel: ModelSnapshot = {
+      id: 'dynamic-reference',
+      name: referenceModelName || 'Current Parameters',
+      timestamp: Date.now(),
+      parameters: {
+        Rs,
+        ra,
+        ca,
+        rb,
+        cb
+      },
+      data: calculateImpedanceSpectrum({Rs, ra, ca, rb, cb}, frequencies).map(point => ({
+        real: point.real,
+        imaginary: point.imag,
+        frequency: point.freq,
+        magnitude: point.mag,
+        phase: point.phase
+      })),
+      color: '#000000',
+      isVisible: true,
+      resnorm: 0
+    };
+    
+    // Add to or update the model in resnormGroups
+    setResnormGroups(prevGroups => {
+      // Create a deep copy of the groups
+      const updatedGroups = JSON.parse(JSON.stringify(prevGroups));
+      
+      // Add the dynamic reference to each group or update it if it exists
+      let dynamicRefExists = false;
+      
+      // If there are no groups yet, create one for the reference
+      if (updatedGroups.length === 0) {
+        return [{
+          range: [0, 0] as [number, number],
+          color: '#000000',
+          items: [dynamicRefModel]
+        }];
+      }
+      
+      // Look in all groups for the dynamic reference
+      for (const group of updatedGroups) {
+        const existingRefIndex = group.items.findIndex((item: ModelSnapshot) => item.id === 'dynamic-reference');
+        if (existingRefIndex >= 0) {
+          // Update the existing reference
+          group.items[existingRefIndex] = dynamicRefModel;
+          dynamicRefExists = true;
+          break;
+        }
+      }
+      
+      // If it doesn't exist yet, add it to the first group
+      if (!dynamicRefExists && updatedGroups.length > 0) {
+        updatedGroups[0].items.unshift(dynamicRefModel);
+      }
+      
+      return updatedGroups;
+    });
+    
+    // Set as the reference
+    setReferenceModelId('dynamic-reference');
+  }, [Rs, ra, ca, rb, cb, frequencies, referenceModelName]);
+  
+  // Update reference model when parameters change or component mounts
+  useEffect(() => {
+    if (resnormGroups.length > 0 || parameterChanged) {
+      updateDynamicReferenceModel();
+    }
+  }, [Rs, ra, ca, rb, cb, parameterChanged, updateDynamicReferenceModel, resnormGroups.length]);
+
+  // Updated handleParameterChange
+  const handleParameterChange = (setter: React.Dispatch<React.SetStateAction<number>>, value: number) => {
+    setter(value);
+    setParameterChanged(true);
+    updateStatusMessage(`Parameter updated to ${value}`);
+    
+    // Update dynamic reference model immediately
+    setTimeout(() => updateDynamicReferenceModel(), 0);
+    
+    // Clear feedback after 2 seconds
+    setTimeout(() => setParameterChanged(false), 2000);
+  };
+
+  // Updated handleComputeRegressionMesh with better mathematical integration
+  const handleComputeRegressionMesh = async () => {
+    // Validate grid size
+    if (gridSize < 2 || gridSize > 10) {
+      updateStatusMessage('Points per dimension must be between 2 and 10');
+      setTimeout(() => setStatusMessage(''), 3000);
+      return;
+    }
+
+    setIsComputingGrid(true); // Start loading
+    setGridResults([]); // Clear previous results
+    setGridError(null); // Clear previous errors
+    setResnormGroups([]); // Clear previous groups
+    setParameterChanged(false); // Reset parameter changed flag
+    
+    // Clear previous logs and switch to the activity tab
+    setLogMessages([]);
+    setCurrentTab('activity');
+    
+    updateStatusMessage(`Starting grid computation with ${gridSize} points per dimension...`);
+    updateStatusMessage(`MATH: Using ${gridSize} points per dimension for 5 parameters = ${Math.pow(gridSize, 5)} total grid points`);
+    updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rs in series with parallel RC elements)`);
+    updateStatusMessage(`MATH: Z(ω) = Rs + [Ra/(1+jωRaCa)] + [Rb/(1+jωRbCb)]`);
+
+    // Prepare parameters for the grid computation
+    const referenceParams = {
+      Rs,
+      ra,
+      ca,
+      rb,
+      cb,
+      frequency_range: frequencies,
+    };
+    
+    // Create a name for the reference model if not set
+    if (!referenceModelName || referenceModelName === "Current Parameters") {
+      setReferenceModelName(`Reference Grid ${new Date().toLocaleTimeString()}`);
+    }
+
+    // Define parameter ranges for grid search - use wider ranges for better exploration
+    // but don't go beyond physiologically reasonable limits
+    const parameterRanges = {
+      Rs: { min: Math.max(5, Rs * 0.5), max: Math.min(50, Rs * 2.0) },
+      ra: { min: Math.max(50, ra * 0.3), max: Math.min(2000, ra * 3.0) },
+      ca: { min: Math.max(0.5e-6, ca * 0.3), max: Math.min(10e-6, ca * 3.0) },
+      rb: { min: Math.max(50, rb * 0.3), max: Math.min(2000, rb * 3.0) },
+      cb: { min: Math.max(0.5e-6, cb * 0.3), max: Math.min(10e-6, cb * 3.0) },
+    };
+
+    // Log initial calculation details
+    updateStatusMessage(`MATH: Frequencies: [${frequencies[0].toFixed(1)}, ..., ${frequencies[frequencies.length-1].toFixed(1)}] Hz (${frequencies.length} points)`);
+    updateStatusMessage(`MATH: Reference values: Rs=${Rs.toFixed(2)}Ω, Ra=${ra.toFixed(0)}Ω, Ca=${(ca*1e6).toFixed(2)}μF, Rb=${rb.toFixed(0)}Ω, Cb=${(cb*1e6).toFixed(2)}μF`);
+    updateStatusMessage(`MATH: Parameter ranges: Rs=[${parameterRanges.Rs.min.toFixed(2)}, ${parameterRanges.Rs.max.toFixed(2)}], Ra=[${parameterRanges.ra.min.toFixed(0)}, ${parameterRanges.ra.max.toFixed(0)}], Ca=[${(parameterRanges.ca.min*1e6).toFixed(2)}, ${(parameterRanges.ca.max*1e6).toFixed(2)}]μF, Rb=[${parameterRanges.rb.min.toFixed(0)}, ${parameterRanges.rb.max.toFixed(0)}], Cb=[${(parameterRanges.cb.min*1e6).toFixed(2)}, ${(parameterRanges.cb.max*1e6).toFixed(2)}]μF`);
+  
+    try {
+      // Calculate expected impedance spectrum for reference parameters
+      const refSpectrum = calculateImpedanceSpectrum(referenceParams, frequencies);
+      
+      // Log impedance at key frequencies to show the reference point spectrum
+      const freqIndices = [0, Math.floor(frequencies.length/4), Math.floor(frequencies.length/2), frequencies.length-1];
+      updateStatusMessage(`MATH: Reference impedance at key frequencies:`);
+      
+      freqIndices.forEach(idx => {
+        const freq = frequencies[idx];
+        const point = refSpectrum[idx];
+        updateStatusMessage(`MATH: f=${freq.toFixed(2)}Hz: Z=${point.real.toFixed(2)}${point.imag >= 0 ? '+' : ''}${point.imag.toFixed(2)}j Ω, |Z|=${point.mag.toFixed(2)} Ω, phase=${point.phase.toFixed(1)}°`);
+      });
+      
+      // Calculate and log reference time constants
+      const tauA = ra * ca * 1000; // in ms
+      const tauB = rb * cb * 1000; // in ms
+      updateStatusMessage(`MATH: Reference time constants: τA=${tauA.toFixed(2)}ms, τB=${tauB.toFixed(2)}ms`);
+      
+      // Generate grid points using our improved algorithm with combinatorial exploration
+      updateStatusMessage(`Generating grid points with combinatorial parameter exploration...`);
+      const gridPoints = generateGridPoints(
+        referenceParams, 
+        parameterRanges, 
+        gridSize,
+        updateStatusMessage // Pass the logging function for detailed math
+      );
+      
+      // Process the generated grid points
+      processGridResults(gridPoints);
+    } catch (error) {
+      console.error("Error computing grid:", error);
+      setGridError(`Grid computation failed: ${error instanceof Error ? error.message : String(error)}`);
+      updateStatusMessage(`Error computing grid: ${error instanceof Error ? error.message : String(error)}`);
+      setIsComputingGrid(false);
+    }
+  };
+
+  // ParamSlider component - Add this at the end of the CircuitSimulator component before the return statement
+  const ParamSlider = ({ 
+    label, 
+    value, 
+    min, 
+    max, 
+    step, 
+    unit, 
+    onChange 
+  }: { 
+    label: string; 
+    value: number; 
+    min: number; 
+    max: number; 
+    step: number; 
+    unit: string; 
+    onChange: (value: number) => void 
+  }) => {
+    return (
+      <div className="space-y-1">
+        <div className="flex justify-between items-center">
+          <label className="text-xs text-gray-600">{label}</label>
+          <span className="text-xs font-medium">
+            {value.toFixed(step < 1 ? 2 : 0)} {unit}
+          </span>
+        </div>
+        <input 
+          type="range" 
+          min={min} 
+          max={max} 
+          step={step} 
+          value={value} 
+          onChange={(e) => onChange(parseFloat(e.target.value))} 
+          className="w-full h-1.5 bg-gray-200 rounded-sm appearance-none cursor-pointer" 
+        />
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-screen max-h-screen overflow-hidden bg-white">
+      {/* Header - Simplified */}
+      <header className="bg-white border-b py-2 px-4 flex items-center justify-between flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-medium text-gray-800">Circuit Simulator</h1>
+          <span className="text-sm text-gray-500">Parameter Optimization</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {gridResults.length > 0 && (
+            <div className="text-xs text-gray-600 px-2 py-1 rounded bg-gray-50 flex items-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5"></span>
+              {gridResults.length} Grid Points
+            </div>
+          )}
+          <div className="flex items-center space-x-2 mb-2">
+            <button 
+              className="text-xs text-blue-600 hover:bg-blue-50 rounded px-2 py-1 transition-colors flex items-center gap-1"
+              onClick={resetToReference}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Reset
+            </button>
+            
+            <button 
+              className="text-xs text-blue-600 hover:bg-blue-50 rounded px-2 py-1 transition-colors flex items-center gap-1"
+              onClick={updateReferenceFromCurrent}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+              Set as Reference
+            </button>
+          </div>
+          {!isSidebarOpen && (
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="text-xs flex items-center text-gray-600 hover:bg-gray-50 rounded px-2 py-1"
+            >
+              <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              Menu
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar - Fixed width */}
+        <div 
+          className={`border-r flex-shrink-0 transition-all duration-200 ease-in-out ${
+            isSidebarOpen ? 'w-64' : 'w-0'
+          } h-full flex flex-col overflow-hidden`}
+        >
+          {isSidebarOpen && (
+            <>
+              {/* Sidebar Tabs */}
+              <div className="flex border-b text-xs">
+                <button
+                  className={`flex-1 px-3 py-2 font-medium ${
+                    currentTab === 'toolbox' 
+                      ? 'bg-gray-50 text-gray-800 border-b-2 border-gray-500' 
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                  onClick={() => setCurrentTab('toolbox')}
+                >
+                  Toolbox
+                </button>
+                <button
+                  className={`flex-1 px-3 py-2 font-medium ${
+                    currentTab === 'activity' 
+                      ? 'bg-gray-50 text-gray-800 border-b-2 border-gray-500' 
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                  onClick={() => setCurrentTab('activity')}
+                >
+                  Activity Log
+                </button>
+                <button
+                  className="text-gray-500 hover:text-gray-700 px-2 flex items-center justify-center"
+                  onClick={() => setIsSidebarOpen(false)}
+                  title="Close sidebar"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {/* Sidebar Content - scrollable */}
+              <div className="flex-1 overflow-y-auto">
+                {currentTab === 'toolbox' && (
+                  <div className="p-3 space-y-3">
+                    {/* Grid Computation Section */}
+                    <CollapsibleSection 
+                      title="Grid Computation" 
+                      isOpen={gridSettingsOpen} 
+                      toggleOpen={() => setGridSettingsOpen(!gridSettingsOpen)}
+                    >
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <label htmlFor="gridSize" className="text-xs text-gray-600">
+                            Points per dimension:
+                          </label>
+                          <input
+                            type="number"
+                            id="gridSize"
+                            value={gridSize}
+                            onChange={(e) => {
+                              const size = Math.max(2, Math.min(10, parseInt(e.target.value) || 2));
+                              setGridSize(size);
+                              updateStatusMessage(`Grid size: ${size} (${Math.pow(size, 5)} total points)`);
+                            }} 
+                            min="2"
+                            max="10"
+                            className="w-12 p-1 border rounded text-xs text-center"
+                          />
+                        </div>
+                        <div className="text-xs text-gray-500 flex justify-between">
+                          <span>Total: ~{Math.pow(gridSize, 5)} points</span>
+                          {parameterChanged && <span>Parameters modified</span>}
+                        </div>
+                        <button
+                          onClick={handleComputeRegressionMesh}
+                          disabled={isComputingGrid}
+                          className={`w-full mt-1 px-3 py-1.5 rounded text-white text-xs font-medium transition-colors ${
+                            isComputingGrid
+                              ? 'bg-gray-400 cursor-not-allowed'
+                              : parameterChanged 
+                                ? 'bg-amber-600 hover:bg-amber-700' 
+                                : 'bg-blue-600 hover:bg-blue-700'
+                          }`}
+                        >
+                          {isComputingGrid ? (
+                            <span className="flex items-center justify-center">
+                              <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Computing...
+                            </span>
+                          ) : (parameterChanged ? 'Recompute Grid' : 'Compute Grid')}
+                        </button>
+                      </div>
+                    </CollapsibleSection>
+
+                    {/* Circuit Parameters Section */}
+                    <CollapsibleSection 
+                      title="Circuit Parameters" 
+                      isOpen={circuitParamsOpen} 
+                      toggleOpen={() => setCircuitParamsOpen(!circuitParamsOpen)}
+                    >
+                      <div className="space-y-3 pt-1">
+                        {/* Reset Button */}
+                        <div className="flex justify-between items-center mb-3">
+                          <h3 className="text-sm font-medium text-gray-700">Circuit Parameters</h3>
+                          <button
+                            onClick={() => {
+                              // Reset to default values
+                              if (referenceParams) {
+                                setRs(referenceParams.Rs);
+                                setRa(referenceParams.ra);
+                                setCa(referenceParams.ca);
+                                setRb(referenceParams.rb);
+                                setCb(referenceParams.cb);
+                              } else {
+                                setRs(24);
+                                setRa(500);
+                                setCa(3e-6);
+                                setRb(500);
+                                setCb(3e-6);
+                              }
+                              
+                              setParameterChanged(true);
+                              updateStatusMessage('Parameters reset');
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Reset Parameters
+                          </button>
+                        </div>
+                        
+                        {/* Reference Model Name */}
+                        <div className="mb-4 p-2 bg-gray-50 rounded-md border border-gray-100">
+                          <div className="mb-2 flex justify-between items-center">
+                            <label className="text-xs font-medium text-gray-700">Reference Model Name:</label>
+                          </div>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={referenceModelName}
+                              onChange={(e) => setReferenceModelName(e.target.value)}
+                              className="text-xs w-full px-2 py-1 border rounded"
+                              placeholder="Enter reference model name"
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* Parameter Sliders */}
+                        <ParamSlider 
+                          label="Rs" 
+                          value={Rs} 
+                          min={10} 
+                          max={30} 
+                          step={0.1}
+                          unit="Ω" 
+                          onChange={(val) => handleParameterChange(setRs, val)} 
+                        />
+                        
+                        <ParamSlider 
+                          label="Ra" 
+                          value={ra} 
+                          min={100} 
+                          max={1000} 
+                          step={1}
+                          unit="Ω" 
+                          onChange={(val) => handleParameterChange(setRa, val)} 
+                        />
+                        
+                        <ParamSlider 
+                          label="Ca" 
+                          value={ca * 1e6} 
+                          min={1} 
+                          max={5} 
+                          step={0.01}
+                          unit="μF" 
+                          onChange={(val) => handleParameterChange(setCa, val / 1e6)} 
+                        />
+                        
+                        <ParamSlider 
+                          label="Rb" 
+                          value={rb} 
+                          min={100} 
+                          max={1000} 
+                          step={1}
+                          unit="Ω" 
+                          onChange={(val) => handleParameterChange(setRb, val)} 
+                        />
+                        
+                        <ParamSlider 
+                          label="Cb" 
+                          value={cb * 1e6} 
+                          min={1} 
+                          max={5} 
+                          step={0.01}
+                          unit="μF" 
+                          onChange={(val) => handleParameterChange(setCb, val / 1e6)} 
+                        />
+                      </div>
+                    </CollapsibleSection>
+                  </div>
+                )}
+                
+                {currentTab === 'activity' && (
+                  <div className="p-3">
+                    <div className="text-xs space-y-1 text-gray-600 max-h-full overflow-y-auto">
+                      {logMessages.length === 0 ? (
+                        <p className="italic text-gray-400">No activity yet</p>
+                      ) : (
+                        logMessages.map((log, idx) => (
+                          <div key={idx} className="py-1 border-b border-gray-100 last:border-0">
+                            <span className="text-gray-400 mr-2">{log.time}</span>
+                            <span>{log.message}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Main Content Area - This takes all remaining space and scrolls internally */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Status message bar */}
+          {statusMessage && (
+            <div className="px-4 py-2 text-xs bg-blue-50 text-blue-700 border-b">
+              {statusMessage}
+            </div>
+          )}
+
+          {/* Main workspace - This will be updated in the next edit */}
+          <div className="flex-1 overflow-auto p-4">
+            {isComputingGrid ? (
+              <div className="flex items-center justify-center p-4 h-32 bg-white border rounded shadow-sm">
+                <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-b-2 border-blue-500 mr-3"></div>
+                <p className="text-sm text-blue-600">Computing grid points...</p>
+              </div>
+            ) : gridError ? (
+              <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                Error: {gridError}
+              </div>
+            ) : gridResults.length === 0 ? (
+              <div className="flex items-center justify-center h-32 bg-white border rounded shadow-sm">
+                <p className="text-sm text-gray-500">
+                  No results yet. Use the toolbox to compute a grid.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                {/* Spider Plot - Left Side (3 columns) */}
+                <div className="lg:col-span-3 bg-white border rounded shadow-sm">
+                  <div className="p-3 border-b">
+                    <h2 className="text-sm font-medium text-gray-700">Parameter Visualization</h2>
+                    <p className="text-xs text-gray-500 mt-1">Reference: {referenceModelName || "Current Parameters"}</p>
+                  </div>
+                  <div className="p-4 h-[600px]">
+                    <SpiderPlot 
+                      meshItems={resnormGroups.flatMap(group => group.items).filter(item => visibleRows[item.id] !== false) as ModelSnapshot[]} 
+                      referenceId={referenceModelId || undefined}
+                    />
+                  </div>
+                </div>
+                
+                {/* Results Grid - Right Side (2 columns) */}
+                <div className="lg:col-span-2 flex flex-col">
+                  {/* Header controls */}
+                  <div className="flex justify-between items-center text-xs mb-2 px-2">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium text-gray-800">Results: {gridResults.length} grid points</span>
+                      
+                      {/* Expand/collapse all control */}
+                      {resnormGroups.length > 0 && (
+                        <button
+                          onClick={() => setAllGroupsExpanded(resnormGroups.some((_, idx) => !expandedGroups[idx]))}
+                          className="text-gray-700 hover:text-gray-900 inline-flex items-center"
+                        >
+                          <svg className="w-3.5 h-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+                              resnormGroups.some((_, idx) => !expandedGroups[idx])
+                                ? "M19 9l-7 7-7-7"
+                                : "M9 5l7 7-7 7"
+                            } />
+                          </svg>
+                          {resnormGroups.some((_, idx) => !expandedGroups[idx])
+                            ? "Expand All"
+                            : "Collapse All"
+                          }
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-gray-700">Click headers to sort</span>
+                  </div>
+                  
+                  {/* Results table */}
+                  <div className="flex-1 border rounded shadow-sm overflow-hidden bg-white">
+                    <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+                      <table className="min-w-full divide-y divide-gray-200 table-fixed">
+                        {/* Resnorm Filters in Table Header - Desmos Style */}
+                        <thead>
+                          <tr className="bg-gray-50 border-b">
+                            <th colSpan={10} className="py-2 px-3">
+                              <div className="flex flex-wrap gap-2 items-center">
+                                <span className="text-xs font-medium text-gray-700 mr-1">Show:</span>
+                                {resnormGroups.map((group, idx) => {
+                                  const isHidden = group.items.some((item: ResnormGroupItem) => visibleRows[item.id] === false);
+                                  const toggleGroup = () => {
+                                    const newVisibility = {...visibleRows};
+                                    group.items.forEach((item: ResnormGroupItem) => {
+                                      newVisibility[item.id] = isHidden;
+                                    });
+                                    setVisibleRows(newVisibility);
+                                    updateStatusMessage(`${isHidden ? 'Showed' : 'Hid'} all models in group ${idx + 1}`);
+                                  };
+                                  
+                                  return (
+                                    <button
+                                      key={`table-filter-${idx}`}
+                                      onClick={toggleGroup}
+                                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-full transition-colors"
+                                      title={`Toggle visibility of resnorm range ${group.range[0].toExponential(2)} - ${group.range[1].toExponential(2)}`}
+                                    >
+                                      <div 
+                                        className={`w-3 h-3 rounded-full border flex-shrink-0 ${isHidden ? 'bg-gray-100' : ''}`} 
+                                        style={{
+                                          borderColor: group.color,
+                                          backgroundColor: isHidden ? undefined : group.color
+                                        }}
+                                      />
+                                      <span className={`${isHidden ? 'text-gray-400' : 'text-gray-800'} font-medium`}>
+                                        {group.range[0].toExponential(1)}-{group.range[1].toExponential(1)}
+                                        <span className="ml-1 text-xs opacity-75">({group.items.length})</span>
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                                
+                                {/* Toggle all button */}
+                                <button
+                                  className="text-xs text-blue-600 hover:text-blue-800 ml-auto px-2 py-1 flex items-center gap-1"
+                                  onClick={() => {
+                                    // Check if any items are hidden
+                                    const anyHidden = resnormGroups.some(group => 
+                                      group.items.some((item: ResnormGroupItem) => visibleRows[item.id] === false)
+                                    );
+                                    
+                                    // Toggle visibility for all items
+                                    const newVisibility = {...visibleRows};
+                                    resnormGroups.forEach(group => {
+                                      group.items.forEach((item: ResnormGroupItem) => {
+                                        newVisibility[item.id] = anyHidden;
+                                      });
+                                    });
+                                    
+                                    setVisibleRows(newVisibility);
+                                    updateStatusMessage(`${anyHidden ? 'Showed' : 'Hid'} all models`);
+                                  }}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    {resnormGroups.some(group => group.items.some((item: ResnormGroupItem) => visibleRows[item.id] === false)) ? (
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    ) : (
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                    )}
+                                  </svg>
+                                  {resnormGroups.some(group => group.items.some((item: ResnormGroupItem) => visibleRows[item.id] === false)) ? 'Show All' : 'Hide All'}
+                                </button>
+                              </div>
+                            </th>
+                          </tr>
+                        </thead>
+                        
+                        <thead className="bg-gray-100 sticky top-0 z-10">
+                          <tr className="text-xs text-gray-700 uppercase">
+                            <th className="w-8 px-2 py-1.5 text-left font-medium">#</th>
+                            <th className="w-8 px-1 py-1.5 text-center font-medium">View</th>
+                            
+                            <th 
+                              className="w-16 px-2 py-1.5 text-left font-medium cursor-pointer hover:bg-gray-200"
+                              onClick={() => requestSort('resnorm')}
+                            >
+                              <div className="flex items-center">
+                                <span>Resnorm</span>
+                                {sortConfig.key === 'resnorm' && (
+                                  <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+                                      sortConfig.direction === 'ascending' 
+                                        ? "M5 15l7-7 7 7" 
+                                        : "M19 9l-7 7-7-7"
+                                    } />
+                                  </svg>
+                                )}
+                              </div>
+                            </th>
+                            
+                            {['Rs', 'ra', 'ca', 'rb', 'cb'].map(param => (
+                              <th
+                                key={param}
+                                className="px-2 py-1.5 text-left font-medium cursor-pointer hover:bg-gray-200"
+                                onClick={() => requestSort(`parameters.${param}`)}
+                              >
+                                <div className="flex items-center">
+                                  <span>{param}</span>
+                                  {sortConfig.key === `parameters.${param}` && (
+                                    <svg className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+                                        sortConfig.direction === 'ascending' 
+                                          ? "M5 15l7-7 7 7" 
+                                          : "M19 9l-7 7-7-7"
+                                      } />
+                                    </svg>
+                                  )}
+                                </div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="text-xs divide-y divide-gray-200 bg-white">
+                          {resnormGroups.map((group, groupIdx) => {
+                            const isExpanded = expandedGroups[groupIdx];
+                            
+                            return (
+                              <React.Fragment key={`group-${groupIdx}`}>
+                                <tr 
+                                  className={`group bg-gray-50 hover:bg-gray-100 cursor-pointer ${isExpanded ? 'border-b border-gray-200' : ''}`}
+                                  onClick={() => toggleGroupExpanded(groupIdx)}
+                                >
+                                  <td 
+                                    colSpan={8}
+                                    className="px-3 py-2 font-medium text-gray-800"
+                                  >
+                                    <div className="flex items-center">
+                                      <svg className="w-3.5 h-3.5 mr-1.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={
+                                          isExpanded
+                                            ? "M19 9l-7 7-7-7"
+                                            : "M9 5l7 7-7 7"
+                                        } />
+                                      </svg>
+                                      <div 
+                                        className="w-2.5 h-2.5 rounded-full mr-2" 
+                                        style={{ backgroundColor: group.color }}
+                                      ></div>
+                                      <span className="font-medium text-gray-900">
+                                        Resnorm: {group.range[0].toExponential(2)} - {group.range[1].toExponential(2)}
+                                      </span>
+                                      <span className="ml-2 text-gray-800">
+                                        ({group.items.length} items)
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                                
+                                {isExpanded && getSortedModels()
+                                  .filter(item => 
+                                    item.resnorm !== undefined && 
+                                    item.resnorm >= group.range[0] && 
+                                    item.resnorm < group.range[1]
+                                  )
+                                  .map((item, idx) => (
+                                    <tr 
+                                      key={item.id} 
+                                      className={`hover:bg-gray-50 ${visibleRows[item.id] === false ? 'opacity-50' : ''}`}
+                                    >
+                                      <td className="px-2 py-1.5 text-gray-800">{idx + 1}</td>
+                                      <td className="px-1 py-1.5 text-center">
+                                        <button
+                                          className="text-gray-700 hover:text-gray-900 focus:outline-none"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleRowVisibility(item.id);
+                                          }}
+                                          title={visibleRows[item.id] === false ? "Show this model" : "Hide this model"}
+                                        >
+                                          {visibleRows[item.id] === false ? (
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                            </svg>
+                                          ) : (
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                            </svg>
+                                          )}
+                                        </button>
+                                      </td>
+                                      <td className="px-2 py-1.5 font-mono text-gray-900 whitespace-nowrap" style={{ color: group.color }}>
+                                        {item.resnorm?.toExponential(3)}
+                                      </td>
+                                      {['Rs', 'ra', 'ca', 'rb', 'cb'].map(param => (
+                                        <td key={param} className="px-2 py-1.5 font-mono text-gray-800">
+                                          {typeof item.parameters[param as keyof typeof item.parameters] === 'number' 
+                                            ? (item.parameters[param as keyof typeof item.parameters] as number).toExponential(3) 
+                                            : 'N/A'}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+} 
