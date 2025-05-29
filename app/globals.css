@@ -129,8 +129,9 @@ body {
   }
   
   .circuit-visualization {
-    @apply flex-1 overflow-auto p-5;
-    background-color: var(--neutral-50);
+    @apply flex-1 p-4 overflow-y-auto;
+    min-height: 500px; /* Ensure minimum height */
+    max-height: calc(100vh - 120px); /* Prevent excessive height */
   }
   
   /* Status Message */
@@ -269,6 +270,7 @@ body {
     background-color: rgba(15, 23, 42, 0.9);
     border-radius: var(--rounded-md);
     position: relative;
+    display: block;
   }
   
   .spider-svg text {
@@ -298,6 +300,9 @@ body {
     height: 100%;
     width: 100%;
     position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   
   .spider-card {
@@ -307,6 +312,9 @@ body {
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     overflow: hidden;
     transition: all 0.3s ease;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
   }
   
   .spider-card:hover {

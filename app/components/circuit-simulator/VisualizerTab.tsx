@@ -148,16 +148,16 @@ const VisualizerTab: React.FC<VisualizerTabProps> = ({
   return (
     <div className="space-y-4">
       {/* Main Visualization Area */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-full min-h-[500px]">
         {/* Spider Plot */}
-        <div className={`card spider-card md:col-span-2 ${
+        <div className={`card spider-card md:col-span-2 h-full flex flex-col ${
           maxFreq - minFreq > 500 
             ? 'freq-range-wide' 
             : maxFreq - minFreq > 100 
             ? 'freq-range-moderate' 
             : 'freq-range-narrow'
         }`}>
-          <div className="relative h-full min-h-[300px]">
+          <div className="relative flex-1 w-full min-h-[450px]">
             <BaseSpiderPlot
               meshItems={combinedItems}
               referenceId={showReference && referenceModel ? 'dynamic-reference' : undefined}

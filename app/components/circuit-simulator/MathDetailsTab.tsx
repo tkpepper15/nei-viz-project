@@ -189,6 +189,38 @@ const MathDetailsTab: React.FC<MathDetailsTabProps> = ({
         <h3 className="text-lg font-medium text-neutral-200">Mathematical Details</h3>
       </div>
       
+      {/* Frequency Information Section - New Addition */}
+      <div className="bg-primary/10 border border-primary/20 rounded-lg p-4 mb-6">
+        <h4 className="text-sm font-medium text-primary mb-2 flex items-center">
+          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          Frequency Analysis Range
+        </h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="bg-primary/5 p-3 rounded">
+            <div className="text-xs text-neutral-400">Minimum Frequency</div>
+            <div className="font-mono font-medium text-primary">
+              {minFreq < 1 ? minFreq.toFixed(2) : minFreq < 1000 ? minFreq.toFixed(1) : (minFreq/1000).toFixed(1) + 'k'} Hz
+            </div>
+          </div>
+          <div className="bg-primary/5 p-3 rounded">
+            <div className="text-xs text-neutral-400">Maximum Frequency</div>
+            <div className="font-mono font-medium text-primary">
+              {maxFreq < 1000 ? maxFreq.toFixed(1) : (maxFreq/1000).toFixed(1) + 'k'} Hz
+            </div>
+          </div>
+          <div className="bg-primary/5 p-3 rounded">
+            <div className="text-xs text-neutral-400">Frequency Points</div>
+            <div className="font-mono font-medium text-primary">{numPoints} points</div>
+          </div>
+        </div>
+        <div className="mt-3 text-xs text-neutral-400">
+          <p>All impedance calculations and resnorm comparisons are performed across this frequency range with logarithmic spacing.</p>
+          <p className="mt-1">Note: For EIS analysis, lower frequencies ({minFreq < 1 ? 'below 1 Hz' : minFreq < 10 ? 'below 10 Hz' : 'low range'}) highlight capacitive behavior, while higher frequencies ({maxFreq > 5000 ? 'above 5 kHz' : 'high range'}) reveal resistive properties.</p>
+        </div>
+      </div>
+      
       {/* Current Parameters and Calculated Values */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-neutral-800/50 rounded-lg p-5 border border-neutral-700">

@@ -62,8 +62,13 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ activeSnapshot }) => {
   return (
     <div className="bg-white p-4 rounded-lg border border-[#E0E0E0]">
       <div className="mb-3">
-        <h4 className="text-sm font-medium text-[#112E51] mb-1">
-          Impedance Values
+        <h4 className="text-sm font-medium text-[#112E51] mb-1 flex items-center justify-between">
+          <span>Impedance Values</span>
+          <span className="text-xs font-normal text-primary">
+            at {groundTruthImpedance.frequency < 1000 ? 
+              groundTruthImpedance.frequency.toFixed(1) : 
+              (groundTruthImpedance.frequency/1000).toFixed(1) + 'k'} Hz
+          </span>
         </h4>
         <div className="flex justify-between items-center">
           <div>
