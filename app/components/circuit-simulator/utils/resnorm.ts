@@ -120,7 +120,7 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
 };
 
 /**
- * Calculate the residual norm (resnorm) between reference and test data.
+ * Calculate residual norm (resnorm) between reference and test data.
  * Follows standard scientific practice for EIS (Electrochemical Impedance Spectroscopy).
  * 
  * @param testData Array of impedance points to compare against reference
@@ -129,13 +129,45 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
  * @returns The calculated resnorm value
  */
 export const calculateResnorm = (
-  testData: ImpedancePoint[],
-  referenceData: ImpedancePoint[],
-  logFunction?: (message: string) => void
+  testData: ImpedancePoint[] | ImpedancePoint,
+  referenceData: ImpedancePoint[] | number,
+  logFunction?: ((message: string) => void) | number,
+  frequency?: number
 ): number => {
+  // Handle the case where we're passing individual points
+  if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
+    // In this case:
+    // testData is a single ImpedancePoint
+    // referenceData is the real part of reference impedance
+    // logFunction is actually the imaginary part of reference impedance
+    // frequency is the frequency at which to compare
+    
+    const testPoint = testData;
+    const refReal = referenceData;
+    const refImag = logFunction as number;
+    const refFreq = frequency ?? testPoint.frequency;
+    
+    // Create a synthetic reference point
+    const refPoint: ImpedancePoint = {
+      frequency: refFreq,
+      real: refReal,
+      imaginary: refImag,
+      magnitude: Math.sqrt(refReal * refReal + refImag * refImag),
+      phase: Math.atan2(refImag, refReal) * (180 / Math.PI)
+    };
+    
+    // Convert to arrays and call the main implementation
+    return calculateResnorm([testPoint], [refPoint]);
+  }
+  
+  // Handle arrays case (original implementation)
+  const testDataArray = Array.isArray(testData) ? testData : [testData];
+  const referenceDataArray = Array.isArray(referenceData) ? referenceData : [referenceData as unknown as ImpedancePoint];
+  const logger = typeof logFunction === 'function' ? logFunction : undefined;
+
   // Ensure we have data to compare
-  if (!testData || !referenceData || testData.length === 0 || referenceData.length === 0) {
-    if (logFunction) logFunction("No data to compare");
+  if (!testDataArray || !referenceDataArray || testDataArray.length === 0 || referenceDataArray.length === 0) {
+    if (logger) logger("No data to compare");
     return Infinity;
   }
 
@@ -148,9 +180,9 @@ export const calculateResnorm = (
   }> = [];
 
   // Process each test data point
-  for (const testPoint of testData) {
+  for (const testPoint of testDataArray) {
     // Find matching reference point with the same frequency
-    const refPoint = referenceData.find(p => 
+    const refPoint = referenceDataArray.find(p => 
       Math.abs(p.frequency - testPoint.frequency) / testPoint.frequency < 0.01);
     
     if (refPoint) {
@@ -168,11 +200,11 @@ export const calculateResnorm = (
   }
 
   if (matchedData.length === 0) {
-    if (logFunction) logFunction("No matching frequency points found");
+    if (logger) logger("No matching frequency points found");
     return Infinity;
   }
 
-  if (logFunction) logFunction(`Matched ${matchedData.length} frequency points for comparison`);
+  if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
   // Calculate weighted sum of squared residuals
   let sumWeightedSquaredResiduals = 0;
@@ -200,16 +232,16 @@ export const calculateResnorm = (
     sumWeightedSquaredResiduals += weightedSquaredResidual;
     sumWeights += point.weight;
     
-    if (logFunction) {
-      logFunction(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}, Weight: ${point.weight.toFixed(2)}`);
+    if (logger) {
+      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}, Weight: ${point.weight.toFixed(2)}`);
     }
   }
 
   // Calculate weighted RMSE (Root Mean Square Error)
   const weightedRMSE = Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
   
-  if (logFunction) {
-    logFunction(`Weighted RMSE: ${weightedRMSE.toFixed(6)}`);
+  if (logger) {
+    logger(`Weighted RMSE: ${weightedRMSE.toFixed(6)}`);
   }
 
   return weightedRMSE;

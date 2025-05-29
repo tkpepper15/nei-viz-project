@@ -74,18 +74,18 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
     
     try {
       // Define proper ranges for each parameter to ensure consistent scaling
-      const rsRange = { min: 10, max: 30 };
-      const raRange = { min: 100, max: 1000 };
-      const rbRange = { min: 100, max: 1000 };
-      const caRange = { min: 1e-6, max: 5e-6 };
-      const cbRange = { min: 1e-6, max: 5e-6 };
+      const rsRange = { min: 10, max: 10000 };
+      const raRange = { min: 10, max: 10000 };
+      const rbRange = { min: 10, max: 10000 };
+      const caRange = { min: 0.1e-6, max: 50e-6 };
+      const cbRange = { min: 0.1e-6, max: 50e-6 };
       
       // Get parameters with fallbacks to reasonable defaults
       const rs = item.parameters.Rs !== undefined ? item.parameters.Rs : 24;
       const ra = item.parameters.Ra !== undefined ? item.parameters.Ra : 500;
       const rb = item.parameters.Rb !== undefined ? item.parameters.Rb : 500;
-      const ca = item.parameters.Ca !== undefined ? item.parameters.Ca : 3e-6;
-      const cb = item.parameters.Cb !== undefined ? item.parameters.Cb : 3e-6;
+      const ca = item.parameters.Ca !== undefined ? item.parameters.Ca : 0.5e-6;
+      const cb = item.parameters.Cb !== undefined ? item.parameters.Cb : 0.5e-6;
       
       // Calculate scaled positions for each parameter (0-1 range)
       // Use non-linear scaling for capacitance to enhance visual differences
@@ -135,7 +135,7 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
   
   // Always show the spider plot, even with no data
   return (
-    <div className="spider-plot h-full w-full">
+    <div className="spider-plot h-full w-full" style={{ border: '1px solid rgba(100, 116, 139, 0.2)' }}>
       <style>{pulseAnimation}</style>
       <div className="h-full w-full flex items-center justify-center">
         <div className="spider-visualization h-full w-full">
@@ -145,7 +145,10 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
             style={{ 
               stroke: '#64748b', 
               fill: '#64748b',
-              backgroundColor: '#0f172a'
+              backgroundColor: '#0f172a',
+              minHeight: '100%',
+              minWidth: '100%',
+              display: 'block'
             }}
           >
             {/* Parameter axes */}
