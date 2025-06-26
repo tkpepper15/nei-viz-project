@@ -1,1209 +1,1166 @@
 "use client";
 
-import React, { useMemo, useEffect, useState, useCallback } from 'react';
-import {
-  Radar,
-  RadarChart,
-  PolarAngleAxis,
-  ResponsiveContainer,
-  PolarGrid,
-  PolarRadiusAxis,
-} from 'recharts';
-import { ModelSnapshot } from '../types';
+import React, { useMemo, useEffect, useRef, useState, useCallback } from 'react';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar } from 'recharts';
+import { ModelSnapshot, GridParameterArrays, RadarDataPoint } from '../utils/types';
+import { generateGridValues } from '../utils/spider-utils';
 
-// Structure to hold info about each radar line (model)
-interface SpiderState {
-  name: string;
-  color: string;
-  dataKey: string;
-  resnorm?: number;
-  opacity: number;
-}
-
-// Define Parameter interface and SpiderData type
-interface Parameter {
-  key: string;
-  displayName: string;
-  unit?: string;
-  min?: number;
-  max?: number;
-}
-
-// Define PolarAxisProps for proper typing
-// interface PolarAxisProps {
-//   cx: number;
-//   cy: number;
-//   radius: number;
-//   payload: {
-//     value: number;
-//   };
-// }
-
-export interface SpiderData {
-  data: Record<string, string | number>[];
-  states: SpiderState[];
-  referenceValues: Record<string, number>;
-  parameters: Parameter[];
-}
-
-// Add dataKey to ModelSnapshot interface via declaration merging
-declare module '../types' {
-  interface ModelSnapshot {
-    dataKey?: string;
-  }
-}
-
-// Update the CircuitParameters type to include both uppercase and lowercase variants
-type CircuitParameters = {
-  ra: number;
-  ca: number;
-  rb: number;
-  cb: number;
-  Rs: number;
-  // Also include uppercase variants for compatibility
-  Ra?: number;
-  Ca?: number;
-  Rb?: number;
-  Cb?: number;
-};
-
-// Function to ensure consistent parameter handling
-const normalizeParameters = (params: Record<string, number | [number, number]>): CircuitParameters => {
-  // Create a new object without frequency_range
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { frequency_range, ...rest } = params;
-  const normalized = { ...rest } as CircuitParameters;
-  
-  // Handle parameter conversion to Rs
-  if ('rBlank' in params && params.rBlank !== undefined) {
-    normalized.Rs = params.rBlank as number;
-  } else if ('rShunt' in params && params.rShunt !== undefined) {
-    normalized.Rs = params.rShunt as number;
-  } else if (!('Rs' in params) || normalized.Rs === undefined) {
-    normalized.Rs = 0; // Default value if none is present
-  }
-  
-  // Ensure all parameters have sensible defaults
-  normalized.ra = normalized.ra || normalized.Ra || 0;
-  normalized.ca = normalized.ca || normalized.Ca || 0;
-  normalized.rb = normalized.rb || normalized.Rb || 0;
-  normalized.cb = normalized.cb || normalized.Cb || 0;
-  
-  return normalized;
-};
-
-// Function to calculate impedance from circuit parameters at a given frequency
-// This follows the Randles equivalent circuit model
-const calculateImpedance = (params: CircuitParameters, frequency: number): { real: number; imag: number } => {
-  const w = 2 * Math.PI * frequency; // Angular frequency
-  
-  // Calculate impedances of the RC elements
-  // Za = Ra / (1 + jwRaCa)
-  const za_real = params.ra / (1 + Math.pow(w * params.ra * params.ca, 2));
-  const za_imag = -w * Math.pow(params.ra, 2) * params.ca / (1 + Math.pow(w * params.ra * params.ca, 2));
-  
-  // Zb = Rb / (1 + jwRbCb)
-  const zb_real = params.rb / (1 + Math.pow(w * params.rb * params.cb, 2));
-  const zb_imag = -w * Math.pow(params.rb, 2) * params.cb / (1 + Math.pow(w * params.rb * params.cb, 2));
-  
-  // Add Za and Zb (since they are in series with each other in the Randles circuit)
-  const z_series_real = za_real + zb_real;
-  const z_series_imag = za_imag + zb_imag;
-  
-  // Add Rs in series with the combined Za+Zb
-  const total_real = params.Rs + z_series_real;
-  const total_imag = z_series_imag;
-  
-  return { real: total_real, imag: total_imag };
-};
-
-// Calculate resnorm between two sets of impedances across frequencies
-const calculateImpedanceResnorm = (
-  ref: Array<{ real: number; imag: number }>,
-  test: Array<{ real: number; imag: number }>
-): number => {
-  if (ref.length !== test.length || ref.length === 0) return Infinity;
-  
-  let sumSquaredDiff = 0;
-  let sumSquaredRef = 0;
-  
-  for (let i = 0; i < ref.length; i++) {
-    const realDiff = ref[i].real - test[i].real;
-    const imagDiff = ref[i].imag - test[i].imag;
-    const squaredDiff = realDiff * realDiff + imagDiff * imagDiff;
-    
-    const refMagSquared = ref[i].real * ref[i].real + ref[i].imag * ref[i].imag;
-    
-    sumSquaredDiff += squaredDiff;
-    sumSquaredRef += refMagSquared;
-  }
-  
-  return sumSquaredDiff / sumSquaredRef;
-};
-
-// Function to create a color scale based on resnorm values
-const createResnormColorScale = (range: { min: number; max: number }) => {
-  return (resnorm: number): string => {
-    // Default for invalid resnorm
-    if (!Number.isFinite(resnorm)) return 'hsl(0, 75%, 50%)'; // Red for invalid/infinite
-
-    // If resnorm is 0 or very small, return pure green (reference point)
-    if (resnorm < 1e-10) return 'hsl(120, 80%, 40%)';
-
-    // For very small range of values, use a different approach
-    if (range.max - range.min < 1e-6) {
-      return 'hsl(200, 75%, 45%)'; // Use a fixed blue color
-    }
-
-    // Use log scale for better distribution since resnorm values can vary by orders of magnitude
-    const logMin = Math.log10(Math.max(range.min, 1e-10)); // Avoid log(0)
-    const logMax = Math.log10(Math.max(range.max, 1e-9));
-    const logResnorm = Math.log10(Math.max(resnorm, 1e-10));
-    
-    // Invert: lower resnorm (better fit) = higher value (greener)
-    const colorValue = 1 - Math.min(1, Math.max(0, (logResnorm - logMin) / (logMax - logMin)));
-    
-    // Generate color using a better gradient from green to yellow to orange to red
-    let hue;
-    if (colorValue > 0.75) {
-      // Green to yellowish-green (120° to 90°)
-      hue = 120 - (1 - colorValue) * 4 * 30;
-    } else if (colorValue > 0.5) {
-      // Yellowish-green to yellow (90° to 60°)
-      hue = 90 - (0.75 - colorValue) * 4 * 30;
-    } else if (colorValue > 0.25) {
-      // Yellow to orange (60° to 30°)
-      hue = 60 - (0.5 - colorValue) * 4 * 30;
-    } else {
-      // Orange to red (30° to 0°)
-      hue = 30 - colorValue * 4 * 30;
-    }
-    
-    return `hsl(${hue}, 85%, 45%)`; // More saturated for better visibility
-  };
-};
-
-// Ensure the interface has the correct property names to match what's being passed from CircuitSimulator
 interface SpiderPlotProps {
   meshItems: ModelSnapshot[];
-  referenceId?: string;
-  opacityFactor?: number; // Add opacity factor parameter
+  referenceId?: string | null;
+  opacityFactor: number;
+  maxPolygons: number;
+  onGridValuesGenerated: (values: GridParameterArrays) => void;
+  mode: 'interactive' | 'static';
+  onExportSvg?: (svgString: string) => void;
+  onExportPng?: (pngBlob: Blob) => void;
+  visualizationMode?: 'color' | 'opacity';
+  opacityIntensity?: number;
 }
 
-export const SpiderPlot: React.FC<SpiderPlotProps> = ({ 
+// Add new interfaces for chunked rendering
+interface ChunkedRenderingState {
+  isRendering: boolean;
+  currentChunk: number;
+  totalChunks: number;
+  renderedPolygons: number;
+  totalPolygons: number;
+  renderStartTime: number;
+  estimatedTimeRemaining: number;
+}
+
+interface RenderingControls {
+  chunkSize: number;
+  renderQuality: 'low' | 'medium' | 'high' | 'ultra';
+  useCanvas: boolean;
+  progressiveLoading: boolean;
+  maxPolygonsPerFrame: number;
+}
+
+export const SpiderPlot: React.FC<SpiderPlotProps> = ({
   meshItems,
   referenceId,
-  opacityFactor = 0.7 // Default value if not provided
+  opacityFactor,
+  maxPolygons,
+  onGridValuesGenerated,
+  mode,
+  onExportSvg,
+  onExportPng,
+  visualizationMode = 'color',
+  opacityIntensity = 1.0
 }) => {
-  // State to hold min/max resnorm for opacity scaling
-  const [resnormRange, setResnormRange] = useState({ min: 0, max: 1 });
-  const [referenceItem, setReferenceItem] = useState<ModelSnapshot | null>(null);
-  
-  // Standard test frequencies for impedance calculations
-  const testFrequencies = useMemo(() => {
-    // Generate logarithmically spaced frequencies between 0.1 Hz and 100 kHz
-    const frequencies: number[] = [];
-    const start = 0.1;
-    const end = 100000;
-    const points = 20;
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Generate default parameter structure for the spider plot axes
+  const defaultSpiderData = useMemo(() => {
+    const validParams = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'] as const;
     
-    const logStart = Math.log10(start);
-    const logEnd = Math.log10(end);
-    const step = (logEnd - logStart) / (points - 1);
-    
-    for (let i = 0; i < points; i++) {
-      frequencies.push(Math.pow(10, logStart + i * step));
-    }
-    
-    return frequencies;
+    // Default parameter ranges for display
+    const defaultRanges = {
+      Rs: { min: 10, max: 10000, unit: 'Ω' },
+      Ra: { min: 10, max: 10000, unit: 'Ω' },
+      Rb: { min: 10, max: 10000, unit: 'Ω' },
+      Ca: { min: 0.1, max: 50, unit: 'µF' },
+      Cb: { min: 0.1, max: 50, unit: 'µF' }
+    };
+
+    return validParams.map(param => ({
+      parameter: param,
+      fullValue: defaultRanges[param].max,
+      displayValue: `${defaultRanges[param].max}${defaultRanges[param].unit}`
+    }));
   }, []);
-  
-  // Handle reference ID changes from parent
-  useEffect(() => {
-    if (referenceId && meshItems.length > 0) {
-      const selectedReference = meshItems.find((item: ModelSnapshot) => item.id === referenceId);
-      if (selectedReference) {
-        setReferenceItem(selectedReference);
-      }
-    }
-  }, [referenceId, meshItems]);
 
-  // Calculate min/max resnorm when meshItems change and identify reference item
-  useEffect(() => {
-    // Skip if no mesh items or if reference already set via prop
-    if (meshItems.length === 0) return;
-    
-    // Sort items first by resnorm
-    const sortedItems = [...meshItems].sort((a, b) => {
-      const aResnorm = a.resnorm || Infinity;
-      const bResnorm = b.resnorm || Infinity;
-      return aResnorm - bResnorm;
-    });
-    
-    // Find our reference item - either from prop or default criteria
-    let selectedRef: ModelSnapshot | null = null;
-    
-    if (referenceId) {
-      selectedRef = meshItems.find((item: ModelSnapshot) => item.id === referenceId) || null;
-    } 
-    
-    if (!selectedRef) {
-      // Otherwise find reference/ground truth item by default criteria
-      selectedRef = sortedItems.find((item: ModelSnapshot) => 
-      item.id === 'ground-truth' || 
-      item.name === 'Ground Truth' || 
-      Math.abs(item.resnorm || 1) < 1e-10
-    ) || (sortedItems.length > 0 ? sortedItems[0] : null);
-    }
-    
-    if (selectedRef) {
-      setReferenceItem(selectedRef);
-    }
-    
-    // Calculate impedance-based resnorms if we have a reference
-    if (selectedRef) {
-      // Calculate reference impedances across frequencies
-      const normalizedRefParams = normalizeParameters(selectedRef.parameters);
-      const refImpedances = testFrequencies.map(freq => 
-        calculateImpedance(normalizedRefParams, freq)
+  // Generate grid values only when meshItems change
+  const gridValues = useMemo(() => {
+    try {
+      if (!meshItems || meshItems.length === 0) return null;
+      
+      // Ensure all required parameters are present
+      const validItems = meshItems.filter(item => 
+        item?.parameters && 
+        typeof item.parameters.Rs === 'number' &&
+        typeof item.parameters.Ra === 'number' &&
+        typeof item.parameters.Ca === 'number' &&
+        typeof item.parameters.Rb === 'number' &&
+        typeof item.parameters.Cb === 'number'
       );
       
-      // Calculate resnorms for all non-reference items
-      const impedanceResnorms = sortedItems
-        .filter((item: ModelSnapshot) => item.id !== selectedRef.id)
-        .map((item: ModelSnapshot) => {
-          const normalizedParams = normalizeParameters(item.parameters);
-          const testImpedances = testFrequencies.map(freq => 
-            calculateImpedance(normalizedParams, freq)
-          );
-          return calculateImpedanceResnorm(refImpedances, testImpedances);
-        })
-        .filter((res: number) => Number.isFinite(res));
-      
-      if (impedanceResnorms.length > 0) {
-        const min = Math.min(...impedanceResnorms);
-        const max = Math.max(...impedanceResnorms);
-        setResnormRange({ min, max });
+      if (validItems.length === 0) return null;
+      return generateGridValues(validItems);
+    } catch (error) {
+      console.error('Error generating grid values:', error);
+      return null;
+    }
+  }, [meshItems]);
+
+  // Notify parent of grid values when meshItems change
+  useEffect(() => {
+    try {
+      if (onGridValuesGenerated && gridValues) {
+        onGridValuesGenerated(gridValues);
+      }
+    } catch (error) {
+      console.error('Error in grid values callback:', error);
+    }
+  }, [gridValues, onGridValuesGenerated]);
+
+  // Format parameter values with appropriate units and scale
+  const formatParamValue = (param: string, value: number): string => {
+    try {
+      if (param.includes('C')) {
+        // Convert capacitance from F to µF
+        return `${(value * 1e6).toFixed(1)}µF`;
       } else {
-        // Fallback to using the original resnorms
-        const originalResnorms = sortedItems
-          .filter((item: ModelSnapshot) => item.id !== selectedRef.id)
-          .map((item: ModelSnapshot) => item.resnorm)
-          .filter((res: number | undefined) => res !== undefined && Number.isFinite(res)) as number[];
-          
-        if (originalResnorms.length > 0) {
-          const min = Math.min(...originalResnorms);
-          const max = Math.max(...originalResnorms);
-          setResnormRange({ min, max });
+        // Format resistance in Ω with appropriate scale
+        if (value >= 1000) {
+          return `${(value/1000).toFixed(1)}kΩ`;
         } else {
-          setResnormRange({ min: 0, max: 1 }); // Default
+          return `${value.toFixed(1)}Ω`;
         }
       }
-    } else {
-      // No reference, use original resnorms
-      const resnorms = sortedItems
-        .map((item: ModelSnapshot) => item.resnorm)
-        .filter((res: number | undefined) => res !== undefined && Number.isFinite(res)) as number[];
-        
-      if (resnorms.length > 0) {
-        const min = Math.min(...resnorms);
-        const max = Math.max(...resnorms);
-        setResnormRange({ min, max });
-      } else {
-        setResnormRange({ min: 0, max: 1 }); // Default
-      }
+    } catch (error) {
+      console.error('Error formatting param value:', error);
+      return String(value);
     }
-  }, [meshItems, testFrequencies]);
-
-  // Recalculate impedance-based resnorms when reference item changes manually
-  useEffect(() => {
-    if (!referenceItem || meshItems.length === 0) return;
-    
-    // Calculate reference impedances across frequencies
-    const normalizedRefParams = normalizeParameters(referenceItem.parameters);
-    const refImpedances = testFrequencies.map(freq => 
-      calculateImpedance(normalizedRefParams, freq)
-    );
-    
-    // Calculate resnorms for all non-reference items
-    const impedanceResnorms = meshItems
-      .filter((item: ModelSnapshot) => item.id !== referenceItem.id)
-      .map((item: ModelSnapshot) => {
-        const normalizedParams = normalizeParameters(item.parameters);
-        const testImpedances = testFrequencies.map(freq => 
-          calculateImpedance(normalizedParams, freq)
-        );
-        return calculateImpedanceResnorm(refImpedances, testImpedances);
-      })
-      .filter((res: number) => Number.isFinite(res));
-    
-    if (impedanceResnorms.length > 0) {
-      const min = Math.min(...impedanceResnorms);
-      const max = Math.max(...impedanceResnorms);
-      setResnormRange({ min, max });
-    }
-  }, [referenceItem, testFrequencies, meshItems]);
-
-  // Function to calculate opacity based on resnorm and opacity factor
-  const calculateLineOpacity = useCallback(
-    (resnorm: number | undefined, isReference: boolean): number => {
-    if (isReference) return 1; // Reference always fully visible
-    if (resnorm === undefined || !Number.isFinite(resnorm)) return 0.4; // Default for unknown
-    
-    // Use log scale to map resnorm to opacity
-    const { min, max } = resnormRange;
-    
-    // Handle edge cases
-    if (min === max) return opacityFactor;
-    
-    // Base opacity is inversely related to resnorm (lower resnorm = higher quality = more visible)
-    const logMin = Math.log10(Math.max(min, 1e-10));
-    const logMax = Math.log10(Math.max(max, 1e-9));
-    const logResnorm = Math.log10(Math.max(resnorm, 1e-10));
-    
-    // Higher quality (lower resnorm) items are more visible
-    const normalizedQuality = 1 - Math.min(1, Math.max(0, (logResnorm - logMin) / (logMax - logMin)));
-    
-    // Create dramatically more steps with higher opacity values
-    const stepCount = Math.max(5, Math.round(60 * opacityFactor)); // 5 to 60 steps (increased for more granularity)
-    
-    // Apply a more aggressive curve for the step calculation
-    // Use an adaptive power function that changes behavior based on opacity setting
-    const adaptivePower = () => {
-      if (opacityFactor < 0.3) {
-        // Gentler curve at low opacity settings
-        return 0.8;
-      } else if (opacityFactor < 0.6) {
-        // Moderate curve at medium opacity settings
-        return 0.6 + (opacityFactor * 0.8);
-      } else {
-        // Very aggressive curve at high opacity settings
-        return 0.4 + (opacityFactor * 1.8);
-      }
-    };
-    
-    const power = adaptivePower();
-    // Use polynomial interpolation for smoother steps
-    const polyCurve = Math.pow(normalizedQuality, 1/power);
-    const stepIndex = Math.floor(stepCount * polyCurve);
-    const fraction = (stepCount * polyCurve) - stepIndex; // Get fractional part for smooth interpolation
-    
-    // Smooth quantization using interpolation between steps
-    const step1 = 1 - (stepIndex / stepCount);
-    const step2 = 1 - ((stepIndex + 1) / stepCount);
-    const smoothQuantized = step1 * (1 - fraction) + step2 * fraction;
-    
-    // Enhanced contrast factor - super aggressive but with smoother transitions
-    const getContrastCurve = () => {
-      // Multi-segment contrast curve for more refined control
-      if (opacityFactor < 0.3) {
-        // Low opacity regime: mild contrast (2.0-3.0)
-        return 2.0 + (opacityFactor * 3.3);
-      } else if (opacityFactor < 0.6) {
-        // Mid opacity regime: medium contrast (3.0-5.5)
-        return 3.0 + ((opacityFactor - 0.3) * 8.3);
-      } else if (opacityFactor < 0.8) {
-        // High opacity regime: high contrast (5.5-8.0)
-        return 5.5 + ((opacityFactor - 0.6) * 12.5);
-      } else {
-        // Extreme opacity regime: extreme contrast (8.0-15.0)
-        return 8.0 + ((opacityFactor - 0.8) * 35);
-      }
-    };
-    
-    const contrastFactor = getContrastCurve();
-    const enhancedOpacity = Math.pow(1 - smoothQuantized, contrastFactor);
-    
-    // Apply adaptive transform power based on opacity setting
-    const getTransformPower = () => {
-      if (opacityFactor < 0.4) {
-        // Gentle transform at low settings: 0.4-0.6
-        return 0.4 + (opacityFactor * 0.5);
-      } else if (opacityFactor < 0.7) {
-        // Medium transform at mid settings: 0.6-1.0
-        return 0.6 + ((opacityFactor - 0.4) * 1.33);
-      } else {
-        // Strong transform at high settings: 1.0-2.0
-        return 1.0 + ((opacityFactor - 0.7) * 3.33);
-      }
-    };
-    
-    const logTransformPower = getTransformPower();
-    
-    // Use a multi-stage sigmoid for more refined control over the transition curve
-    const getSigmoidParams = () => {
-      // Return midpoint and steepness values that vary with opacity settings
-      if (opacityFactor < 0.3) {
-        // Low setting: gentle slope, centered lower
-        return { midpoint: 0.6, steepness: 3.0 + (opacityFactor * 10) };
-      } else if (opacityFactor < 0.6) {
-        // Medium setting: moderate slope, centered in middle
-        return { midpoint: 0.65, steepness: 6.0 + ((opacityFactor - 0.3) * 16.7) };
-      } else if (opacityFactor < 0.8) {
-        // High setting: steep slope, centered higher
-        return { midpoint: 0.7, steepness: 11.0 + ((opacityFactor - 0.6) * 40) };
-      } else {
-        // Extreme setting: very steep slope
-        return { midpoint: 0.75, steepness: 19.0 + ((opacityFactor - 0.8) * 100) };
-      }
-    };
-    
-    const { midpoint, steepness } = getSigmoidParams();
-    
-    // Calculate sigmoid value using the refined parameters
-    const sigmoidInput = (Math.pow(enhancedOpacity, logTransformPower) - midpoint) * steepness;
-    const sigmoidOpacity = 1 / (1 + Math.exp(-sigmoidInput));
-    
-    // Scale the sigmoid with adaptive min/max values
-    const getMinOpacity = () => {
-      // More granular control over minimum opacity
-      if (opacityFactor < 0.3) {
-        // Low setting: relatively high minimum (0.15-0.08)
-        return 0.15 - (opacityFactor * 0.23);
-      } else if (opacityFactor < 0.6) {
-        // Medium setting: medium minimum (0.08-0.04)
-        return 0.08 - ((opacityFactor - 0.3) * 0.13);
-      } else if (opacityFactor < 0.8) {
-        // High setting: low minimum (0.04-0.02)
-        return 0.04 - ((opacityFactor - 0.6) * 0.1);
-      } else {
-        // Extreme setting: very low minimum (0.02-0.005)
-        return 0.02 - ((opacityFactor - 0.8) * 0.075);
-      }
-    };
-    
-    const minOpacity = getMinOpacity();
-    const maxOpacity = Math.min(0.98, 0.85 + (opacityFactor * 0.15)); // Dynamic max based on opacity factor
-    const scaledOpacity = minOpacity + (sigmoidOpacity * (maxOpacity - minOpacity));
-    
-    return Math.max(minOpacity, Math.min(maxOpacity, scaledOpacity));
-    },
-    [resnormRange, opacityFactor]
-  );
-
-  // Function to format parameter values based on parameter type
-  const formatParameterValue = (value: number | [number, number], paramKey: string): string => {
-    // Skip if value is an array (frequency_range)
-    if (Array.isArray(value)) {
-      return `[${value[0]}-${value[1]}]`;
-    }
-    
-    // Handle special parameters with unit conversions
-    if (paramKey === 'ca' || paramKey === 'Ca' || paramKey === 'cb' || paramKey === 'Cb') {
-      return `${(value * 1e6).toFixed(2)} μF`;
-    } else if (paramKey === 'Rs' || paramKey === 'ra' || paramKey === 'Ra' || paramKey === 'rb' || paramKey === 'Rb') {
-      return `${value.toFixed(1)} Ω`;
-    } else if (paramKey === 'TER' || paramKey === 'ter') {
-      return `${value.toFixed(1)} Ω`;
-    } else if (paramKey === 'resnorm') {
-      return value.toExponential(2);
-    }
-    
-    // Default formatting for other numeric values
-    return value.toFixed(2);
   };
 
-  // Helper function to apply normalization effects to normalized values
-  const applyNormalizationEffects = useCallback(
-    (
-      normalizedValue: number,
-      referenceItem: ModelSnapshot | null | undefined,
-      paramName: string,
-      originalValue: number
-    ): number => {
-      // For reference point, add a slight boost to make it more visible
-      if (referenceItem) {
-        const normalizedRefParams = normalizeParameters(referenceItem.parameters);
-        let refValue: number | undefined;
-        
-        if (paramName === 'Rs') {
-          refValue = normalizedRefParams.Rs;
-        } else {
-          refValue = normalizedRefParams[paramName as keyof typeof normalizedRefParams];
-        }
-        
-        // Use absolute comparison with small tolerance for floating point
-        if (refValue !== undefined && Math.abs(originalValue - refValue) < 1e-10) {
-          // Add a slight boost for better visibility of the reference
-          normalizedValue = Math.min(1, normalizedValue + 0.05);
-        }
+  // Calculate more aggressive logarithmic opacity based on resnorm with intensity control
+  const calculateLogOpacity = useMemo(() => {
+    try {
+      if (!meshItems?.length) return () => 0.7;
+      
+      // Get all valid resnorm values
+      const resnorms = meshItems
+        .map(item => item?.resnorm)
+        .filter(r => typeof r === 'number' && r > 0 && isFinite(r)) as number[];
+      
+      if (resnorms.length === 0) return () => 0.7;
+      
+      // Use iterative approach to avoid stack overflow with large arrays
+      let minResnorm = Infinity;
+      let maxResnorm = -Infinity;
+      for (const resnorm of resnorms) {
+        if (resnorm < minResnorm) minResnorm = resnorm;
+        if (resnorm > maxResnorm) maxResnorm = resnorm;
       }
       
-      return Math.max(0, Math.min(1, normalizedValue)); // Ensure value is between 0 and 1
-    },
-    []
-  );
+      // Avoid log of zero and handle edge cases
+      const safeMin = Math.max(minResnorm, 1e-10);
+      const safeMax = Math.max(maxResnorm, safeMin * 10);
+      const logMin = Math.log10(safeMin);
+      const logMax = Math.log10(safeMax);
+      const logRange = Math.max(logMax - logMin, 1e-10);
+      
+      return (resnorm: number) => {
+        try {
+          if (!resnorm || resnorm <= 0 || !isFinite(resnorm)) return 0.3;
+          
+          const safeResnorm = Math.max(resnorm, safeMin);
+          const logResnorm = Math.log10(safeResnorm);
+          const normalizedLog = (logResnorm - logMin) / logRange;
+          
+          // Invert so lower resnorm (better fit) = higher opacity
+          const inverted = 1 - Math.max(0, Math.min(1, normalizedLog));
+          
+          // Apply intensity factor to make the curve more aggressive
+          const intensified = Math.pow(inverted, 1 / opacityIntensity);
+          
+          // Map to opacity range 0.05 to 1.0 for better contrast
+          return Math.max(0.05, Math.min(1.0, 0.05 + intensified * 0.95));
+        } catch (error) {
+          console.error('Error calculating opacity for resnorm:', resnorm, error);
+          return 0.5;
+        }
+      };
+    } catch (error) {
+      console.error('Error in calculateLogOpacity:', error);
+      return () => 0.7;
+    }
+  }, [meshItems, opacityIntensity]);
 
-  // Enhanced function to normalize parameter values
-  const normalizeParameterValue = useCallback(
-    (
-      value: number, 
-      paramName: string, 
-      referenceItem: ModelSnapshot | null | undefined,
-      meshItems: ModelSnapshot[]
-    ): number => {
-      // If no meshItems or this is a non-numeric value, return 0.5 (middle)
-      if (!meshItems.length || typeof value !== 'number' || !Number.isFinite(value)) {
-        return 0.5;
-      }
-      
-      // Get reference parameter value if available
-      let refValue: number | undefined;
-      if (referenceItem) {
-        const refParams = normalizeParameters(referenceItem.parameters);
-        refValue = paramName === 'Rs' 
-          ? refParams.Rs 
-          : refParams[paramName as keyof typeof refParams];
-      }
-      
-      // Get all values for this parameter across all meshItems
-      const allValues = meshItems
-        .map((item: ModelSnapshot) => {
-          const normalizedParams = normalizeParameters(item.parameters);
-          let paramValue: number | undefined;
-          
-          // Handle special case for Rs
-          if (paramName === 'Rs') {
-            paramValue = normalizedParams.Rs;
-          } else {
-            paramValue = normalizedParams[paramName as keyof typeof normalizedParams];
-          }
-          
-          return typeof paramValue === 'number' ? paramValue : NaN;
-        })
-        .filter((v: number) => Number.isFinite(v));
-      
-      // If we have no valid values, return 0.5 (middle of the scale)
-      if (!allValues.length) return 0.5;
-      
-      // Get min and max values
-      const minValue = Math.min(...allValues);
-      const maxValue = Math.max(...allValues);
-      
-      // If min and max are the same, return 0.5 (middle of the scale)
-      if (maxValue === minValue) return 0.5;
-      
-      // Use reference-centered normalization if a reference value exists
-      if (refValue !== undefined && Number.isFinite(refValue)) {
-        // Determine visualization strategy based on parameter type
-        if (paramName === 'ca' || paramName === 'cb') {
-          // For capacitance - use ratio to reference (log scale)
-          // A value of 0.5 means equal to reference
-          // Values < 0.5 mean smaller than reference, > 0.5 mean larger
-          const ratio = value / refValue;
-          
-          // Map to [0,1] range with 0.5 being the reference value
-          // Use asymmetric scaling to handle wide ranges
-          let normalizedValue;
-          if (ratio < 1) {
-            // Less than reference (scale from 0 to 0.5)
-            normalizedValue = 0.5 * (Math.log10(Math.max(ratio, 0.01)) + 2) / 2;
-          } else {
-            // Greater than reference (scale from 0.5 to 1)
-            normalizedValue = 0.5 + 0.5 * Math.min(1, Math.log10(ratio) / 2);
-          }
-          
-          return applyNormalizationEffects(normalizedValue, referenceItem, paramName, value);
-        } 
-        else if (paramName === 'ra' || paramName === 'rb' || paramName === 'Rs') {
-          // For resistance - use ratio to reference (log scale)
-          const ratio = value / refValue;
-          
-          // Map to [0,1] range with 0.5 being the reference value
-          let normalizedValue;
-          if (ratio < 1) {
-            // Less than reference (scale from 0 to 0.5)
-            normalizedValue = 0.5 * (Math.log10(Math.max(ratio, 0.01)) + 2) / 2;
-          } else {
-            // Greater than reference (scale from 0.5 to 1)
-            normalizedValue = 0.5 + 0.5 * Math.min(1, Math.log10(ratio) / 2);
-          }
-          
-          return applyNormalizationEffects(normalizedValue, referenceItem, paramName, value);
-        }
-      }
-      
-      // Fallback to the standard normalization if no reference available
-      // Choose normalization method based on parameter type
-      if (paramName === 'ca' || paramName === 'cb') {
-        // For capacitance values (always positive), use logarithmic scale
-        const safeValue = Math.max(value, 1e-15);
-        const safeMin = Math.max(minValue, 1e-15);
-        const safeMax = Math.max(maxValue, 1e-14);
-        
-        const logMin = Math.log10(safeMin);
-        const logMax = Math.log10(safeMax);
-        const logValue = Math.log10(safeValue);
-        
-        const normalizedValue = (logValue - logMin) / (logMax - logMin);
-        return applyNormalizationEffects(normalizedValue, referenceItem, paramName, value);
-      } else {
-        // For resistance values
-        const range = maxValue - minValue;
-        
-        if (minValue > 0 && maxValue / minValue > 10) {
-          // Use log scale for wide ranges
-          const safeValue = Math.max(value, minValue * 0.1);
-          const safeMin = Math.max(minValue, 1e-15);
-          
-          const logMin = Math.log10(safeMin);
-          const logMax = Math.log10(maxValue);
-          const logValue = Math.log10(safeValue);
-          
-          const normalizedValue = (logValue - logMin) / (logMax - logMin);
-          return applyNormalizationEffects(normalizedValue, referenceItem, paramName, value);
-        } else {
-          // Use linear scale for narrower ranges
-          const normalizedValue = (value - minValue) / range;
-          return applyNormalizationEffects(normalizedValue, referenceItem, paramName, value);
-        }
-      }
-    },
-    [applyNormalizationEffects]
-  );
-
-  // Generate a key for the reference model that will change when its parameters change
-  const referenceKey = useMemo(() => {
-    if (!referenceItem) return 'no-reference';
-    
-    // Create a string that includes all parameter values - this will change when any parameter changes
-    const { Rs, ra, ca, rb, cb } = normalizeParameters(referenceItem.parameters);
-    return `ref-${referenceItem.id}-${Rs}-${ra}-${ca}-${rb}-${cb}`;
-  }, [referenceItem]);
-
-  // Calculate spiderData from meshItems
+  // Generate spider plot data with normalized values
   const spiderData = useMemo(() => {
-    if (!meshItems.length) {
-      return { 
-        data: [],
-        states: [],
-        referenceValues: {},
-        parameters: [] 
-      };
-    }
-    
-    // Sort items by resnorm to ensure consistent rendering and assignment of colors
-    const sortedItems = [...meshItems].sort((a, b) => {
-      // Reference item (or lowest resnorm) always comes first
-      if (a.id === referenceItem?.id) return -1;
-      if (b.id === referenceItem?.id) return 1;
-      
-      const aResnorm = a.resnorm || Infinity;
-      const bResnorm = b.resnorm || Infinity;
-      return aResnorm - bResnorm;
-    });
+    try {
+      // Always return the default structure for axes
+      if (!meshItems?.length) return defaultSpiderData;
 
-    // Get the color generator function
-    const getColor = createResnormColorScale(resnormRange);
-    
-    // Create radar entries for each mesh item
-    const radarStates: SpiderState[] = sortedItems.map((item, index) => {
-      // Use custom color if provided, otherwise generate based on resnorm
-      const color = item.id === referenceItem?.id
-        ? '#000000' // Black for reference/ground truth
-        : item.color || getColor(item.resnorm || 0);
-      
-      // Calculate appropriate opacity based on resnorm
-      const opacity = calculateLineOpacity(item.resnorm, item.id === referenceItem?.id);
-        
-      return {
-        name: item.name || `Model ${index + 1}`,
-        color,
-        dataKey: `model_${item.id || index}`,
-        resnorm: item.resnorm,
-        opacity
-      };
-    });
-    
-    // Initialize radar data with all parameters
-    // First, identify all possible parameters from all items
-    const parameterKeys = new Set<string>();
-    for (const item of sortedItems) {
-      if (item.parameters) {
-        // Normalize parameter keys - replace rBlank with Rs
-        Object.keys(item.parameters).forEach(key => {
-          if (key === 'rBlank') {
-            parameterKeys.add('Rs');
-          } else if (key !== 'frequency_range') {
-            parameterKeys.add(key);
-          }
-        });
-      }
-    }
-    
-    // Filter out any frequency_range parameter
-    parameterKeys.delete('frequency_range');
-    
-    // Create parameter info with display names, units, and electrophysiological significance
-    const paramInfo: Parameter[] = Array.from(parameterKeys).map(key => {
-      // Customize display name and unit based on parameter
-      let displayName = key;
-      let unit = '';
-      
-      switch (key) {
-        case 'Rs':
-          displayName = 'R_s';
-          unit = 'Ω';
-          break;
-        case 'ra':
-          displayName = 'R_a';
-          unit = 'Ω';
-          break;
-        case 'ca':
-          displayName = 'C_a';
-          unit = 'μF';
-          break;
-        case 'rb':
-          displayName = 'R_b';
-          unit = 'Ω';
-          break;
-        case 'cb':
-          displayName = 'C_b';
-          unit = 'μF';
-          break;
-      }
-      
-      return { key, displayName, unit };
-    });
-    
-    // Pre-calculate parameter values for each item to avoid doing it repeatedly during render
-    const parameterValues: Record<string, Record<string, number>> = {};
-    
-    // For each parameter
-    paramInfo.forEach(param => {
-      parameterValues[param.key] = {};
-      
-      // For each state (item)
-      radarStates.forEach(state => {
-        const meshItem = sortedItems.find((item: ModelSnapshot) => `model_${item.id || ''}` === state.dataKey);
-        if (meshItem && meshItem.parameters) {
-          const normalizedParams = normalizeParameters(meshItem.parameters);
+      const validParams = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'] as const;
+      type ValidParam = typeof validParams[number];
+
+      // Find min/max values for each parameter
+      const paramRanges = validParams.reduce((acc, param) => {
+        try {
+          const values = meshItems
+            .filter(item => item?.parameters && typeof item.parameters[param as ValidParam] === 'number')
+            .map(item => item.parameters[param as ValidParam]);
           
-          // Get value based on parameter key
-          let value: number | undefined;
-          
-          // Special handling for Rs
-          if (param.key === 'Rs') {
-            value = normalizedParams.Rs;
+          if (values.length > 0) {
+            // Use iterative approach to avoid stack overflow
+            let min = Infinity;
+            let max = -Infinity;
+            for (const value of values) {
+              if (value < min) min = value;
+              if (value > max) max = value;
+            }
+            acc[param] = { min, max };
           } else {
-            value = normalizedParams[param.key as keyof typeof normalizedParams];
+            // Use default ranges if no data
+            const defaults = {
+              Rs: { min: 10, max: 10000 },
+              Ra: { min: 10, max: 10000 },
+              Rb: { min: 10, max: 10000 },
+              Ca: { min: 0.1e-6, max: 50e-6 },
+              Cb: { min: 0.1e-6, max: 50e-6 }
+            };
+            acc[param] = defaults[param] || { min: 0, max: 1 };
           }
+        } catch (error) {
+          console.error(`Error processing parameter ${param}:`, error);
+          acc[param] = { min: 0, max: 1 };
+        }
+        return acc;
+      }, {} as Record<string, { min: number; max: number }>);
+
+      // Create one data point per parameter
+      const data: RadarDataPoint[] = validParams.map(param => {
+        try {
+          const range = paramRanges[param];
+          const point: RadarDataPoint = {
+            parameter: param,
+            fullValue: range.max,
+            displayValue: formatParamValue(param, range.max)
+          };
+
+          // Process all models to show complete grid exploration results
+          const modelsToProcess = meshItems;
+          modelsToProcess.forEach(item => {
+            try {
+              if (item?.parameters && typeof item.parameters[param as ValidParam] === 'number') {
+                const value = item.parameters[param as ValidParam];
+                const normalizedValue = (value - range.min) / Math.max(range.max - range.min, 1e-10);
+                point[item.id] = Math.max(0, Math.min(1, normalizedValue));
+              }
+            } catch (error) {
+              console.error(`Error processing item ${item?.id} for param ${param}:`, error);
+            }
+          });
+
+          return point;
+        } catch (error) {
+          console.error(`Error creating data point for parameter ${param}:`, error);
+          return {
+            parameter: param,
+            fullValue: 0,
+            displayValue: param
+          };
+        }
+      });
+
+      return data;
+    } catch (error) {
+      console.error('Error generating spider data:', error);
+      return defaultSpiderData;
+    }
+  }, [meshItems, defaultSpiderData]);
+
+  // Filter models for visualization with logarithmic opacity
+  const visibleModels = useMemo(() => {
+    try {
+      if (!meshItems?.length) return [];
+      
+      // Show all models to display complete parameter space exploration
+      const modelsToShow = meshItems;
+      
+      const models = modelsToShow.map(item => {
+        try {
+          const resnorm = item?.resnorm || 0;
+          let logOpacity: number;
           
-          if (value !== undefined && typeof value === 'number' && Number.isFinite(value)) {
-            const normalizedValue = normalizeParameterValue(
-              value, 
-              param.key, 
-              referenceItem, 
-              meshItems
-            );
+          if (visualizationMode === 'opacity') {
+            // Monochrome mode: use consistent logarithmic scaling with intensity factor
+            const allResnorms = modelsToShow.map(i => i.resnorm).filter(r => r !== undefined) as number[];
             
-            // Ensure the value is not NaN or infinite
-            parameterValues[param.key][state.dataKey] = Number.isFinite(normalizedValue) ? normalizedValue : 0.5;
+            if (resnorm !== undefined && allResnorms.length > 1) {
+              // Use iterative approach to avoid stack overflow
+              let minResnorm = Infinity;
+              let maxResnorm = -Infinity;
+              for (const r of allResnorms) {
+                if (r < minResnorm) minResnorm = r;
+                if (r > maxResnorm) maxResnorm = r;
+              }
+              
+              // Use logarithmic scaling with intensity factor for consistent calculation
+              const logMin = Math.log10(Math.max(minResnorm, 1e-10));
+              const logMax = Math.log10(maxResnorm);
+              const logResnorm = Math.log10(Math.max(resnorm, 1e-10));
+              
+              // Normalize to 0-1 range (inverted so lower resnorm = higher opacity)
+              const normalized = 1 - ((logResnorm - logMin) / (logMax - logMin));
+              
+              // Apply intensity factor to make the curve more aggressive
+              const intensified = Math.pow(normalized, 1 / opacityIntensity);
+              
+              // Map to 0.05-1.0 range for better visibility with more contrast
+              logOpacity = Math.max(0.05, Math.min(1.0, intensified));
+            } else {
+              logOpacity = 0.5;
+            }
           } else {
-            parameterValues[param.key][state.dataKey] = 0.5; // Default for missing/invalid
+            // Color groups mode: use original calculateLogOpacity function
+            logOpacity = calculateLogOpacity(resnorm);
           }
+          
+          const finalOpacity = Math.max(0.05, Math.min(1.0, logOpacity * opacityFactor));
+          
+          // Apply visualization mode
+          let color: string;
+          if (visualizationMode === 'opacity') {
+            // Monochrome mode: use single blue color
+            color = '#3B82F6';
+          } else {
+            // Color groups mode: use original group colors
+            color = item?.color || '#3B82F6';
+          }
+          
+          return {
+            id: item?.id || 'unknown',
+            name: item?.name || 'Unknown',
+            color: color,
+            opacity: finalOpacity,
+            strokeWidth: 1
+          };
+        } catch (error) {
+          console.error('Error processing model for visibility:', item?.id, error);
+          return {
+            id: item?.id || 'unknown',
+            name: item?.name || 'Unknown',
+            color: '#3B82F6',
+            opacity: 0.5,
+            strokeWidth: 1
+          };
         }
       });
-    });
-    
-    // Create radar data structure with precalculated values
-    const radarData = paramInfo.map(param => {
-      const dataPoint: Record<string, string | number> = {
-        parameter: param.key,
-        displayName: param.displayName,
-        unit: param.unit || '',
-      };
-      
-      // Add data for each state (already normalized)
-      radarStates.forEach(state => {
-        if (parameterValues[param.key] && parameterValues[param.key][state.dataKey]) {
-          dataPoint[state.dataKey] = parameterValues[param.key][state.dataKey];
-        } else {
-          dataPoint[state.dataKey] = 0.5; // Fallback to middle value
+
+      // Ensure reference model is included and properly styled
+      if (referenceId) {
+        try {
+          const refModel = meshItems.find(item => item?.id === referenceId);
+          if (refModel) {
+            // Remove existing reference model if it's in the list
+            const filteredModels = models.filter(m => m.id !== referenceId);
+            // Add reference model at the end to ensure it's rendered on top
+            filteredModels.push({
+              id: refModel.id,
+              name: refModel.name || 'Reference',
+              color: '#FFFFFF', // White color for reference
+              opacity: 1.0,
+              strokeWidth: 2
+            });
+            return filteredModels;
+          }
+        } catch (error) {
+          console.error('Error processing reference model:', error);
         }
-      });
-      
-      return dataPoint;
-    });
-    
-    // Get reference values from referenceItem or first item
-    const referenceValues = referenceItem
-      ? { ...normalizeParameters(referenceItem.parameters) }
-      : sortedItems.length > 0
-        ? { ...normalizeParameters(sortedItems[0].parameters) }
-        : {};
-    
-    return {
-      data: radarData,
-      states: radarStates,
-      referenceValues,
-      parameters: paramInfo
-    };
-  }, [meshItems, referenceItem, resnormRange, normalizeParameterValue, calculateLineOpacity]);
-  
-  // Custom tick component for radar axis labels
-  const CustomTick = () => {
-    // Don't render anything in the CustomTick component
-    // We'll handle all axis labels in the AxisValueIndicators component
-    return null;
-  };
-
-  // Render axis values in a more visible way
-  const AxisValueIndicators = () => {
-    if (!meshItems.length || !referenceItem) return null;
-    
-    // Define exact positions for each parameter label instead of calculating angles
-    const parameterPositions = [
-      { key: 'Rs', className: 'axis-top', position: { x: '50%', y: '5%' } },
-      { key: 'ra', className: 'axis-top-right', position: { x: '85%', y: '28%' } },
-      { key: 'ca', className: 'axis-bottom-right', position: { x: '75%', y: '80%' } },
-      { key: 'rb', className: 'axis-bottom-left', position: { x: '25%', y: '80%' } },
-      { key: 'cb', className: 'axis-top-left', position: { x: '15%', y: '28%' } },
-    ];
-    
-    // Map parameter keys to display names
-    const displayNames: Record<string, string> = {
-      'Rs': 'Rs (Shunt)',
-      'ra': 'Ra (Apical)',
-      'ca': 'Ca (Apical)',
-      'rb': 'Rb (Basal)',
-      'cb': 'Cb (Basal)',
-    };
-    
-    // Calculate min/max values for each parameter across all models
-    const paramRanges: Record<string, {min: number, max: number, ref: number}> = {};
-    
-    // Use reference item values
-    const refParams = normalizeParameters(referenceItem.parameters);
-    
-    parameterPositions.forEach(pos => {
-      const key = pos.key;
-      const refValue = refParams[key as keyof typeof refParams];
-      
-      // Find min/max for this parameter across all models
-      const values = meshItems
-        .map(item => {
-          const params = normalizeParameters(item.parameters);
-          return params[key as keyof typeof params];
-        })
-        .filter(val => val !== undefined && Number.isFinite(val)) as number[];
-      
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      
-      paramRanges[key] = {
-        min,
-        max,
-        ref: refValue || 0
-      };
-    });
-    
-    // Fix the type guard function
-    const isValidParameterKey = (k: string, obj: { parameters?: Record<string, unknown> }): boolean => {
-      return obj.parameters !== undefined && typeof obj.parameters === 'object' && k in obj.parameters;
-    };
-
-    // Update the generateTicks function to return correct tick values with value and position properties
-    const generateTicks = (key: string) => {
-      // Get reference value for normalization
-      const refValue = refParams[key as keyof typeof refParams] || 0;
-      
-      // Skip if refValue is an array or not a number
-      if (Array.isArray(refValue) || typeof refValue !== 'number') {
-        return [];
       }
+
+      return models;
+    } catch (error) {
+      console.error('Error creating visible models:', error);
+      return [];
+    }
+  }, [meshItems, referenceId, opacityFactor, calculateLogOpacity, visualizationMode, opacityIntensity]);
+
+  // Export functions with error handling - enhanced for high quality
+  const exportSvg = (quality: 'standard' | 'high' | 'ultra' = 'high') => {
+    try {
+      if (!chartRef.current) return;
+      const svgElement = chartRef.current.querySelector('svg');
+      if (!svgElement) return;
+
+      // Clone the SVG to modify it for high-quality export
+      const svgClone = svgElement.cloneNode(true) as SVGElement;
       
-      // Find parameter min/max across all mesh items
-      const allItems = meshItems.filter(i => 
-        isValidParameterKey(key, i) && 
-        i.parameters[key as keyof typeof i.parameters] !== undefined && 
-        !Array.isArray(i.parameters[key as keyof typeof i.parameters]) && 
-        typeof i.parameters[key as keyof typeof i.parameters] === 'number'
-      );
+      // Set high-resolution dimensions for export based on quality
+      const qualitySettings = {
+        standard: { width: 800, height: 800 },
+        high: { width: 1600, height: 1600 },
+        ultra: { width: 3200, height: 3200 }
+      };
       
-      if (allItems.length === 0) return [];
+      const settings = qualitySettings[quality];
+      svgClone.setAttribute('width', settings.width.toString());
+      svgClone.setAttribute('height', settings.height.toString());
+      svgClone.setAttribute('viewBox', '0 0 800 600');
       
-      const values = allItems.map(i => i.parameters[key as keyof typeof i.parameters] as number);
+      // Enhance quality settings
+      svgClone.style.shapeRendering = 'geometricPrecision';
+      svgClone.style.textRendering = 'geometricPrecision';
       
-      // Calculate a reasonable range - always include reference value plus extra room for context
-      const min = Math.min(...values);
-      const max = Math.max(...values);
+      // Convert to string
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(svgClone);
       
-      // Add the reference value to ensure it's included
-      const valueRange = [min, refValue, max].sort((a, b) => a - b);
-      const rangeMin = valueRange[0];
-      const rangeMax = valueRange[valueRange.length - 1];
-      
-      // Generate tick values (5 is usually a good number)
-      const tickStep = (rangeMax - rangeMin) / 4;
-      
-      // Return objects with value and position properties
-      return [
-        { value: rangeMin, position: 0 },
-        { value: rangeMin + tickStep, position: 0.25 },
-        { value: rangeMin + 2 * tickStep, position: 0.5 },
-        { value: rangeMin + 3 * tickStep, position: 0.75 },
-        { value: rangeMax, position: 1 }
-      ];
-    };
-
-    return (
-      <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-        {/* Parameter axis labels with reference values */}
-        {parameterPositions.map(position => {
-          const paramKey = position.key;
-          const refValue = referenceItem.parameters[paramKey as keyof typeof referenceItem.parameters];
-          
-          if (refValue === undefined) return null;
-          
-          return (
-            <div 
-              key={paramKey} 
-              className={`spider-parameter-label ${position.className}`}
-                  style={{
-                position: 'absolute', 
-                left: position.position.x, 
-                top: position.position.y, 
-                transform: 'translate(-50%, -50%)' 
-              }}
-            >
-              <div className="spider-parameter-name">{displayNames[paramKey]}</div>
-              <div className="spider-parameter-value">{formatParameterValue(refValue, paramKey)}</div>
-            </div>
-          );
-        })}
-
-        {/* Add tick marks with normalized values along axes */}
-        <svg className="absolute inset-0 w-full h-full" aria-hidden="true">
-          {/* Axis lines connecting center to each parameter */}
-          <g className="axis-lines">
-            <line x1="50%" y1="50%" x2="50%" y2="10%" stroke="var(--spider-grid-color)" strokeOpacity="0.6" strokeWidth="1.5" />
-            <line x1="50%" y1="50%" x2="82%" y2="30%" stroke="var(--spider-grid-color)" strokeOpacity="0.6" strokeWidth="1.5" />
-            <line x1="50%" y1="50%" x2="73%" y2="75%" stroke="var(--spider-grid-color)" strokeOpacity="0.6" strokeWidth="1.5" />
-            <line x1="50%" y1="50%" x2="27%" y2="75%" stroke="var(--spider-grid-color)" strokeOpacity="0.6" strokeWidth="1.5" />
-            <line x1="50%" y1="50%" x2="18%" y2="30%" stroke="var(--spider-grid-color)" strokeOpacity="0.6" strokeWidth="1.5" />
-          </g>
-
-          {/* Dynamic tick marks for Rs (top) */}
-          <g className="axis-ticks">
-            {generateTicks('Rs').map((tick, idx) => {
-              // Calculate position along the axis line
-              const yPos = 50 - ((50 - 10) * tick.position);
-              return (
-                <g key={`Rs-tick-${idx}`} transform={`translate(50%, ${yPos}%)`}>
-                  <circle cx="0" cy="0" r="2" fill="var(--spider-grid-color)" opacity="0.8" />
-                  <text x="8" y="0" fontSize="9" fill="var(--circuit-text-secondary)" dominantBaseline="middle" className="tick-text">
-                    {formatParameterValue(tick.value, 'Rs')}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-
-          {/* Dynamic tick marks for Ra (top-right) */}
-          <g className="axis-ticks">
-            {generateTicks('ra').map((tick, idx) => {
-              // Calculate position along the axis line
-              const xPos = 50 + ((82 - 50) * tick.position);
-              const yPos = 50 - ((50 - 30) * tick.position);
-              return (
-                <g key={`ra-tick-${idx}`} transform={`translate(${xPos}%, ${yPos}%)`}>
-                  <circle cx="0" cy="0" r="2" fill="var(--spider-grid-color)" opacity="0.8" />
-                  <text x="6" y="-3" fontSize="9" fill="var(--circuit-text-secondary)" dominantBaseline="middle" className="tick-text">
-                    {formatParameterValue(tick.value, 'ra')}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-
-          {/* Dynamic tick marks for Ca (bottom-right) */}
-          <g className="axis-ticks">
-            {generateTicks('ca').map((tick, idx) => {
-              // Calculate position along the axis line
-              const xPos = 50 + ((73 - 50) * tick.position);
-              const yPos = 50 + ((75 - 50) * tick.position);
-              return (
-                <g key={`ca-tick-${idx}`} transform={`translate(${xPos}%, ${yPos}%)`}>
-                  <circle cx="0" cy="0" r="2" fill="var(--spider-grid-color)" opacity="0.8" />
-                  <text x="6" y="0" fontSize="9" fill="var(--circuit-text-secondary)" dominantBaseline="middle" className="tick-text">
-                    {formatParameterValue(tick.value, 'ca')}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-
-          {/* Dynamic tick marks for Rb (bottom-left) */}
-          <g className="axis-ticks">
-            {generateTicks('rb').map((tick, idx) => {
-              // Calculate position along the axis line
-              const xPos = 50 - ((50 - 27) * tick.position);
-              const yPos = 50 + ((75 - 50) * tick.position);
-              return (
-                <g key={`rb-tick-${idx}`} transform={`translate(${xPos}%, ${yPos}%)`}>
-                  <circle cx="0" cy="0" r="2" fill="var(--spider-grid-color)" opacity="0.8" />
-                  <text x="-6" y="0" fontSize="9" fill="var(--circuit-text-secondary)" dominantBaseline="middle" textAnchor="end" className="tick-text">
-                    {formatParameterValue(tick.value, 'rb')}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-
-          {/* Dynamic tick marks for Cb (top-left) */}
-          <g className="axis-ticks">
-            {generateTicks('cb').map((tick, idx) => {
-              // Calculate position along the axis line
-              const xPos = 50 - ((50 - 18) * tick.position);
-              const yPos = 50 - ((50 - 30) * tick.position);
-              return (
-                <g key={`cb-tick-${idx}`} transform={`translate(${xPos}%, ${yPos}%)`}>
-                  <circle cx="0" cy="0" r="2" fill="var(--spider-grid-color)" opacity="0.8" />
-                  <text x="-6" y="-3" fontSize="9" fill="var(--circuit-text-secondary)" dominantBaseline="middle" textAnchor="end" className="tick-text">
-                    {formatParameterValue(tick.value, 'cb')}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-
-          {/* Center point */}
-          <g className="center-point">
-            <circle cx="50%" cy="50%" r="3" fill="var(--primary)" opacity="0.8" />
-          </g>
-        </svg>
-      </div>
-    );
+      if (onExportSvg) {
+        onExportSvg(svgString);
+      }
+    } catch (error) {
+      console.error('Error exporting SVG:', error);
+    }
   };
 
-  return (
-    <div className="h-full w-full">
-          {meshItems.length === 0 ? (
-        <div className="flex items-center justify-center h-[380px] text-circuit-text-secondary">
-              <p>No data available for visualization</p>
-            </div>
-          ) : (
-        <div className="h-full spider-visualization relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <RadarChart
-                  cx="50%"
-                  cy="50%"
-                  outerRadius="75%"
-                  data={spiderData.data}
-                  key={referenceKey}
-                >
-                  {/* SVG definitions for filters */}
-                  <defs>
-                    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                      <feGaussianBlur stdDeviation="2.5" result="coloredBlur"/>
-                      <feMerge>
-                        <feMergeNode in="coloredBlur"/>
-                        <feMergeNode in="SourceGraphic"/>
-                      </feMerge>
-                    </filter>
-                  </defs>
-                  
-                  {/* PolarGrid represents the parameter grid, values are normalized around the reference shape */}
-                  <PolarGrid 
-                    gridType="polygon"
-                    strokeOpacity={0.4}
-                    stroke="var(--spider-grid-color)"
-                    radialLines={true}
-                    className="spider-grid-line"
-                  />
-                  <PolarAngleAxis
-                    dataKey="displayName"
-                    tick={<CustomTick />}
-                    axisLineType="polygon"
-                    tickLine={false}
-                    className="spider-axis-line"
-                  />
-                  <PolarRadiusAxis 
-                    tick={false} 
-                    axisLine={false}
-                    domain={[0, 1]}
-                  />
-                  
-                  {/* Radar lines for all non-reference models first */}
-                  {spiderData.states
-                    .filter(state => state.dataKey !== `model_${referenceItem?.id || ''}`)
-                    // Sort by resnorm so better fits are on top
-                    .sort((a, b) => (a.resnorm || Infinity) - (b.resnorm || Infinity))
-                    .map((state) => {
-                      const hasValidData = spiderData.data.every(dataPoint => 
-                        state.dataKey in dataPoint && 
-                        typeof dataPoint[state.dataKey] === 'number' &&
-                        Number.isFinite(dataPoint[state.dataKey] as number)
-                      );
-                      
-                      if (!hasValidData) return null;
-                      
-                      return (
-                        <Radar
-                          key={state.dataKey}
-                          name={state.name}
-                          dataKey={state.dataKey}
-                          stroke={state.color}
-                          fill={state.color}
-                          fillOpacity={0}
-                          strokeWidth={1.5}
-                          strokeOpacity={state.opacity}
-                          strokeDasharray="0"
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      );
-                    })}
-                    
-                  {/* Reference model rendered last (on top) */}
-                  {(() => {
-                    const referenceState = spiderData.states.find(
-                      state => state.dataKey === `model_${referenceItem?.id || ''}`
-                    );
-                    
-                    if (!referenceState) return null;
-                    
-                    const hasValidData = spiderData.data.every(dataPoint => 
-                      referenceState.dataKey in dataPoint && 
-                      typeof dataPoint[referenceState.dataKey] === 'number' &&
-                      Number.isFinite(dataPoint[referenceState.dataKey] as number)
-                    );
-                    
-                    if (!hasValidData) return null;
-                    
-                    return (
-                      <Radar
-                        key={referenceState.dataKey}
-                        name="Reference Model"
-                        dataKey={referenceState.dataKey}
-                        stroke="var(--spider-ref-color)"
-                        fill="var(--spider-ref-color)"
-                        fillOpacity={0}
-                        strokeWidth={3} // Increased for maximum visibility
-                        strokeOpacity={1}
-                        strokeDasharray="5,3" // Adjust dash pattern for better visibility
-                        dot={false}
-                        isAnimationActive={false}
-                        style={{ zIndex: 1000, filter: 'url(#glow)' }}
-                      />
-                    );
-                  })()}
-                </RadarChart>
-              </ResponsiveContainer>
+  const exportPng = async (quality: 'standard' | 'high' | 'ultra' = 'high') => {
+    try {
+      if (!chartRef.current) return;
+      const svgElement = chartRef.current.querySelector('svg');
+      if (!svgElement) return;
+
+      // Quality settings for PNG export
+      const qualitySettings = {
+        standard: { width: 800, height: 800, scale: 1 },
+        high: { width: 1600, height: 1600, scale: 2 },
+        ultra: { width: 3200, height: 3200, scale: 4 }
+      };
+
+      const settings = qualitySettings[quality];
+      
+      // Create a high-resolution canvas
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // Set high-resolution dimensions
+      canvas.width = settings.width;
+      canvas.height = settings.height;
+      
+      // Enable high-quality rendering
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      // Create an image from the SVG
+      const svgBlob = new Blob([svgElement.outerHTML], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+
+      img.onload = () => {
+        try {
+          // Draw high-quality background
+          ctx.fillStyle = '#0f172a'; // Dark background
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
           
-          {/* Only use the AxisValueIndicators component for all labels */}
-          <AxisValueIndicators />
+          // Draw the image with antialiasing
+          ctx.scale(settings.scale, settings.scale);
+          ctx.drawImage(img, 0, 0, canvas.width / settings.scale, canvas.height / settings.scale);
+
+          // Convert to high-quality PNG
+          canvas.toBlob((blob) => {
+            if (blob && onExportPng) {
+              onExportPng(blob);
+            }
+            URL.revokeObjectURL(url);
+          }, 'image/png', 1.0); // Maximum quality
+        } catch (error) {
+          console.error('Error in PNG export onload:', error);
+          URL.revokeObjectURL(url);
+        }
+      };
+
+      img.onerror = () => {
+        console.error('Error loading SVG for PNG export');
+        URL.revokeObjectURL(url);
+      };
+
+      img.src = url;
+    } catch (error) {
+      console.error('Error exporting PNG:', error);
+    }
+  };
+
+  // Effect to handle export in static mode
+  useEffect(() => {
+    try {
+      if (mode === 'static') {
+        // Wait for chart to render
+        const timer = setTimeout(() => {
+          exportSvg();
+          exportPng();
+        }, 100);
+        return () => clearTimeout(timer);
+      }
+    } catch (error) {
+      console.error('Error in static mode export effect:', error);
+    }
+  }, [mode, spiderData, visibleModels]);
+
+  // Add event listeners for export triggers
+  useEffect(() => {
+    const handleTriggerSvgExport = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const quality = customEvent.detail?.quality || 'high';
+      exportSvg(quality);
+    };
+
+    const handleTriggerPngExport = (event: Event) => {
+      const customEvent = event as CustomEvent;
+      const quality = customEvent.detail?.quality || 'high';
+      exportPng(quality);
+    };
+
+    window.addEventListener('triggerSvgExport', handleTriggerSvgExport);
+    window.addEventListener('triggerPngExport', handleTriggerPngExport);
+
+    return () => {
+      window.removeEventListener('triggerSvgExport', handleTriggerSvgExport);
+      window.removeEventListener('triggerPngExport', handleTriggerPngExport);
+    };
+  }, []);
+
+    // Add state for chunked rendering
+  const [renderingState, setRenderingState] = useState<ChunkedRenderingState>({
+    isRendering: false,
+    currentChunk: 0,
+    totalChunks: 0,
+    renderedPolygons: 0,
+    totalPolygons: 0,
+    renderStartTime: 0,
+    estimatedTimeRemaining: 0
+  });
+
+  const [renderingControls, setRenderingControls] = useState<RenderingControls>({
+    chunkSize: 500, // Polygons per chunk
+    renderQuality: 'medium',
+    useCanvas: false,
+    progressiveLoading: true,
+    maxPolygonsPerFrame: 100
+  });
+
+  const [renderedChunks, setRenderedChunks] = useState<Set<number>>(new Set());
+  const [visiblePolygons, setVisiblePolygons] = useState<ModelSnapshot[]>([]);
+
+  // Quality settings that affect performance
+  const qualitySettings = {
+    low: { chunkSize: 1000, maxPolygons: 5000, strokeWidth: 0.5 },
+    medium: { chunkSize: 500, maxPolygons: 10000, strokeWidth: 1 },
+    high: { chunkSize: 250, maxPolygons: 20000, strokeWidth: 1.5 },
+    ultra: { chunkSize: 100, maxPolygons: 50000, strokeWidth: 2 }
+  };
+
+  // Chunked rendering function
+  const renderPolygonsInChunks = useCallback(async (polygons: ModelSnapshot[]) => {
+    const quality = qualitySettings[renderingControls.renderQuality];
+    const actualChunkSize = renderingControls.chunkSize || quality.chunkSize;
+    const maxPolygonsLimit = Math.min(polygons.length, quality.maxPolygons);
+    const polygonsToRender = polygons.slice(0, maxPolygonsLimit);
+    
+    const totalChunks = Math.ceil(polygonsToRender.length / actualChunkSize);
+    
+    setRenderingState({
+      isRendering: true,
+      currentChunk: 0,
+      totalChunks,
+      renderedPolygons: 0,
+      totalPolygons: polygonsToRender.length,
+      renderStartTime: Date.now(),
+      estimatedTimeRemaining: 0
+    });
+
+    setVisiblePolygons([]);
+    setRenderedChunks(new Set());
+
+    // Process chunks with delays to prevent UI blocking
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      const startIdx = chunkIndex * actualChunkSize;
+      const endIdx = Math.min(startIdx + actualChunkSize, polygonsToRender.length);
+      const chunk = polygonsToRender.slice(startIdx, endIdx);
+
+      // Add chunk to visible polygons
+      setVisiblePolygons(prev => [...prev, ...chunk]);
+      setRenderedChunks(prev => new Set([...prev, chunkIndex]));
+
+      // Update progress
+      const renderedCount = endIdx;
+      const progress = (renderedCount / polygonsToRender.length) * 100;
+      const elapsed = Date.now() - renderingState.renderStartTime;
+      const estimatedTotal = elapsed / (progress / 100);
+      const remaining = Math.max(0, estimatedTotal - elapsed);
+
+      setRenderingState(prev => ({
+        ...prev,
+        currentChunk: chunkIndex + 1,
+        renderedPolygons: renderedCount,
+        estimatedTimeRemaining: remaining
+      }));
+
+      // Add delay based on chunk size to keep UI responsive
+      const delay = actualChunkSize > 250 ? 50 : actualChunkSize > 100 ? 25 : 10;
+      await new Promise(resolve => setTimeout(resolve, delay));
+
+      // Check if rendering was cancelled
+      if (!renderingState.isRendering) {
+        break;
+      }
+    }
+
+    setRenderingState(prev => ({ ...prev, isRendering: false }));
+  }, [renderingControls, renderingState.renderStartTime, renderingState.isRendering]);
+
+  // Cancel rendering function
+  const cancelRendering = useCallback(() => {
+    setRenderingState(prev => ({ ...prev, isRendering: false }));
+  }, []);
+
+  // Update rendering when meshItems change
+  useEffect(() => {
+    if (meshItems.length > 1000 && renderingControls.progressiveLoading) {
+      renderPolygonsInChunks(meshItems);
+    } else {
+      setVisiblePolygons(meshItems);
+      setRenderingState(prev => ({ ...prev, isRendering: false }));
+    }
+  }, [meshItems, renderingControls.progressiveLoading, renderPolygonsInChunks]);
+
+  // Modify existing visibleModels to use visiblePolygons instead of meshItems
+  const chunkedVisibleModels = useMemo(() => {
+    try {
+      if (!visiblePolygons?.length) return [];
+
+      // Apply polygon limit
+      const effectivePolygons = visiblePolygons.slice(0, maxPolygons);
+      
+      return effectivePolygons.map(model => {
+        try {
+          const resnorm = model?.resnorm || 0;
+          let logOpacity: number;
           
-          {/* Reference model indicator */}
-          <div className="absolute bottom-2 right-2 bg-neutral-900/80 rounded px-3 py-1.5 text-xs border border-neutral-600">
-            <div className="flex items-center">
-              <div className="w-4 h-0.5 bg-white mr-2 opacity-90 dash-pattern"></div>
-              <span className="text-white font-medium">Reference Model</span>
+          if (visualizationMode === 'opacity') {
+            // Use logarithmic scaling for opacity mode
+            const allResnorms = effectivePolygons.map(i => i.resnorm).filter(r => r !== undefined) as number[];
+            
+            if (resnorm !== undefined && allResnorms.length > 1) {
+              // Use iterative approach to avoid stack overflow
+              let minResnorm = Infinity;
+              let maxResnorm = -Infinity;
+              for (const r of allResnorms) {
+                if (r < minResnorm) minResnorm = r;
+                if (r > maxResnorm) maxResnorm = r;
+              }
+              
+              // Use logarithmic scaling with intensity factor
+              const logMin = Math.log10(Math.max(minResnorm, 1e-10));
+              const logMax = Math.log10(maxResnorm);
+              const logResnorm = Math.log10(Math.max(resnorm, 1e-10));
+              
+              // Normalize to 0-1 range (inverted so lower resnorm = higher opacity)
+              const normalized = 1 - ((logResnorm - logMin) / (logMax - logMin));
+              
+              // Apply intensity factor
+              const intensified = Math.pow(normalized, 1 / opacityIntensity);
+              
+              // Map to 0.05-1.0 range for better visibility
+              logOpacity = Math.max(0.05, Math.min(1.0, intensified));
+            } else {
+              logOpacity = 0.5;
+            }
+          } else {
+            // Color groups mode: use original calculateLogOpacity function
+            logOpacity = calculateLogOpacity(resnorm);
+          }
+          
+          const finalOpacity = Math.max(0.05, Math.min(1.0, logOpacity * opacityFactor));
+          
+          // Apply visualization mode
+          let color: string;
+          if (visualizationMode === 'opacity') {
+            color = '#3B82F6';
+          } else {
+            color = model?.color || '#3B82F6';
+          }
+          
+          return {
+            id: model?.id || 'unknown',
+            name: model?.name || 'Unknown',
+            color: color,
+            opacity: finalOpacity,
+            strokeWidth: model.id === referenceId ? 2 : 1
+          };
+        } catch (error) {
+          console.error('Error processing model for spider plot:', error, model);
+          return {
+            id: model?.id || 'unknown',
+            name: model?.name || 'Unknown',
+            color: '#3B82F6',
+            opacity: 0.5,
+            strokeWidth: 1
+          };
+        }
+      }).filter(Boolean);
+    } catch (error) {
+      console.error('Error in chunkedVisibleModels calculation:', error);
+      return [];
+    }
+  }, [visiblePolygons, maxPolygons, calculateLogOpacity, opacityFactor, visualizationMode, referenceId, opacityIntensity]);
+
+  // Rendering controls component - converted to horizontal bar
+  const RenderingControlsBar = () => (
+    <div className="absolute top-4 left-4 right-4 bg-neutral-800/95 backdrop-blur-sm border border-neutral-700 rounded-lg p-3 z-10">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        {/* Left section - Rendering Mode & Quality */}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <span className="text-sm font-medium text-neutral-200">Render Controls</span>
+          </div>
+
+          {/* Render Mode Toggle */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-neutral-300">Mode:</label>
+            <div className="flex bg-neutral-700 rounded-md overflow-hidden">
+              <button
+                onClick={() => setRenderingControls(prev => ({ ...prev, useCanvas: false }))}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  !renderingControls.useCanvas 
+                    ? 'bg-primary text-white' 
+                    : 'text-neutral-300 hover:bg-neutral-600'
+                }`}
+              >
+                Interactive
+              </button>
+              <button
+                onClick={() => setRenderingControls(prev => ({ ...prev, useCanvas: true }))}
+                className={`px-3 py-1 text-xs font-medium transition-colors ${
+                  renderingControls.useCanvas 
+                    ? 'bg-amber-600 text-white' 
+                    : 'text-neutral-300 hover:bg-neutral-600'
+                }`}
+              >
+                Static Grid
+              </button>
             </div>
           </div>
+
+          {/* Quality Selector */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-neutral-300">Quality:</label>
+            <select 
+              value={renderingControls.renderQuality}
+              onChange={(e) => setRenderingControls(prev => ({ 
+                ...prev, 
+                renderQuality: e.target.value as RenderingControls['renderQuality']
+              }))}
+              className="px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200"
+            >
+              <option value="low">Low (5k)</option>
+              <option value="medium">Medium (10k)</option>
+              <option value="high">High (20k)</option>
+              <option value="ultra">Ultra (50k)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Center section - Progressive Loading & Chunk Size */}
+        <div className="flex items-center gap-4">
+          {/* Progressive Loading Toggle */}
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={renderingControls.progressiveLoading}
+              onChange={(e) => setRenderingControls(prev => ({ 
+                ...prev, 
+                progressiveLoading: e.target.checked
+              }))}
+              className="w-4 h-4"
+            />
+            <span className="text-xs text-neutral-300">Progressive</span>
+          </label>
+
+          {/* Chunk Size Slider */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-neutral-300">Chunk:</label>
+            <input
+              type="range"
+              min="50"
+              max="2000"
+              step="50"
+              value={renderingControls.chunkSize}
+              onChange={(e) => setRenderingControls(prev => ({ 
+                ...prev, 
+                chunkSize: parseInt(e.target.value)
+              }))}
+              className="w-20 h-2"
+            />
+            <span className="text-xs text-neutral-400 w-8">{renderingControls.chunkSize}</span>
+          </div>
+        </div>
+
+        {/* Right section - Stats & Progress */}
+        <div className="flex items-center gap-4">
+          {/* Stats */}
+          <div className="text-xs text-neutral-400 space-x-3">
+            <span>Total: {meshItems.length.toLocaleString()}</span>
+            <span>Visible: {visiblePolygons.length.toLocaleString()}</span>
+            {renderingState.totalChunks > 0 && (
+              <span>Chunks: {renderedChunks.size}/{renderingState.totalChunks}</span>
+            )}
+          </div>
+
+          {/* Progress/Cancel Button */}
+          {renderingState.isRendering ? (
+            <div className="flex items-center gap-2">
+              <div className="w-16 bg-neutral-600 rounded-full h-2">
+                <div 
+                  className="bg-primary h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(renderingState.renderedPolygons / renderingState.totalPolygons) * 100}%` }}
+                />
+              </div>
+              <span className="text-xs text-neutral-300">
+                {Math.round((renderingState.renderedPolygons / renderingState.totalPolygons) * 100)}%
+              </span>
+              <button
+                onClick={cancelRendering}
+                className="text-xs px-2 py-1 bg-red-600 hover:bg-red-700 text-white rounded"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="text-xs text-neutral-400">
+              {renderingControls.useCanvas ? 'Static Mode' : 'Interactive Mode'}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Performance Warning - compact */}
+      {meshItems.length > 10000 && !renderingControls.progressiveLoading && (
+        <div className="mt-2 px-3 py-1.5 bg-amber-600/20 border border-amber-500/30 rounded text-xs text-amber-200 flex items-center gap-2">
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span>
+            {meshItems.length.toLocaleString()} polygons detected. Enable Progressive Loading for better performance.
+          </span>
+        </div>
+      )}
     </div>
   );
+
+  // Add canvas ref for static rendering
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Static grid rendering function
+  const generateStaticGrid = useCallback(async () => {
+    if (!canvasRef.current || !visiblePolygons.length) return;
+    
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size for high quality
+    const size = 800;
+    canvas.width = size;
+    canvas.height = size;
+    
+    // Clear canvas with dark background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, size, size);
+    
+    // Grid configuration
+    const gridSize = Math.ceil(Math.sqrt(visiblePolygons.length));
+    const cellSize = size / gridSize;
+    const miniPlotSize = cellSize * 0.8; // Leave some padding
+    const centerOffset = cellSize * 0.1;
+    
+    setRenderingState(prev => ({
+      ...prev,
+      isRendering: true,
+      totalPolygons: visiblePolygons.length,
+      renderedPolygons: 0
+    }));
+
+    // Process polygons in chunks for performance
+    const chunkSize = 50;
+    for (let i = 0; i < visiblePolygons.length; i += chunkSize) {
+      const chunk = visiblePolygons.slice(i, Math.min(i + chunkSize, visiblePolygons.length));
+      
+      for (let j = 0; j < chunk.length; j++) {
+        const polygon = chunk[j];
+        const index = i + j;
+        
+        // Calculate grid position
+        const row = Math.floor(index / gridSize);
+        const col = index % gridSize;
+        const x = col * cellSize + centerOffset;
+        const y = row * cellSize + centerOffset;
+        
+        // Draw mini spider plot for this polygon
+        drawMiniSpiderPlot(ctx, x, y, miniPlotSize, polygon);
+      }
+      
+      // Update progress
+      setRenderingState(prev => ({
+        ...prev,
+        renderedPolygons: Math.min(i + chunkSize, visiblePolygons.length)
+      }));
+      
+      // Yield to browser
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    
+    setRenderingState(prev => ({ ...prev, isRendering: false }));
+  }, [visiblePolygons]);
+
+  // Draw mini spider plot function
+  const drawMiniSpiderPlot = (
+    ctx: CanvasRenderingContext2D, 
+    x: number, 
+    y: number, 
+    size: number, 
+    model: ModelSnapshot
+  ) => {
+    const centerX = x + size / 2;
+    const centerY = y + size / 2;
+    const radius = size / 2 - 5;
+    
+    // Draw pentagon axes (5 parameters)
+    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
+    const angleStep = (2 * Math.PI) / params.length;
+    
+    // Draw grid circles
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, (radius * i) / 3, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    
+    // Draw axes
+    ctx.strokeStyle = '#4B5563';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < params.length; i++) {
+      const angle = i * angleStep - Math.PI / 2;
+      const endX = centerX + Math.cos(angle) * radius;
+      const endY = centerY + Math.sin(angle) * radius;
+      
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
+    
+    // Draw parameter polygon if model has parameters
+    if (model.parameters) {
+      const points: { x: number; y: number }[] = [];
+      
+      params.forEach((param, i) => {
+        const value = model.parameters[param as keyof typeof model.parameters];
+        if (typeof value === 'number') {
+          // Normalize the value (0-1)
+          let normalizedValue: number;
+          if (param.includes('C')) {
+            // Capacitance: 0.1µF to 50µF
+            normalizedValue = Math.log10(value * 1e6 / 0.1) / Math.log10(50 / 0.1);
+          } else {
+            // Resistance: 10Ω to 10kΩ
+            normalizedValue = Math.log10(value / 10) / Math.log10(10000 / 10);
+          }
+          
+          normalizedValue = Math.max(0, Math.min(1, normalizedValue));
+          const pointRadius = normalizedValue * radius;
+          const angle = i * angleStep - Math.PI / 2;
+          
+          points.push({
+            x: centerX + Math.cos(angle) * pointRadius,
+            y: centerY + Math.sin(angle) * pointRadius
+          });
+        }
+      });
+      
+      // Draw the polygon
+      if (points.length === params.length) {
+        ctx.strokeStyle = model.color || '#3B82F6';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = model.opacity || 0.7;
+        
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        
+        ctx.globalAlpha = 1; // Reset alpha
+      }
+    }
+    
+    // Draw resnorm indicator (color-coded border)
+    const resnorm = model.resnorm || 0;
+    let borderColor = '#10B981'; // Green for good fit
+    if (resnorm > 1e-3) borderColor = '#FBBF24'; // Yellow for moderate
+    if (resnorm > 1e-1) borderColor = '#EF4444'; // Red for poor
+    
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, size, size);
+  };
+
+  // Trigger static grid generation when mode changes
+  useEffect(() => {
+    if (renderingControls.useCanvas && visiblePolygons.length > 0) {
+      generateStaticGrid();
+    }
+  }, [renderingControls.useCanvas, generateStaticGrid]);
+
+  // Render different content based on mode
+  const renderContent = () => {
+    if (renderingControls.useCanvas) {
+      // Static grid mode
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-slate-900">
+          <canvas
+            ref={canvasRef}
+            className="max-w-full max-h-full border border-neutral-700 rounded"
+            style={{ 
+              imageRendering: 'pixelated',
+              width: 'auto',
+              height: 'auto'
+            }}
+          />
+        </div>
+      );
+    } else {
+      // Interactive mode - existing radar chart
+      const chart = (
+        <RadarChart data={spiderData} style={{ fontFamily: "'Inter', 'Segoe UI', Arial, sans-serif" }}>
+          <PolarGrid 
+            gridType="polygon"
+            stroke="#4B5563"
+            strokeOpacity={0.3}
+            strokeWidth={0.5}
+          />
+          <PolarAngleAxis 
+            dataKey="parameter"
+            tick={{ 
+              fill: '#E5E7EB', 
+              fontSize: 13,
+              fontWeight: 600
+            }}
+            tickLine={{ stroke: '#4B5563' }}
+            axisLine={{ stroke: '#4B5563' }}
+            tickFormatter={(value) => {
+              try {
+                const point = spiderData.find(p => p.parameter === value);
+                if (!point) return String(value);
+                
+                // Enhanced axis labels with units and ranges
+                const ranges = {
+                  Rs: '10Ω - 10kΩ',
+                  Ra: '10Ω - 10kΩ', 
+                  Rb: '10Ω - 10kΩ',
+                  Ca: '0.1 - 50µF',
+                  Cb: '0.1 - 50µF'
+                };
+                
+                return `${value}\n${ranges[value as keyof typeof ranges] || ''}`;
+              } catch (error) {
+                console.error('Error in tick formatter:', error);
+                return String(value);
+              }
+            }}
+          />
+          <PolarRadiusAxis 
+            tick={{ fill: '#E5E7EB', fontSize: 10 }}
+            tickCount={5}
+            stroke="#4B5563"
+            axisLine={{ stroke: '#4B5563' }}
+          />
+          {/* Only render data polygons if we have actual models */}
+          {chunkedVisibleModels.map(model => (
+            <Radar
+              key={model.id}
+              name={model.name}
+              dataKey={model.id}
+              stroke={model.color}
+              fill="none"
+              fillOpacity={0}
+              strokeOpacity={model.opacity}
+              strokeWidth={model.strokeWidth}
+              dot={model.id === referenceId}
+              isAnimationActive={mode === 'interactive'}
+            />
+          ))}
+        </RadarChart>
+      );
+      
+      return (
+        <div className="spider-plot-container" ref={chartRef}>
+          <ResponsiveContainer width="100%" height="100%">
+            {chart}
+          </ResponsiveContainer>
+        </div>
+      );
+    }
+  };
+
+  try {
+
+    return (
+      <div className="relative w-full h-96">
+        {/* Rendering Controls Panel */}
+        <RenderingControlsBar />
+        
+        <div className="spider-plot-container" ref={chartRef}>
+          {renderContent()}
+        </div>
+
+        {/* Render Progress Overlay */}
+        {renderingState.isRendering && (
+          <div className="absolute inset-0 bg-neutral-900/20 backdrop-blur-[1px] flex items-center justify-center z-20">
+            <div className="bg-neutral-800/95 backdrop-blur-sm border border-neutral-700 rounded-lg p-6 max-w-md">
+              <div className="flex items-center mb-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
+                <div>
+                  <p className="text-sm font-medium text-neutral-200">Rendering Spider Plot</p>
+                  <p className="text-xs text-neutral-400">
+                    Processing {renderingState.totalPolygons.toLocaleString()} polygons in chunks...
+                  </p>
+                </div>
+              </div>
+              
+              <div className="w-full bg-neutral-700 rounded-full h-3 mb-3">
+                <div 
+                  className="bg-gradient-to-r from-primary to-blue-400 h-3 rounded-full transition-all duration-500"
+                  style={{ width: `${(renderingState.renderedPolygons / renderingState.totalPolygons) * 100}%` }}
+                />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4 text-xs text-neutral-400">
+                <div>
+                  <span className="font-medium">Progress:</span><br/>
+                  {Math.round((renderingState.renderedPolygons / renderingState.totalPolygons) * 100)}%
+                </div>
+                <div>
+                  <span className="font-medium">Chunk:</span><br/>
+                  {renderingState.currentChunk} / {renderingState.totalChunks}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  } catch (error) {
+    console.error('Error rendering SpiderPlot:', error);
+    return (
+      <div className="spider-plot-container flex items-center justify-center h-96">
+        <div className="text-red-400 text-sm">
+          Error rendering spider plot. Check console for details.
+        </div>
+      </div>
+    );
+  }
 };

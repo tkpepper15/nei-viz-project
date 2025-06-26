@@ -1,4 +1,4 @@
-import { CircuitParameters } from './impedance';
+import { CircuitParameters } from '../types/parameters';
 
 export interface ParameterRange {
     min: number;

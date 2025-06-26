@@ -1,13 +1,8 @@
 import { ModelSnapshot, StateFolder } from '../types';
+import { CircuitParameters } from '../types/parameters';
 
 interface MeshResponsePoint {
-  parameters: {
-    Rs: number;
-    ra: number;
-    ca: number;
-    rb: number;
-    cb: number;
-  };
+  parameters: CircuitParameters;
   resnorm: number;
   alpha: number;
 }
@@ -94,16 +89,16 @@ export const computeRegressionMesh = async (
       body: JSON.stringify({
         reference_cell: {
           Rs: activeSnapshot.parameters.Rs,
-          ra: activeSnapshot.parameters.ra,
-          ca: activeSnapshot.parameters.ca,
-          rb: activeSnapshot.parameters.rb,
-          cb: activeSnapshot.parameters.cb,
+          Ra: activeSnapshot.parameters.Ra,
+          Ca: activeSnapshot.parameters.Ca,
+          Rb: activeSnapshot.parameters.Rb,
+          Cb: activeSnapshot.parameters.Cb,
           frequency_range: frequencies
         },
         mesh_resolution: meshResolution,
         noise_level: noiseLevel,
         top_percentage: topPercentage,
-        use_ground_truth: true // Use the ground truth dataset for more accurate resnorm calculation
+        use_ground_truth: true
       }),
     });
 
@@ -165,11 +160,11 @@ export const computeRegressionMesh = async (
         
         // Generate impedance data for each frequency
         const data = frequencies.map(f => {
-          const za_real = point.parameters.ra / (1 + Math.pow(2 * Math.PI * f * point.parameters.ra * point.parameters.ca, 2));
-          const za_imag = -2 * Math.PI * f * Math.pow(point.parameters.ra, 2) * point.parameters.ca / (1 + Math.pow(2 * Math.PI * f * point.parameters.ra * point.parameters.ca, 2));
+          const za_real = point.parameters.Ra / (1 + Math.pow(2 * Math.PI * f * point.parameters.Ra * point.parameters.Ca, 2));
+          const za_imag = -2 * Math.PI * f * Math.pow(point.parameters.Ra, 2) * point.parameters.Ca / (1 + Math.pow(2 * Math.PI * f * point.parameters.Ra * point.parameters.Ca, 2));
           
-          const zb_real = point.parameters.rb / (1 + Math.pow(2 * Math.PI * f * point.parameters.rb * point.parameters.cb, 2));
-          const zb_imag = -2 * Math.PI * f * Math.pow(point.parameters.rb, 2) * point.parameters.cb / (1 + Math.pow(2 * Math.PI * f * point.parameters.rb * point.parameters.cb, 2));
+          const zb_real = point.parameters.Rb / (1 + Math.pow(2 * Math.PI * f * point.parameters.Rb * point.parameters.Cb, 2));
+          const zb_imag = -2 * Math.PI * f * Math.pow(point.parameters.Rb, 2) * point.parameters.Cb / (1 + Math.pow(2 * Math.PI * f * point.parameters.Rb * point.parameters.Cb, 2));
           
           // Add Za and Zb (in series) and then add Rs
           const real = point.parameters.Rs + za_real + zb_real;
@@ -193,14 +188,14 @@ export const computeRegressionMesh = async (
           timestamp: Date.now(),
           parameters: {
             Rs: point.parameters.Rs,
-            ra: point.parameters.ra,
-            ca: point.parameters.ca,
-            rb: point.parameters.rb,
-            cb: point.parameters.cb,
+            Ra: point.parameters.Ra,
+            Ca: point.parameters.Ca,
+            Rb: point.parameters.Rb,
+            Cb: point.parameters.Cb,
             R_blank: 10, // Default value
-            frequency_range: frequencies.length > 1 ? [frequencies[0], frequencies[frequencies.length - 1]] : [1, 1000] as [number, number]
+            frequency_range: frequencyRange
           },
-          ter: point.parameters.ra + point.parameters.rb, // TER doesn't include Rs
+          ter: point.parameters.Ra + point.parameters.Rb, // TER doesn't include Rs
           data,
           color: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${point.alpha.toFixed(2)})`,
           isVisible: true,

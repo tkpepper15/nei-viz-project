@@ -1,3 +1,6 @@
+import { BackendMeshPoint } from './types';
+import { CircuitParameters } from './types/parameters';
+
 // Utility functions for circuit simulator
 
 /**
@@ -75,7 +78,7 @@ export const calculateRCImpedance = (r: number, c: number, freq: number): [numbe
 
 /**
  * Calculate the total impedance of the Randles circuit model 
- * (Rs in series with parallel Ra-Ca and parallel Rb-Cb)
+ * Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb) where Za = Ra/(1+jωRaCa) and Zb = Rb/(1+jωRbCb)
  * Returns [real part, imaginary part]
  */
 export const calculateTotalImpedance = (params: {
@@ -91,9 +94,24 @@ export const calculateTotalImpedance = (params: {
   // Calculate parallel Rb-Cb impedance using Zb = Rb/(1+jωRbCb)
   const [realB, imagB] = calculateRCImpedance(params.Rb, params.Cb, freq);
   
-  // Sum impedances in series (Rs + Za + Zb)
-  const realTotal = params.Rs + realA + realB;
-  const imagTotal = imagA + imagB;
+  // Calculate sum of membrane impedances (Za + Zb)
+  const Zab_real = realA + realB;
+  const Zab_imag = imagA + imagB;
+  
+  // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
+  // Numerator: Rs * (Za + Zb)
+  const num_real = params.Rs * Zab_real;
+  const num_imag = params.Rs * Zab_imag;
+  
+  // Denominator: Rs + Za + Zb
+  const denom_real = params.Rs + Zab_real;
+  const denom_imag = Zab_imag;
+  
+  // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+  const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+  
+  const realTotal = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+  const imagTotal = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
   
   return [realTotal, imagTotal];
 };
@@ -151,19 +169,18 @@ export const calculatePhysicalResnorm = (
     // If this is the reference point, log detailed math for educational purposes
     logFunction(`MATH DETAIL: Impedance calculation for reference parameters:`);
     logFunction(`MATH DETAIL: For RC circuit, Z = R/(1+jωRC) where ω = 2πf`);
-    logFunction(`MATH DETAIL: For series components, Ztotal = Z1 + Z2 + ...`);
+    logFunction(`MATH DETAIL: For parallel combination, Ztotal = (Rs * (Za + Zb)) / (Rs + Za + Zb)`);
     
     const sampleFreqs = [frequencies[0], frequencies[Math.floor(frequencies.length/2)], frequencies[frequencies.length-1]];
     sampleFreqs.forEach(freq => {
       const [realA, imagA] = calculateRCImpedance(referenceParams.Ra, referenceParams.Ca, freq);
       const [realB, imagB] = calculateRCImpedance(referenceParams.Rb, referenceParams.Cb, freq);
-      const realTotal = referenceParams.Rs + realA + realB;
-      const imagTotal = imagA + imagB;
+      const [realTotal, imagTotal] = calculateTotalImpedance(referenceParams, freq);
       
       logFunction(`MATH DETAIL: At f=${freq.toFixed(2)}Hz:`);
       logFunction(`MATH DETAIL:   Za = ${realA.toFixed(4)} ${imagA >= 0 ? '+' : ''}${imagA.toFixed(4)}j Ω`);
       logFunction(`MATH DETAIL:   Zb = ${realB.toFixed(4)} ${imagB >= 0 ? '+' : ''}${imagB.toFixed(4)}j Ω`);
-      logFunction(`MATH DETAIL:   Ztotal = Rs + Za + Zb = ${referenceParams.Rs} + (${realA.toFixed(4)} ${imagA >= 0 ? '+' : ''}${imagA.toFixed(4)}j) + (${realB.toFixed(4)} ${imagB >= 0 ? '+' : ''}${imagB.toFixed(4)}j) = ${realTotal.toFixed(4)} ${imagTotal >= 0 ? '+' : ''}${imagTotal.toFixed(4)}j Ω`);
+      logFunction(`MATH DETAIL:   Ztotal = (Rs * (Za + Zb)) / (Rs + Za + Zb) = ${realTotal.toFixed(4)} ${imagTotal >= 0 ? '+' : ''}${imagTotal.toFixed(4)}j Ω`);
     });
   }
   
@@ -234,15 +251,8 @@ export const calculatePhysicalResnorm = (
 /**
  * Generate grid points for parameter space exploration
  */
-export const generateGridPoints = (
-  referenceParams: {
-    Rs: number;
-    Ra: number;
-    Ca: number;
-    Rb: number;
-    Cb: number;
-    frequency_range: number[];
-  }, 
+export function generateGridPoints(
+  referenceParams: CircuitParameters,
   paramBounds: {
     Rs: { min: number; max: number };
     Ra: { min: number; max: number };
@@ -250,133 +260,66 @@ export const generateGridPoints = (
     Rb: { min: number; max: number };
     Cb: { min: number; max: number };
   },
-  pointsPerDim: number = 3,
+  pointsPerDim: number,
   logFunction?: (message: string) => void
-): Array<{
-  parameters: {
-    Rs: number;
-    Ra: number;
-    Ca: number;
-    Rb: number;
-    Cb: number;
-    frequency_range: number[];
-  };
-  resnorm: number;
-  alpha: number;
-}> => {
-  // Log the generation process
-  if (logFunction) {
-    logFunction(`MATH: Generating grid points for exploring parameter space`);
-    logFunction(`MATH: Reference parameters: Rs=${referenceParams.Rs}, Ra=${referenceParams.Ra}, Ca=${(referenceParams.Ca * 1e6).toFixed(2)}μF, Rb=${referenceParams.Rb}, Cb=${(referenceParams.Cb * 1e6).toFixed(2)}μF`);
-    logFunction(`MATH: Parameter bounds: Rs=[${paramBounds.Rs.min}, ${paramBounds.Rs.max}], Ra=[${paramBounds.Ra.min}, ${paramBounds.Ra.max}], Ca=[${(paramBounds.Ca.min * 1e6).toFixed(2)}, ${(paramBounds.Ca.max * 1e6).toFixed(2)}]μF, Rb=[${paramBounds.Rb.min}, ${paramBounds.Rb.max}], Cb=[${(paramBounds.Cb.min * 1e6).toFixed(2)}, ${(paramBounds.Cb.max * 1e6).toFixed(2)}]μF`);
-  }
-
-  // Function to generate grid values for a parameter
-  const generateParamValues = (
-    param: string,
-    min: number,
-    max: number, 
-    refValue: number,
-    pointsPerDim: number
-  ): number[] => {
-    // Create an array of values clustered more densely around the reference
-    // but also ensure we cover the entire range to explore the parameter space
-    
-    // Previously we used a linear grid or weighted grid that favored the reference point too much
-    // Now we'll use a mixture of reference-focused and exploration-focused points
-    
+): BackendMeshPoint[] {
+  // Generate logarithmically spaced values for each parameter
+  const generateLogValues = (min: number, max: number, count: number): number[] => {
     const values: number[] = [];
+    const logMin = Math.log10(min);
+    const logMax = Math.log10(max);
+    const step = (logMax - logMin) / (count - 1);
     
-    // Add the min and max bounds to ensure full range coverage
-    values.push(min);
-    values.push(max);
-    
-    // Add the reference value
-    if (refValue >= min && refValue <= max) {
-      values.push(refValue);
+    for (let i = 0; i < count; i++) {
+      const logVal = logMin + i * step;
+      const value = Math.pow(10, logVal);
+      values.push(value);
     }
     
-    // Add some points near reference (25% of points)
-    const nearRefCount = Math.max(1, Math.floor(pointsPerDim * 0.25));
-    const refRangeMin = Math.max(min, refValue * 0.85);
-    const refRangeMax = Math.min(max, refValue * 1.15);
-    
-    for (let i = 0; i < nearRefCount; i++) {
-      const t = (i + 1) / (nearRefCount + 1);
-      values.push(refRangeMin + t * (refRangeMax - refRangeMin));
-    }
-    
-    // Add points across the full range (75% of points)
-    const fullRangeCount = pointsPerDim - nearRefCount - 3; // -3 for min, max, ref
-    for (let i = 0; i < fullRangeCount; i++) {
-      const t = (i + 1) / (fullRangeCount + 1);
-      values.push(min + t * (max - min));
-    }
-    
-    // Sort and deduplicate values
-    return [...new Set(values)].sort((a, b) => a - b);
+    return values;
   };
 
-  // Generate parameter values for each dimension
-  const rsValues = generateParamValues('Rs', paramBounds.Rs.min, paramBounds.Rs.max, referenceParams.Rs, pointsPerDim);
-  const raValues = generateParamValues('Ra', paramBounds.Ra.min, paramBounds.Ra.max, referenceParams.Ra, pointsPerDim);
-  const caValues = generateParamValues('Ca', paramBounds.Ca.min, paramBounds.Ca.max, referenceParams.Ca, pointsPerDim);
-  const rbValues = generateParamValues('Rb', paramBounds.Rb.min, paramBounds.Rb.max, referenceParams.Rb, pointsPerDim);
-  const cbValues = generateParamValues('Cb', paramBounds.Cb.min, paramBounds.Cb.max, referenceParams.Cb, pointsPerDim);
+  // Generate values for each parameter
+  const rsValues = generateLogValues(paramBounds.Rs.min, paramBounds.Rs.max, pointsPerDim);
+  const raValues = generateLogValues(paramBounds.Ra.min, paramBounds.Ra.max, pointsPerDim);
+  const rbValues = generateLogValues(paramBounds.Rb.min, paramBounds.Rb.max, pointsPerDim);
+  const caValues = generateLogValues(paramBounds.Ca.min, paramBounds.Ca.max, pointsPerDim);
+  const cbValues = generateLogValues(paramBounds.Cb.min, paramBounds.Cb.max, pointsPerDim);
 
   if (logFunction) {
-    logFunction(`MATH: Grid points per parameter: Rs=${rsValues.length}, Ra=${raValues.length}, Ca=${caValues.length}, Rb=${rbValues.length}, Cb=${cbValues.length}`);
-    logFunction(`MATH: Total points in grid: ${rsValues.length * raValues.length * caValues.length * rbValues.length * cbValues.length}`);
-    
-    // Log a subset of the values for each parameter to show distribution
-    logFunction(`MATH: Rs values sample: [${rsValues.slice(0, 3).join(', ')}... ${rsValues.slice(-3).join(', ')}]`);
-    logFunction(`MATH: Ra values sample: [${raValues.slice(0, 3).join(', ')}... ${raValues.slice(-3).join(', ')}]`);
-    logFunction(`MATH: Ca values sample: [${caValues.slice(0, 3).map(v => (v * 1e6).toFixed(2)).join(', ')}... ${caValues.slice(-3).map(v => (v * 1e6).toFixed(2)).join(', ')}]μF`);
+    logFunction(`Parameter Value Distribution`);
+    logFunction(`Rs (Ω):\n[${rsValues.map(v => v.toFixed(1))}]\nCount: ${rsValues.length}`);
+    logFunction(`Ra (Ω):\n[${raValues.map(v => v.toFixed(1))}]\nCount: ${raValues.length}`);
+    logFunction(`Rb (Ω):\n[${rbValues.map(v => v.toFixed(1))}]\nCount: ${rbValues.length}`);
+    logFunction(`Ca (µF):\n[${caValues.map(v => (v * 1e6).toFixed(2))}]\nCount: ${caValues.length}`);
+    logFunction(`Cb (µF):\n[${cbValues.map(v => (v * 1e6).toFixed(2))}]\nCount: ${cbValues.length}`);
   }
 
-  // Generate all grid points
-  const gridPoints: Array<{
-    parameters: {
-      Rs: number;
-      Ra: number;
-      Ca: number;
-      Rb: number;
-      Cb: number;
-      frequency_range: number[];
-    };
-    resnorm: number;
-    alpha: number;
-  }> = [];
+  // Generate all combinations
+  const gridPoints: BackendMeshPoint[] = [];
   
-  // Generate ALL combinations for full parameter space exploration
-  // This uses nested loops to create the full Cartesian product of all parameter values
-  for (const rs of rsValues) {
-    for (const ra of raValues) {
-      for (const ca of caValues) {
-        for (const rb of rbValues) {
-          for (const cb of cbValues) {
+  for (const Rs of rsValues) {
+    for (const Ra of raValues) {
+      for (const Ca of caValues) {
+        for (const Rb of rbValues) {
+          for (const Cb of cbValues) {
             gridPoints.push({
               parameters: {
-                ...referenceParams,
-                Rs: rs,
-                Ra: ra,
-                Ca: ca,
-                Rb: rb,
-                Cb: cb
+                Rs,
+                Ra,
+                Ca,  // Keep in Farads
+                Rb,
+                Cb,  // Keep in Farads
+                frequency_range: referenceParams.frequency_range
               },
-              resnorm: 0,
-              alpha: 1
+              spectrum: [],  // Will be filled later
+              resnorm: 0     // Will be calculated later
             });
           }
         }
       }
     }
   }
-  
-  if (logFunction) {
-    logFunction(`MATH: Generated ${gridPoints.length} grid points using full Cartesian product`);
-    logFunction(`MATH: Exploring all possible parameter combinations for comprehensive visualization`);
-  }
-  
+
   return gridPoints;
-}; 
+} 

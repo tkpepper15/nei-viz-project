@@ -30,21 +30,22 @@ export interface ImpedancePoint {
 export interface ResnormGroup {
     range: [number, number];
     color: string;
+    label: string;
+    description: string;
     items: ModelSnapshot[];
 }
 
 export interface ModelSnapshot {
     id: string;
     name: string;
-    timestamp: number;
     parameters: CircuitParameters;
     data: ImpedancePoint[];
-    resnorm?: number;
     color: string;
     isVisible: boolean;
     opacity: number;
+    resnorm: number;
+    timestamp?: number;
     ter?: number;
-    dataKey?: string;
 }
 
 export interface ResnormGroupItem {
@@ -59,4 +60,35 @@ export interface ResnormGroupItem {
     opacity: number;
     ter?: number;
     dataKey?: string;
+}
+
+export interface GridParameterArrays {
+    Rs: number[];
+    Ra: number[];
+    Ca: number[];
+    Rb: number[];
+    Cb: number[];
+}
+
+export interface RadarDataPoint {
+    parameter: string;
+    fullValue: number;
+    displayValue: string;
+    [key: string]: number | string;
+}
+
+export interface SpiderData {
+    data: SpiderDataPoint[];
+    states: SpiderState[];
+}
+
+export interface SpiderDataPoint {
+    parameter: string;
+    [key: string]: number | string;
+}
+
+export interface SpiderState {
+    name: string;
+    color: string;
+    dataKey: string;
 } 

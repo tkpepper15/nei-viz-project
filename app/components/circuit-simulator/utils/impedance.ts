@@ -1,13 +1,5 @@
 import { Complex } from './types';
-
-export interface CircuitParameters {
-    Rs: number;      // Tight junction resistance
-    Ra: number;      // Apical membrane resistance
-    Ca: number;      // Apical membrane capacitance
-    Rb: number;      // Basal membrane resistance
-    Cb: number;      // Basal membrane capacitance
-    frequency_range: [number, number]; // Frequency range for impedance calculation
-}
+import { CircuitParameters } from '../types/parameters';
 
 export interface ImpedancePoint {
     real: number;
@@ -41,13 +33,13 @@ export const calculateMembraneImpedance = (
 
 /**
  * Calculate the equivalent impedance of the epithelial model
- * Z_eq(ω) = Rs + Za(ω) + Zb(ω) where Za(ω) = Ra/(1+jωRaCa) and Zb(ω) = Rb/(1+jωRbCb)
+ * Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb) where Za(ω) = Ra/(1+jωRaCa) and Zb(ω) = Rb/(1+jωRbCb)
  */
 export const calculateEquivalentImpedance = (
     params: CircuitParameters,
     omega: number
 ): Complex => {
-    // Calculate individual membrane impedances using the new formula Ra/(1+jωRaCa)
+    // Calculate individual membrane impedances using the formula Ra/(1+jωRaCa)
     // For Za
     const Za_denom = {
         real: 1, 
@@ -70,10 +62,31 @@ export const calculateEquivalentImpedance = (
         imag: -params.Rb * Zb_denom.imag / Zb_denom_mag_squared
     };
 
-    // Z_eq = Rs + Za + Zb
-    return {
-        real: params.Rs + Za.real + Zb.real,
+    // Calculate sum of membrane impedances (Za + Zb)
+    const Zab = {
+        real: Za.real + Zb.real,
         imag: Za.imag + Zb.imag
+    };
+
+    // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
+    // Numerator: Rs * (Za + Zb)
+    const numerator = {
+        real: params.Rs * Zab.real,
+        imag: params.Rs * Zab.imag
+    };
+    
+    // Denominator: Rs + Za + Zb
+    const denominator = {
+        real: params.Rs + Zab.real,
+        imag: Zab.imag
+    };
+    
+    // Complex division: numerator / denominator
+    const denom_mag_squared = denominator.real * denominator.real + denominator.imag * denominator.imag;
+    
+    return {
+        real: (numerator.real * denominator.real + numerator.imag * denominator.imag) / denom_mag_squared,
+        imag: (numerator.imag * denominator.real - numerator.real * denominator.imag) / denom_mag_squared
     };
 };
 

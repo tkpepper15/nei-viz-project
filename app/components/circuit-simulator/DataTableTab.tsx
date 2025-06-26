@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { BackendMeshPoint, ResnormGroup } from '../circuit-simulator/utils/types';
-import { CircuitParameters } from '../circuit-simulator/utils/impedance';
+import React, { useState, useMemo } from 'react';
+import { BackendMeshPoint, ResnormGroup, GridParameterArrays } from './utils/types';
+import { CircuitParameters } from './types/parameters';
 
-type DataTableTabProps = {
+interface DataTableTabProps {
   gridResults: BackendMeshPoint[];
   gridResultsWithIds: (BackendMeshPoint & { id: number })[];
   resnormGroups: ResnormGroup[];
@@ -10,10 +10,21 @@ type DataTableTabProps = {
   maxGridPoints: number;
   gridSize: number;
   parameters: CircuitParameters;
-  groundTruthParams?: CircuitParameters;
+  groundTruthParams: CircuitParameters;
+  gridParameterArrays: GridParameterArrays | null;
+}
+
+// Add formatValue function to handle unit conversions
+const formatValue = (value: number, isCapacitance: boolean): string => {
+  if (isCapacitance) {
+    // Convert from Farads to µF and format with 2 decimal places
+    return (value * 1e6).toFixed(2);
+  }
+  // For resistance values, show 1 decimal place for values < 1000, otherwise no decimals
+  return value < 1000 ? value.toFixed(1) : value.toFixed(0);
 };
 
-const DataTableTab: React.FC<DataTableTabProps> = ({
+export const DataTableTab: React.FC<DataTableTabProps> = ({
   gridResults,
   gridResultsWithIds,
   resnormGroups,
@@ -21,7 +32,8 @@ const DataTableTab: React.FC<DataTableTabProps> = ({
   maxGridPoints,
   gridSize,
   parameters,
-  groundTruthParams
+  groundTruthParams,
+  gridParameterArrays
 }) => {
   // Table sorting state
   const [sortColumn, setSortColumn] = useState<string>('resnorm');
@@ -182,193 +194,361 @@ const DataTableTab: React.FC<DataTableTabProps> = ({
     return { qualityLabel, groupColor, groupIndex, qualityCategory };
   };
 
+  // Calculate unique values for each parameter
+  const uniqueValues = useMemo(() => {
+    const values = {
+      Rs: new Set<number>(),
+      Ra: new Set<number>(),
+      Rb: new Set<number>(),
+      Ca: new Set<number>(),
+      Cb: new Set<number>()
+    };
+
+    gridResults.forEach(point => {
+      values.Rs.add(Number(point.parameters.Rs.toFixed(2)));
+      values.Ra.add(Number(point.parameters.Ra.toFixed(2)));
+      values.Rb.add(Number(point.parameters.Rb.toFixed(2)));
+      values.Ca.add(Number((point.parameters.Ca * 1e6).toFixed(2))); // Convert to µF
+      values.Cb.add(Number((point.parameters.Cb * 1e6).toFixed(2))); // Convert to µF
+    });
+
+    return {
+      Rs: Array.from(values.Rs).sort((a, b) => a - b),
+      Ra: Array.from(values.Ra).sort((a, b) => a - b),
+      Rb: Array.from(values.Rb).sort((a, b) => a - b),
+      Ca: Array.from(values.Ca).sort((a, b) => a - b),
+      Cb: Array.from(values.Cb).sort((a, b) => a - b)
+    };
+  }, [gridResults]);
+
+  // Add grid parameter info display
+  const renderGridInfo = () => {
+    if (!gridParameterArrays) return null;
+
+    const getMinMax = (values: number[]) => ({
+      min: Math.min(...values),
+      max: Math.max(...values)
+    });
+
+    const ranges = {
+      Rs: getMinMax(gridParameterArrays.Rs),
+      Ra: getMinMax(gridParameterArrays.Ra),
+      Rb: getMinMax(gridParameterArrays.Rb),
+      Ca: getMinMax(gridParameterArrays.Ca),
+      Cb: getMinMax(gridParameterArrays.Cb)
+    };
+
+    return (
+      <div className="mb-4 p-3 bg-neutral-800/30 rounded-md">
+        <h3 className="text-sm font-medium text-neutral-200 mb-2">Grid Parameter Ranges</h3>
+        <div className="grid grid-cols-5 gap-4 text-xs">
+          <div>
+            <span className="text-neutral-400">Rs: </span>
+            <span className="font-mono text-neutral-300">
+              {ranges.Rs.min.toFixed(1)} - {ranges.Rs.max.toFixed(1)} Ω
+            </span>
+          </div>
+          <div>
+            <span className="text-neutral-400">Ra: </span>
+            <span className="font-mono text-neutral-300">
+              {ranges.Ra.min.toFixed(1)} - {ranges.Ra.max.toFixed(1)} Ω
+            </span>
+          </div>
+          <div>
+            <span className="text-neutral-400">Rb: </span>
+            <span className="font-mono text-neutral-300">
+              {ranges.Rb.min.toFixed(1)} - {ranges.Rb.max.toFixed(1)} Ω
+            </span>
+          </div>
+          <div>
+            <span className="text-neutral-400">Ca: </span>
+            <span className="font-mono text-neutral-300">
+              {ranges.Ca.min.toFixed(2)} - {ranges.Ca.max.toFixed(2)} µF
+            </span>
+          </div>
+          <div>
+            <span className="text-neutral-400">Cb: </span>
+            <span className="font-mono text-neutral-300">
+              {ranges.Cb.min.toFixed(2)} - {ranges.Cb.max.toFixed(2)} µF
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="card">
-      <header className="card-header">
-        <div className="flex items-center">
+    <div className="space-y-4">
+      {/* Add grid info section */}
+      {renderGridInfo()}
+
+      {/* Debug section showing unique values */}
+      <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
+        <h3 className="text-sm font-medium text-neutral-300 mb-3 flex items-center">
           <svg className="w-4 h-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
-          <h3 className="text-sm font-medium text-neutral-300">Grid Results Data</h3>
-        </div>
-        <p className="text-xs text-neutral-500 mt-2">
-          Showing all {gridResults.length} grid points, grouped by quality score
-        </p>
-      </header>
+          Parameter Value Distribution
+        </h3>
+        
+        <div className="space-y-3 text-sm">
+          <div>
+            <span className="text-neutral-400 font-medium">Rs (Ω):</span>
+            <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
+              [{uniqueValues.Rs.map(v => v.toFixed(1)).join(', ')}]
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Rs.length}</div>
+          </div>
           
-      <div className="px-5 pb-5">
-        <div className="flex justify-between items-center mb-3">
-          <h4 className="text-xs font-medium text-neutral-300 flex items-center">
-            <svg className="w-3.5 h-3.5 mr-1.5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-            Parameters Data
-          </h4>
-          <div className="text-xs text-neutral-500">
-            Showing {startIndex + 1}-{Math.min(endIndex, displayCount)} of {gridResults.length} results ({Math.round((maxGridPoints / Math.pow(gridSize, 5)) * 100)}% of total {Math.pow(gridSize, 5).toLocaleString()})
+          <div>
+            <span className="text-neutral-400 font-medium">Ra (Ω):</span>
+            <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
+              [{uniqueValues.Ra.map(v => v.toFixed(1)).join(', ')}]
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Ra.length}</div>
+          </div>
+          
+          <div>
+            <span className="text-neutral-400 font-medium">Rb (Ω):</span>
+            <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
+              [{uniqueValues.Rb.map(v => v.toFixed(1)).join(', ')}]
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Rb.length}</div>
+          </div>
+          
+          <div>
+            <span className="text-neutral-400 font-medium">Ca (µF):</span>
+            <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
+              [{uniqueValues.Ca.map(v => v.toFixed(2)).join(', ')}]
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Ca.length}</div>
+          </div>
+          
+          <div>
+            <span className="text-neutral-400 font-medium">Cb (µF):</span>
+            <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
+              [{uniqueValues.Cb.map(v => v.toFixed(2)).join(', ')}]
+            </div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Cb.length}</div>
           </div>
         </div>
-        
-        <table className="data-table w-full border border-neutral-700 rounded-lg overflow-hidden">
-          <thead>
-            <tr className="bg-neutral-800 text-neutral-300 text-xs">
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('id')}>
-                <div className="flex items-center justify-between">
-                  <span>ID</span>
-                  {renderSortArrow('id')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('Rs')}>
-                <div className="flex items-center justify-between">
-                  <span>Rs (Ω)</span>
-                  {renderSortArrow('Rs')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('Ra')}>
-                <div className="flex items-center justify-between">
-                  <span>Ra (Ω)</span>
-                  {renderSortArrow('Ra')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('Ca')}>
-                <div className="flex items-center justify-between">
-                  <span>Ca (μF)</span>
-                  {renderSortArrow('Ca')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('Rb')}>
-                <div className="flex items-center justify-between">
-                  <span>Rb (Ω)</span>
-                  {renderSortArrow('Rb')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('Cb')}>
-                <div className="flex items-center justify-between">
-                  <span>Cb (μF)</span>
-                  {renderSortArrow('Cb')}
-                </div>
-              </th>
-              <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('resnorm')}>
-                <div className="flex items-center justify-between">
-                  <span>Fit Quality (Resnorm)</span>
-                  {renderSortArrow('resnorm')}
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* Reference Row */}
-            <tr className="bg-primary/10 hover:bg-primary/15 transition-colors border-t border-neutral-700">
-              <td className="p-2 font-medium text-primary">Ref</td>
-              <td className="p-2">{groundTruthParams?.Rs.toFixed(2) || parameters.Rs.toFixed(2)}</td>
-              <td className="p-2">{groundTruthParams?.Ra.toFixed(0) || parameters.Ra.toFixed(0)}</td>
-              <td className="p-2">{((groundTruthParams?.Ca || parameters.Ca) * 1e6).toFixed(2)}</td>
-              <td className="p-2">{groundTruthParams?.Rb.toFixed(0) || parameters.Rb.toFixed(0)}</td>
-              <td className="p-2">{((groundTruthParams?.Cb || parameters.Cb) * 1e6).toFixed(2)}</td>
-              <td className="p-2">
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
-                  <span className="font-medium text-primary mr-2">Perfect</span>
-                  <span className="text-xs font-mono text-primary">0.00E+00</span>
-                </div>
-              </td>
-            </tr>
-            
-            {/* Paginated Results */}
-            {getPaginatedGridResults()
-              // Show all points regardless of visibility status in the spider plot
-              .map((point, idx) => {
-                const { qualityLabel, groupColor, groupIndex } = getQualityInfo(point);
-                // Calculate visibility status for UI indication
-                const isHidden = groupIndex >= 0 && hiddenGroups.includes(groupIndex);
-                
-                return (
-                  <tr 
-                    key={idx} 
-                    className={`${idx % 2 === 0 ? 'bg-neutral-900' : 'bg-neutral-800/60'} 
-                      hover:bg-neutral-800/80 transition-colors border-t border-neutral-700
-                      ${isHidden ? 'opacity-50' : ''}`}
-                  >
-                    <td className="p-2 font-medium">{point.id}</td>
-                    <td className="p-2">{point.parameters.Rs.toFixed(2)}</td>
-                    <td className="p-2">{point.parameters.Ra.toFixed(0)}</td>
-                    <td className="p-2">{(point.parameters.Ca * 1e6).toFixed(2)}</td>
-                    <td className="p-2">{point.parameters.Rb.toFixed(0)}</td>
-                    <td className="p-2">{(point.parameters.Cb * 1e6).toFixed(2)}</td>
-                    <td className="p-2">
-                      <div className="flex items-center space-x-2">
-                        <span 
-                          className="w-2.5 h-2.5 rounded-full"
-                          style={{ backgroundColor: groupColor }}
-                        ></span>
-                        <span className="font-medium mr-2" style={{ color: groupColor }}>{qualityLabel}</span>
-                        <span className="text-xs font-mono text-neutral-400">{point.resnorm.toExponential(3)}</span>
-                        {isHidden && (
-                          <span className="text-xs text-neutral-500 ml-1">(hidden)</span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-          </tbody>
-        </table>
-        
-        {/* Pagination Controls */}
-        {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => handlePageChange(1)}
-                disabled={currentPage === 1}
-                className={`p-1.5 rounded-md text-neutral-400 ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className={`p-1.5 rounded-md text-neutral-400 ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              
-              <span className="text-sm text-neutral-400">
-                Page {currentPage} of {totalPages}
-              </span>
-              
-              <button
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className={`p-1.5 rounded-md text-neutral-400 ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-              <button
-                onClick={() => handlePageChange(totalPages)}
-                disabled={currentPage === totalPages}
-                className={`p-1.5 rounded-md text-neutral-400 ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                </svg>
-              </button>
-            </div>
-            
-            <div className="text-xs text-neutral-400">
-              <span className="font-medium text-neutral-300">TER</span> = Ra + Rb = {((groundTruthParams?.Ra || parameters.Ra) + (groundTruthParams?.Rb || parameters.Rb)).toFixed(0)} Ω (reference)
+      </div>
+
+      <div className="card">
+        <header className="card-header">
+          <div className="flex items-center">
+            <svg className="w-4 h-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <h3 className="text-sm font-medium text-neutral-300">Grid Results Data</h3>
+          </div>
+          <p className="text-xs text-neutral-500 mt-2">
+            Showing all {gridResults.length} grid points, grouped by quality score
+          </p>
+        </header>
+          
+        <div className="px-5 pb-5">
+          <div className="flex justify-between items-center mb-3">
+            <h4 className="text-xs font-medium text-neutral-300 flex items-center">
+              <svg className="w-3.5 h-3.5 mr-1.5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              Parameters Data
+            </h4>
+            <div className="text-xs text-neutral-500">
+              Showing {startIndex + 1}-{Math.min(endIndex, displayCount)} of {gridResults.length} results ({Math.round((maxGridPoints / Math.pow(gridSize, 5)) * 100)}% of total {Math.pow(gridSize, 5).toLocaleString()})
             </div>
           </div>
-        )}
+          
+          <table className="min-w-full divide-y divide-neutral-700 data-table">
+            <thead>
+              <tr className="bg-neutral-800 text-neutral-300 text-xs">
+                <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('id')}>
+                  <div className="flex items-center justify-between">
+                    <span>ID</span>
+                    {renderSortArrow('id')}
+                  </div>
+                </th>
+                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                  <button 
+                    className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
+                    onClick={() => handleSort('parameters.Rs')}
+                  >
+                    Rs (Ω) {renderSortArrow('parameters.Rs')}
+                  </button>
+                </th>
+                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                  <button 
+                    className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
+                    onClick={() => handleSort('parameters.Ra')}
+                  >
+                    Ra (Ω) {renderSortArrow('parameters.Ra')}
+                  </button>
+                </th>
+                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                  <button 
+                    className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
+                    onClick={() => handleSort('parameters.Ca')}
+                  >
+                    Ca (µF) {renderSortArrow('parameters.Ca')}
+                  </button>
+                </th>
+                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                  <button 
+                    className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
+                    onClick={() => handleSort('parameters.Rb')}
+                  >
+                    Rb (Ω) {renderSortArrow('parameters.Rb')}
+                  </button>
+                </th>
+                <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
+                  <button 
+                    className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
+                    onClick={() => handleSort('parameters.Cb')}
+                  >
+                    Cb (µF) {renderSortArrow('parameters.Cb')}
+                  </button>
+                </th>
+                <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('resnorm')}>
+                  <div className="flex items-center justify-between">
+                    <span>Fit Quality (Resnorm)</span>
+                    {renderSortArrow('resnorm')}
+                  </div>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-700">
+              {/* Reference Row */}
+              <tr className="bg-primary/10 hover:bg-primary/15 transition-colors border-t border-neutral-700">
+                <td className="p-2 font-medium text-primary">Ref</td>
+                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                  {formatValue(groundTruthParams?.Rs || parameters.Rs, false)}
+                </td>
+                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                  {formatValue(groundTruthParams?.Ra || parameters.Ra, false)}
+                </td>
+                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                  {formatValue(groundTruthParams?.Ca || parameters.Ca, true)}
+                </td>
+                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                  {formatValue(groundTruthParams?.Rb || parameters.Rb, false)}
+                </td>
+                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                  {formatValue(groundTruthParams?.Cb || parameters.Cb, true)}
+                </td>
+                <td className="p-2">
+                  <div className="flex items-center space-x-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
+                    <span className="font-medium text-primary mr-2">Perfect</span>
+                    <span className="text-xs font-mono text-primary">0.00E+00</span>
+                  </div>
+                </td>
+              </tr>
+              
+              {/* Paginated Results */}
+              {getPaginatedGridResults()
+                // Show all points regardless of visibility status in the spider plot
+                .map((point, idx) => {
+                  const { qualityLabel, groupColor, groupIndex } = getQualityInfo(point);
+                  // Calculate visibility status for UI indication
+                  const isHidden = groupIndex >= 0 && hiddenGroups.includes(groupIndex);
+                  
+                  return (
+                    <tr 
+                      key={`result-${idx}`} 
+                      className={`${idx % 2 === 0 ? 'bg-neutral-900' : 'bg-neutral-800/60'} 
+                        hover:bg-neutral-800/80 transition-colors border-t border-neutral-700
+                        ${isHidden ? 'opacity-50' : ''}`}
+                    >
+                      <td className="p-2 font-medium">{point.id}</td>
+                      <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                        {formatValue(point.parameters.Rs, false)}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                        {formatValue(point.parameters.Ra, false)}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                        {formatValue(point.parameters.Ca, true)}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                        {formatValue(point.parameters.Rb, false)}
+                      </td>
+                      <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                        {formatValue(point.parameters.Cb, true)}
+                      </td>
+                      <td className="p-2">
+                        <div className="flex items-center space-x-2">
+                          <span 
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: groupColor }}
+                          ></span>
+                          <span className="font-medium mr-2" style={{ color: groupColor }}>{qualityLabel}</span>
+                          <span className="text-xs font-mono text-neutral-400">{point.resnorm.toExponential(3)}</span>
+                          {isHidden && (
+                            <span className="text-xs text-neutral-500 ml-1">(hidden)</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+          
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handlePageChange(1)}
+                  disabled={currentPage === 1}
+                  className={`p-1.5 rounded-md text-neutral-400 ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className={`p-1.5 rounded-md text-neutral-400 ${currentPage === 1 ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                
+                <span className="text-sm text-neutral-400">
+                  Page {currentPage} of {totalPages}
+                </span>
+                
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className={`p-1.5 rounded-md text-neutral-400 ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => handlePageChange(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className={`p-1.5 rounded-md text-neutral-400 ${currentPage === totalPages ? 'opacity-50 cursor-not-allowed' : 'hover:text-primary hover:bg-neutral-800/50'}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+              
+              <div className="text-xs text-neutral-400">
+                <span className="font-medium text-neutral-300">TER</span> = Ra + Rb = {((groundTruthParams?.Ra || parameters.Ra) + (groundTruthParams?.Rb || parameters.Rb)).toFixed(0)} Ω (reference)
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
-};
-
-export default DataTableTab; 
+}; 

@@ -2,885 +2,359 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom utility classes that might be missing */
+.text-primary {
+  color: var(--primary);
+}
+
+.text-primary-light {
+  color: #60a5fa; /* blue-400 */
+}
+
+.bg-primary {
+  background-color: var(--primary);
+}
+
+.border-primary {
+  border-color: var(--primary);
+}
+
+.hover\:text-primary:hover {
+  color: var(--primary);
+}
+
+.hover\:bg-primary:hover {
+  background-color: var(--primary);
+}
+
+/* Backdrop filter support */
+.backdrop-blur-sm {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.backdrop-blur {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Animation utilities */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 html, body {
-  height: 100vh;
-  overflow: hidden;
-  margin: 0;
   padding: 0;
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen,
+    Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
 }
 
 :root {
-  /* Core colors - Modern Dark Theme */
-  --background: #0f172a;
-  --foreground: #f8fafc;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
-  --primary-light: #1e3a8a;
-  
-  /* Semantic colors */
-  --success: #10b981;
-  --success-light: #064e3b;
-  --warning: #f59e0b;
-  --warning-light: #78350f;
-  --danger: #ef4444;
-  --danger-light: #7f1d1d;
-  
-  /* Neutral scale */
-  --neutral-50: #0f172a;
-  --neutral-100: #1e293b;
-  --neutral-200: #334155;
-  --neutral-300: #475569;
-  --neutral-400: #64748b;
-  --neutral-500: #94a3b8;
-  --neutral-600: #cbd5e1;
-  --neutral-700: #e2e8f0;
-  --neutral-800: #f1f5f9;
-  --neutral-900: #f8fafc;
-  
-  /* Circuit-specific colors */
-  --circuit-text-primary: var(--neutral-600);
-  --circuit-text-secondary: var(--neutral-500);
-  --circuit-text-tertiary: var(--neutral-400);
-  --circuit-border-color: var(--neutral-200);
-  --circuit-bg-light: var(--neutral-100);
-  --circuit-shadow: rgba(0, 0, 0, 0.5);
-  
-  /* Component variables */
-  --header-height: 64px;
-  --sidebar-width: 17rem;
-  --rounded-sm: 0.25rem;
-  --rounded-md: 0.375rem;
-  --rounded-lg: 0.5rem;
-  
-  /* Spider Plot specific colors */
-  --spider-grid-color: var(--neutral-400);
-  --spider-bg: var(--neutral-50);
-  --spider-axis-text: var(--neutral-600);
-  --spider-axis-unit: var(--neutral-500);
-  --spider-ref-color: #ffffff;
-  --spider-card-bg: var(--neutral-100);
-  --spider-label-bg: rgba(15, 23, 42, 0.9);
+  --background: #0f172a; /* slate-900 */
+  --foreground: #f8fafc; /* slate-50 */
+  --primary: #3b82f6; /* blue-500 */
+  --primary-hover: #2563eb; /* blue-600 */
+  --neutral-50: #f8fafc;
+  --neutral-100: #f1f5f9;
+  --neutral-200: #e2e8f0;
+  --neutral-700: #334155;
+  --neutral-800: #1e293b;
+  --neutral-900: #0f172a;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-/* Circuit Simulator Component Styles */
-@layer components {
-  /* Layout */
-  .circuit-container {
-    @apply flex flex-col h-screen max-h-screen overflow-hidden;
-    background-color: var(--background);
-  }
-  
-  .circuit-header {
-    @apply py-3 px-5 flex items-center justify-between flex-shrink-0;
-    background-color: var(--neutral-50);
-    border-bottom: 1px solid var(--circuit-border-color);
-    color: var(--circuit-text-primary);
-    height: var(--header-height);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-  
-  .circuit-content {
-    @apply flex flex-1 overflow-hidden;
-  }
-  
-  .circuit-sidebar {
-    @apply flex-shrink-0 h-full flex flex-col overflow-hidden;
-    width: var(--sidebar-width);
-    border-right: 1px solid var(--circuit-border-color);
-    background-color: var(--neutral-50);
-    box-shadow: 1px 0 3px rgba(0, 0, 0, 0.1);
-  }
-  
-  .circuit-tabs {
-    @apply flex text-xs border-b;
-    border-color: var(--circuit-border-color);
-  }
-  
-  .circuit-tab {
-    @apply flex-1 px-4 py-3 font-medium transition-all duration-200;
-    letter-spacing: 0.02em;
-  }
-  
-  .circuit-tab-active {
-    color: var(--primary);
-    background-color: var(--neutral-100);
-    border-bottom: 2px solid var(--primary);
-    font-weight: 600;
-  }
-  
-  .circuit-tab-inactive {
-    color: var(--circuit-text-secondary);
-  }
-  
-  .circuit-tab-inactive:hover {
-    background-color: var(--circuit-bg-light);
-    color: var(--circuit-text-primary);
-  }
-  
-  .circuit-main {
-    @apply flex-1 flex flex-col overflow-hidden;
-    background-color: var(--neutral-50);
-  }
-  
-  .circuit-visualization {
-    @apply flex-1 p-4 overflow-y-auto;
-    min-height: 500px; /* Ensure minimum height */
-    max-height: calc(100vh - 120px); /* Prevent excessive height */
-  }
-  
-  /* Status Message */
-  .circuit-status {
-    @apply px-5 py-2.5 text-xs border-b;
-    background-color: var(--primary-light);
-    color: var(--primary);
-    letter-spacing: 0.02em;
-    font-weight: 500;
-  }
-  
-  /* Text styles */
-  .text-title {
-    font-size: 1.125rem;
-    font-weight: 600;
-    color: var(--circuit-text-primary);
-    letter-spacing: -0.01em;
-  }
-  
-  .text-subtitle {
-    font-size: 0.875rem;
-    color: var(--circuit-text-secondary);
-    letter-spacing: 0.01em;
-  }
-  
-  .text-small {
-    font-size: 0.75rem;
-    color: var(--circuit-text-tertiary);
-    letter-spacing: 0.02em;
-  }
-  
-  .text-data {
-    font-size: 0.75rem;
-    color: var(--circuit-text-primary);
-    letter-spacing: 0.01em;
-  }
-  
-  /* Buttons */
-  .button-primary {
-    @apply px-3.5 py-2 rounded-md text-white text-xs font-medium transition-all duration-200 ease-in-out shadow-sm;
-    background-color: var(--primary);
-    letter-spacing: 0.02em;
-  }
-  
-  .button-primary:hover {
-    background-color: var(--primary-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  }
-  
-  .button-secondary {
-    @apply px-2.5 py-1.5 text-xs rounded-md transition-all duration-200 ease-in-out;
-    color: var(--primary);
-    background-color: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    font-weight: 500;
-  }
-  
-  .button-secondary:hover {
-    background-color: rgba(59, 130, 246, 0.15);
-    transform: translateY(-1px);
-  }
-  
-  .button-success {
-    @apply px-3.5 py-2 rounded-md text-xs font-medium transition-all duration-200 ease-in-out shadow-sm;
-    background-color: var(--success-light);
-    color: var(--success);
-    border: 1px solid rgba(16, 185, 129, 0.3);
-  }
-  
-  .button-success:hover {
-    filter: brightness(1.2);
-    transform: translateY(-1px);
-  }
-  
-  .icon-button {
-    @apply flex items-center gap-1.5;
-  }
-  
-  /* Sections */
-  .collapsible-section {
-    @apply border rounded-lg overflow-hidden shadow-sm;
-    border-color: var(--circuit-border-color);
-    background-color: var(--neutral-100);
-  }
-  
-  .section-header {
-    @apply w-full flex items-center justify-between px-4 py-3 text-xs font-medium transition-colors;
-    background-color: var(--neutral-200);
-    color: var(--circuit-text-primary);
-    letter-spacing: 0.02em;
-  }
-  
-  .section-header:hover {
-    filter: brightness(1.1);
-  }
-  
-  .section-content {
-    @apply p-4;
-    background-color: var(--neutral-100);
-  }
-  
-  /* Cards and Boxes */
-  .card {
-    @apply border rounded-lg overflow-hidden;
-    border-color: var(--circuit-border-color);
-    background-color: var(--neutral-100);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    transition: all 0.2s ease;
-  }
-  
-  .card:hover {
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  }
-  
-  .card-header {
-    @apply py-3 px-5 border-b;
-    background-color: var(--neutral-200);
-    border-color: var(--circuit-border-color);
-  }
-  
-  /* Spider Plot */
-  .spider-plot-container {
-    @apply relative;
-    height: 520px;
-    background-color: var(--spider-bg);
-    border-radius: var(--rounded-md);
-    overflow: hidden;
-    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4);
-  }
-  
-  .spider-svg {
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    background-color: rgba(15, 23, 42, 0.9);
-    border-radius: var(--rounded-md);
-    position: relative;
-    display: block;
-  }
-  
-  .spider-svg text {
-    fill: white;
-    font-size: 12px;
-    font-weight: 600;
-    filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9));
-  }
-  
-  .spider-svg .axis-line {
-    stroke: var(--spider-grid-color);
-    stroke-width: 1.5;
-    stroke-opacity: 0.7;
-  }
-  
-  .spider-svg .reference-point {
-    filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));
-  }
-  
-  /* Spider Plot specific styling */
-  .spider-visualization {
-    background-color: var(--spider-bg);
-    border-radius: var(--rounded-md);
-    border: 1px solid var(--circuit-border-color);
-    overflow: hidden;
-    box-shadow: inset 0 1px 5px rgba(0, 0, 0, 0.4);
-    height: 100%;
-    width: 100%;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  
-  .spider-card {
-    background-color: var(--spider-card-bg);
-    border-color: var(--circuit-border-color);
-    border-radius: var(--rounded-lg);
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    overflow: hidden;
-    transition: all 0.3s ease;
-    min-height: 400px;
-    display: flex;
-    flex-direction: column;
-  }
-  
-  .spider-card:hover {
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-  }
-  
-  .spider-card-header {
-    background-color: var(--neutral-200);
-    border-bottom: 1px solid var(--circuit-border-color);
-    padding: 14px 18px;
-  }
-  
-  .spider-value-indicator {
-    background-color: var(--neutral-300);
-    padding: 3px 10px;
-    border-radius: 6px;
-    color: var(--neutral-800);
-    min-width: 42px;
-    text-align: center;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-  }
-  
-  .spider-heading {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--circuit-text-primary);
-    margin-bottom: 0.75rem;
-    letter-spacing: 0.01em;
-  }
-  
-  .spider-label {
-    background-color: var(--spider-label-bg);
-    padding: 0.3rem 0.6rem;
-    border-radius: var(--rounded-md);
-    font-size: 0.75rem;
-    color: var(--circuit-text-primary);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  }
-  
-  .spider-parameter-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--spider-axis-text);
-    letter-spacing: 0.02em;
-  }
-  
-  .spider-parameter-unit {
-    font-size: 0.625rem;
-    color: var(--spider-axis-unit);
-    letter-spacing: 0.02em;
-  }
-  
-  .spider-reference-dot {
-    fill: var(--spider-ref-color);
-    r: 3.5;
-    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
-  }
-  
-  .spider-grid-line {
-    stroke: var(--spider-grid-color);
-    stroke-opacity: 0.5;
-    stroke-width: 1;
-  }
-  
-  .spider-axis-line {
-    stroke: var(--spider-grid-color);
-    stroke-opacity: 0.7;
-    stroke-width: 1;
-  }
-  
-  .spider-control-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--circuit-text-primary);
-    margin-bottom: 0.25rem;
-    letter-spacing: 0.02em;
-  }
-  
-  .spider-control-value {
-    font-size: 0.75rem;
-    color: var(--primary);
-    font-weight: 500;
-    letter-spacing: 0.01em;
-  }
-  
-  .spider-range-slider {
-    height: 0.3rem;
-    background-color: var(--neutral-300);
-    border-radius: 0.15rem;
-    appearance: none;
-    cursor: pointer;
-    outline: none;
-    transition: all 0.2s ease;
-  }
-  
-  .spider-range-slider::-webkit-slider-thumb {
-    appearance: none;
-    width: 0.9rem;
-    height: 0.9rem;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s ease;
-  }
-  
-  .spider-range-slider::-webkit-slider-thumb:hover {
-    transform: scale(1.1);
-  }
-  
-  .spider-range-slider::-moz-range-thumb {
-    width: 0.9rem;
-    height: 0.9rem;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s ease;
-  }
-  
-  .spider-range-slider::-moz-range-thumb:hover {
-    transform: scale(1.1);
-  }
-  
-  .spider-info-box {
-    background-color: var(--neutral-200);
-    border: 1px solid var(--circuit-border-color);
-    border-radius: var(--rounded-md);
-    padding: 0.6rem;
-    max-width: 14rem;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  }
-  
-  .spider-info-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--circuit-text-primary);
-    margin-bottom: 0.35rem;
-    letter-spacing: 0.01em;
-  }
-  
-  .spider-info-row {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.75rem;
-    color: var(--circuit-text-secondary);
-    letter-spacing: 0.01em;
-  }
-  
-  .spider-info-label {
-    font-weight: 500;
-  }
-  
-  /* Data & tables */
-  .data-table {
-    @apply min-w-full text-xs border-collapse;
-    color: var(--circuit-text-primary);
-  }
-  
-  .data-table-header {
-    background-color: var(--neutral-200);
-  }
-  
-  .data-th {
-    @apply px-4 py-2.5 text-left border-b font-medium;
-    color: var(--circuit-text-primary);
-    border-color: var(--circuit-border-color);
-    letter-spacing: 0.02em;
-  }
-  
-  .data-td {
-    @apply px-4 py-2.5 border-b;
-    border-color: var(--circuit-border-color);
-    letter-spacing: 0.01em;
-  }
-  
-  /* Forms & Sliders */
-  .param-slider {
-    @apply space-y-1.5;
-  }
-  
-  .slider-label {
-    @apply flex justify-between items-center;
-  }
-  
-  .slider-label-text {
-    @apply text-xs;
-    color: var(--neutral-600);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-  }
-  
-  .slider-value {
-    @apply text-xs font-medium;
-    color: var(--neutral-900);
-    background-color: var(--neutral-400);
-    padding: 2px 8px;
-    border-radius: 4px;
-    letter-spacing: 0.01em;
-  }
-  
-  .slider-input {
-    @apply w-full h-1.5 rounded-lg appearance-none cursor-pointer;
-    background-color: var(--neutral-500);
-    transition: all 0.2s ease;
-  }
-  
-  .slider-input:hover {
-    background-color: var(--neutral-400);
-  }
-  
-  .slider-input::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s ease;
-  }
-  
-  .slider-input::-webkit-slider-thumb:hover {
-    transform: scale(1.1);
-    background: var(--primary-hover);
-  }
-  
-  .slider-input::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: var(--primary);
-    cursor: pointer;
-    border: 2px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    transition: all 0.2s ease;
-  }
-  
-  .slider-input::-moz-range-thumb:hover {
-    transform: scale(1.1);
-    background: var(--primary-hover);
-  }
-  
-  /* Adjust input field styling for better visibility */
-  input[type="text"],
-  input[type="number"] {
-    color: var(--neutral-800) !important;
-    background-color: var(--neutral-100) !important;
-    border-color: var(--neutral-400) !important;
-    border-radius: 0.375rem !important;
-    padding: 0.35rem 0.5rem !important;
-    transition: all 0.2s ease !important;
-  }
-  
-  input[type="text"]:focus,
-  input[type="number"]:focus {
-    border-color: var(--primary) !important;
-    outline: none !important;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
-  }
-  
-  /* Utility classes */
-  .icon-small {
-    width: 1rem;
-    height: 1rem;
-  }
-  
-  .chip {
-    @apply px-2.5 py-1.5 text-xs rounded-md flex items-center;
-    background-color: var(--neutral-200);
-    color: var(--circuit-text-secondary);
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    transition: all 0.2s ease;
-  }
-  
-  .chip:hover {
-    background-color: var(--neutral-300);
-  }
-  
-  .chip-indicator {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
-    margin-right: 0.5rem;
-    box-shadow: 0 0 3px rgba(0, 0, 0, 0.2);
-  }
-  
-  .hover-row:hover {
-    background-color: var(--neutral-200) !important;
-  }
-  
-  .zebra-row-even {
-    background-color: var(--neutral-100);
-  }
-  
-  .zebra-row-odd {
-    background-color: var(--neutral-50);
-  }
+/* Custom Range Slider Styles */
+.slider {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
 }
 
-/* Spider plot axis label positioning */
-.axis-label-group {
-  pointer-events: none;
+.slider::-webkit-slider-track {
+  background: #374151;
+  height: 6px;
+  border-radius: 3px;
 }
 
-.axis-marker-group {
-  pointer-events: none;
-}
-
-.recharts-polar-angle-axis-tick text {
-  font-size: 10px;
-  fill: var(--circuit-text-primary);
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
-  font-weight: 500;
-}
-
-.recharts-polar-grid-concentric-polygon {
-  stroke: var(--spider-grid-color);
-  stroke-opacity: 0.3;
-}
-
-.recharts-polar-grid-concentric-circle {
-  stroke: var(--spider-grid-color);
-  stroke-opacity: 0.3;
-}
-
-.recharts-polar-grid-radial-line {
-  stroke: var(--spider-grid-color);
-  stroke-opacity: 0.3;
-}
-
-/* Enhanced spider plot parameter labels */
-.spider-parameter-label {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  pointer-events: none;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.8));
-  z-index: 10;
+.slider::-webkit-slider-thumb {
+  appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border: 2px solid #1e293b;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.spider-parameter-name {
+.slider::-webkit-slider-thumb:hover {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+  transform: scale(1.1);
+}
+
+.slider::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.8);
+}
+
+.slider::-moz-range-track {
+  background: #374151;
+  height: 6px;
+  border-radius: 3px;
+  border: none;
+}
+
+.slider::-moz-range-thumb {
+  height: 18px;
+  width: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  border: 2px solid #1e293b;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-thumb:hover {
+  background: linear-gradient(135deg, #2563eb, #1e40af);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+  transform: scale(1.1);
+}
+
+/* Parameter slider styles for the circuit simulator */
+.param-slider {
+  width: 100%;
+  position: relative;
+  margin: 16px 0;
+  padding: 8px 0;
+}
+
+.param-slider .slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.param-slider .slider-value {
+  background-color: var(--neutral-700);
+  color: var(--neutral-100);
+  padding: 4px 8px;
+  border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
-  color: white;
-  white-space: nowrap;
-  background-color: rgba(15, 23, 42, 0.9);
-  padding: 4px 10px;
-  border-radius: 6px;
-  margin-bottom: 4px;
-  border: 1px solid var(--neutral-500);
-  letter-spacing: 0.02em;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
 }
 
-.spider-parameter-value {
-  background-color: rgba(15, 23, 42, 0.9);
-  border: 1px solid var(--primary);
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-weight: 600;
-  font-size: 11px;
-  color: white;
-  letter-spacing: 0.02em;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
-  display: block;
-  text-align: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-/* Axis tick styling */
-.axis-ticks text {
-  fill: white;
-  font-size: 9px;
-  font-weight: 500;
-  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.9));
-}
-
-.tick-text {
-  background-color: rgba(15, 23, 42, 0.9);
-  padding: 3px 6px;
+.param-slider input[type="range"].slider-input {
+  width: 100%;
+  height: 8px;
   border-radius: 4px;
-  font-size: 9px !important;
-  fill: white !important;
-  letter-spacing: -0.2px;
-  font-weight: 600 !important;
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.5));
+  background: var(--neutral-700);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
 }
 
-/* Position-specific styling for axis labels */
-.axis-top {
-  top: 5%;
+.param-slider input[type="range"].slider-input::-webkit-slider-thumb {
+  appearance: none;
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--neutral-800);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.axis-top-right {
-  top: 28%;
-  right: 15%;
+.param-slider input[type="range"].slider-input:focus::-webkit-slider-thumb {
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
 }
 
-.axis-bottom-right {
-  bottom: 20%;
-  right: 25%;
+.param-slider input[type="range"].slider-input::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid var(--neutral-800);
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  cursor: pointer;
 }
 
-.axis-bottom-left {
-  bottom: 20%;
-  left: 25%;
+.param-slider input[type="range"].slider-input:focus::-moz-range-thumb {
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
 }
 
-.axis-top-left {
-  top: 28%;
-  left: 15%;
-}
-
-/* Dark mode spider plot enhancements */
-.recharts-radar-polygon {
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.3));
-}
-
-/* Make reference model more visible in dark mode */
-.recharts-radar[name="Reference Model"] {
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.6));
-  z-index: 100; /* Ensure reference model is above other elements */
-}
-
-/* Center point styling */
-.center-point text {
-  font-weight: 600;
-  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
-}
-
-/* Dash pattern for reference model indicator */
-.dash-pattern {
-  border-top: 1.5px dashed white;
-  height: 0 !important;
-  background: transparent !important;
-}
-
-/* Modern Pokemon-style radar chart */
-.spider-plot polygon {
-  stroke-width: 2px;
-  transition: all 0.3s ease;
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
-}
-
-.spider-plot polygon:hover {
-  stroke-width: 3px;
-  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.6));
-}
-
-/* Add frequency range visual effect classes */
-.freq-range-narrow .spider-plot {
-  background: radial-gradient(circle at center, rgba(239, 68, 68, 0.05) 0%, rgba(0, 0, 0, 0) 70%);
-  box-shadow: inset 0 0 50px rgba(239, 68, 68, 0.1);
-}
-
-.freq-range-moderate .spider-plot {
-  background: radial-gradient(circle at center, rgba(245, 158, 11, 0.05) 0%, rgba(0, 0, 0, 0) 70%);
-  box-shadow: inset 0 0 50px rgba(245, 158, 11, 0.1);
-}
-
-.freq-range-wide .spider-plot {
-  background: radial-gradient(circle at center, rgba(16, 185, 129, 0.05) 0%, rgba(0, 0, 0, 0) 70%);
-  box-shadow: inset 0 0 50px rgba(16, 185, 129, 0.1);
-}
-
-/* Category-specific styling for resnorm groups */
-.spider-plot polygon[stroke="#10B981"] {
-  /* Very Good - Green */
-  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.7));
-}
-
-.spider-plot polygon[stroke="#3B82F6"] {
-  /* Good - Blue */
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.7));
-}
-
-.spider-plot polygon[stroke="#F59E0B"] {
-  /* Moderate - Amber */
-  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.7));
-}
-
-.spider-plot polygon[stroke="#EF4444"] {
-  /* Poor - Red */
-  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.7));
-}
-
-/* Reference model style */
-.spider-plot polygon[stroke="#FFFFFF"] {
-  stroke-width: 3px;
-  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8));
-}
-
-.spider-plot circle {
-  transition: all 0.3s ease;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.4));
-}
-
-.spider-plot circle:hover {
-  r: 6;
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8));
-}
-
-/* Make the grid pentagons more visible but subtle */
-.spider-plot .grid-pentagon {
-  stroke: var(--spider-grid-color);
-  stroke-opacity: 0.4;
-  stroke-width: 1px;
-  fill: none;
-  filter: none;
-}
-
-/* Hide debugging elements in production */
-.debug-only {
-  display: none;
-}
-
-/* Pokemon-like axis labels */
-.spider-plot text {
-  fill: white;
-  font-weight: 600;
+.param-slider .slider-label-text {
   font-size: 14px;
-  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.9));
+  font-weight: 500;
+  color: var(--neutral-200);
+  transition: color 0.2s ease;
+}
+
+.param-slider .slider-value {
+  background-color: var(--neutral-700);
+  color: var(--neutral-100);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
   transition: all 0.2s ease;
 }
 
-.spider-plot text:hover {
-  font-size: 15px;
-  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.8));
+/* Circuit sidebar specific styles that can't be easily replaced with Tailwind */
+.circuit-sidebar {
+  width: 350px;
+  min-width: 350px;
+  background-color: var(--neutral-800);
+  border-right: 1px solid var(--neutral-700);
 }
 
-/* Reference toggle styles */
-.reference-toggle {
+.circuit-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--neutral-700);
+}
+
+.circuit-tab {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--neutral-400);
+}
+
+.circuit-tab-active {
+  color: var(--primary);
+  background-color: var(--neutral-700);
+  border-bottom: 2px solid var(--primary);
+}
+
+.circuit-tab-inactive {
+  color: var(--neutral-400);
+}
+
+.circuit-tab-inactive:hover {
+  background-color: var(--neutral-700);
+  color: var(--neutral-200);
+}
+
+/* Range slider container styles */
+.range_container {
   position: relative;
-  z-index: 10;
+  margin: 16px 0;
 }
 
-.reference-toggle.active {
-  border-color: #ffffff !important;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3), 0 0 15px rgba(255, 255, 255, 0.2);
+.sliders_control {
+  position: relative;
+  height: 32px;
 }
 
-.reference-toggle:hover {
-  transform: translateY(-2px);
-  transition: all 0.2s ease;
+.slider-track {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 6px;
+  background-color: var(--neutral-700);
+  border-radius: 3px;
+  transform: translateY(-50%);
 }
 
-.reference-toggle.active:hover {
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5), 0 0 20px rgba(255, 255, 255, 0.3);
+.slider-track-active {
+  position: absolute;
+  top: 50%;
+  height: 6px;
+  background-color: var(--primary);
+  border-radius: 3px;
+  transform: translateY(-50%);
 }
 
-.reference-toggle .indicator {
-  transition: all 0.3s ease;
+.form_control {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 16px;
 }
 
-.reference-toggle.active .indicator {
-  box-shadow: 0 0 10px #ffffff, 0 0 20px rgba(255, 255, 255, 0.4);
+.form_control_container {
+  display: flex;
+  flex-direction: column;
+}
+
+.form_control_container__time {
+  font-size: 11px;
+  color: var(--neutral-400);
+  margin-bottom: 4px;
+}
+
+.form_control_container__time__input {
+  width: 96px;
+  padding: 6px;
+  border: 1px solid var(--neutral-700);
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+  background-color: var(--neutral-800);
+  color: var(--neutral-200);
+}
+
+/* Spider plot specific styles */
+.spider-visualization {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.spider-svg {
+  width: 100%;
+  height: 100%;
+  background-color: var(--neutral-900);
+  border: 1px solid var(--neutral-700);
+  border-radius: 8px;
+}
+
+.spider-plot {
+  width: 100%;
+  height: 500px;
+  position: relative;
+}
+
+.spider-plot-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background-color: var(--neutral-900);
+  border: 1px solid var(--neutral-700);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.spider-plot-container .recharts-wrapper {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.spider-plot-container .recharts-surface {
+  background-color: var(--neutral-900);
 }
