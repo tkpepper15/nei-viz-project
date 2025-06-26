@@ -1,56 +1,62 @@
 import React from 'react';
-import { CircuitParameters } from '../circuit-simulator/utils/impedance';
+import { CircuitParameters } from './types/parameters';
+import { ModelSnapshot, GridParameterArrays } from './utils/types';
 
-type MathDetailsTabProps = {
+interface MathDetailsTabProps {
   parameters: CircuitParameters;
   minFreq: number;
   maxFreq: number;
   numPoints: number;
-  referenceModel?: {
-    parameters: CircuitParameters;
-    name?: string;
-  } | null;
-};
+  referenceModel: ModelSnapshot | null;
+  gridParameterArrays: GridParameterArrays | null;
+}
 
 // Helper functions
 function calculateTER(params: CircuitParameters): number {
-  const numerator = params.Rs * (params.Ra + params.Rb);
-  const denominator = params.Rs + params.Ra + params.Rb;
-  return numerator / denominator;
+  return (params.Rs * (params.Ra + params.Rb)) / (params.Rs + params.Ra + params.Rb);
 }
 
 function calculateTEC(params: CircuitParameters): number {
-  // TEC calculation formula: CaCb/(Ca+Cb)
+  // Calculate TEC in Farads, will be converted to µF for display
   return (params.Ca * params.Cb) / (params.Ca + params.Cb);
 }
 
-// Calculate impedance at a specific frequency
+// Calculate impedance at a specific frequency using parallel configuration
 function calculateImpedance(params: CircuitParameters, frequency: number): { real: number; imaginary: number; magnitude: number; phase: number } {
   const omega = 2 * Math.PI * frequency;
   
-  // Calculate apical membrane impedance
+  // Calculate apical membrane impedance - Ca is in Farads
   const Za_real = params.Ra / (1 + Math.pow(omega * params.Ra * params.Ca, 2));
   const Za_imag = -omega * Math.pow(params.Ra, 2) * params.Ca / (1 + Math.pow(omega * params.Ra * params.Ca, 2));
   
-  // Calculate basal membrane impedance
+  // Calculate basal membrane impedance - Cb is in Farads
   const Zb_real = params.Rb / (1 + Math.pow(omega * params.Rb * params.Cb, 2));
   const Zb_imag = -omega * Math.pow(params.Rb, 2) * params.Cb / (1 + Math.pow(omega * params.Rb * params.Cb, 2));
   
-  // Calculate total apical + basal impedance
+  // Calculate sum of membrane impedances (Za + Zb)
   const Zab_real = Za_real + Zb_real;
   const Zab_imag = Za_imag + Zb_imag;
   
-  // Calculate parallel combination with Rs
-  const denominator = Math.pow(params.Rs + Zab_real, 2) + Math.pow(Zab_imag, 2);
+  // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
+  // Numerator: Rs * (Za + Zb)
+  const num_real = params.Rs * Zab_real;
+  const num_imag = params.Rs * Zab_imag;
   
-  const Z_real = (params.Rs * Zab_real) / denominator;
-  const Z_imag = (params.Rs * Zab_imag) / denominator;
+  // Denominator: Rs + Za + Zb
+  const denom_real = params.Rs + Zab_real;
+  const denom_imag = Zab_imag;
+  
+  // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+  const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+  
+  const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+  const imaginary = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
   
   // Calculate magnitude and phase
-  const magnitude = Math.sqrt(Math.pow(Z_real, 2) + Math.pow(Z_imag, 2));
-  const phase = Math.atan2(Z_imag, Z_real) * (180 / Math.PI);
+  const magnitude = Math.sqrt(Math.pow(real, 2) + Math.pow(imaginary, 2));
+  const phase = Math.atan2(imaginary, real) * (180 / Math.PI);
   
-  return { real: Z_real, imaginary: Z_imag, magnitude, phase };
+  return { real, imaginary, magnitude, phase };
 }
 
 // Define proper interfaces for resnorm details
@@ -77,10 +83,10 @@ declare global {
   }
 }
 
-// Calculate resnorm between two parameter sets
+// Calculate resnorm between two parameter sets using simplified formula: (1/n) * sqrt(sum(ri^2))
 function calculateResnorm(params1: CircuitParameters, params2: CircuitParameters, frequencies: number[]): number {
   let sumOfSquaredResiduals = 0;
-  let sumWeights = 0;
+  const n = frequencies.length;
   
   // Store details for display
   const details: ResnormDetail[] = [];
@@ -89,21 +95,15 @@ function calculateResnorm(params1: CircuitParameters, params2: CircuitParameters
     const z1 = calculateImpedance(params1, freq);
     const z2 = calculateImpedance(params2, freq);
     
-    // Magnitude of reference for normalization
-    const refMagnitude = Math.sqrt(z2.real * z2.real + z2.imaginary * z2.imaginary);
-    const normFactor = refMagnitude > 0 ? refMagnitude : 1;
+    // Calculate residuals for real and imaginary components (no normalization)
+    const realResidual = z1.real - z2.real;
+    const imagResidual = z1.imaginary - z2.imaginary;
     
-    // Calculate normalized residuals for real and imaginary components
-    const realResidual = (z1.real - z2.real) / normFactor;
-    const imagResidual = (z1.imaginary - z2.imaginary) / normFactor;
+    // Calculate squared residual (ri^2)
+    const residualSquared = realResidual * realResidual + imagResidual * imagResidual;
     
-    // Calculate the weighted squared difference (weighted by frequency importance)
-    const weight = 1 / Math.max(1, Math.log10(freq));
-    const residualSquared = (realResidual * realResidual + imagResidual * imagResidual) * weight;
-    
-    // Add to running totals
+    // Add to running totals (no weighting)
     sumOfSquaredResiduals += residualSquared;
-    sumWeights += weight;
     
     // Store calculation details
     details.push({
@@ -116,35 +116,39 @@ function calculateResnorm(params1: CircuitParameters, params2: CircuitParameters
       z2: { 
         real: z2.real, 
         imaginary: z2.imaginary,
-        magnitude: refMagnitude
+        magnitude: Math.sqrt(z2.real * z2.real + z2.imaginary * z2.imaginary)
       },
       residuals: {
         real: realResidual,
         imaginary: imagResidual,
         combined: Math.sqrt(realResidual * realResidual + imagResidual * imagResidual)
       },
-      weight,
+      weight: 1.0, // No weighting in simplified formula
       weightedResidual: residualSquared
     });
   }
+  
+  // Calculate final resnorm: (1/n) * sqrt(sum(ri^2))
+  const finalResnorm = (1 / n) * Math.sqrt(sumOfSquaredResiduals);
   
   // Store details for rendering
   window.resnormDetails = details;
   window.resnormSummary = {
     sumOfSquaredResiduals,
-    sumWeights,
-    finalResnorm: Math.sqrt(sumOfSquaredResiduals / sumWeights)
+    sumWeights: n, // Use n as the "weight sum" for display consistency
+    finalResnorm
   };
   
-  return Math.sqrt(sumOfSquaredResiduals / sumWeights);
+  return finalResnorm;
 }
 
-const MathDetailsTab: React.FC<MathDetailsTabProps> = ({ 
+export const MathDetailsTab: React.FC<MathDetailsTabProps> = ({ 
   parameters, 
   minFreq, 
   maxFreq, 
   numPoints,
-  referenceModel
+  referenceModel,
+  gridParameterArrays
 }) => {
   // Calculate derived values
   const terValue = calculateTER(parameters);
@@ -172,13 +176,103 @@ const MathDetailsTab: React.FC<MathDetailsTabProps> = ({
   const resnorm = referenceModel ? calculateResnorm(parameters, referenceModel.parameters, frequencies) : 0;
   
   const equations = [
-    { name: 'Epithelial Impedance Model', equation: 'Z_eq(ω) = (Rs * (Za(ω) + Zb(ω))) / (Rs + Za(ω) + Zb(ω))' },
-    { name: 'Apical Membrane Impedance', equation: 'Za(ω) = Ra/(1+jωRaCa)' },
-    { name: 'Basal Membrane Impedance', equation: 'Zb(ω) = Rb/(1+jωRbCb)' },
+    { name: 'Epithelial Impedance Model', equation: 'Z_total(ω) = (Rs × (Za(ω) + Zb(ω))) / (Rs + Za(ω) + Zb(ω))' },
+    { name: 'Apical Membrane Impedance', equation: 'Za(ω) = Ra/(1+jωRaCa)  [Ca in F]' },
+    { name: 'Basal Membrane Impedance', equation: 'Zb(ω) = Rb/(1+jωRbCb)  [Cb in F]' },
     { name: 'Angular Frequency', equation: 'ω = 2πf' },
-    { name: 'Transepithelial Resistance (TER)', equation: 'TER = Rs * (Ra + Rb) / (Rs + Ra + Rb)' },
-    { name: 'Transepithelial Capacitance (TEC)', equation: 'TEC = (Ca * Cb) / (Ca + Cb)' },
+    { name: 'Transepithelial Resistance (TER)', equation: 'TER = Rs × (Ra + Rb) / (Rs + Ra + Rb)  [Ω]' },
+    { name: 'Transepithelial Capacitance (TEC)', equation: 'TEC = (Ca × Cb) / (Ca + Cb)  [F]' },
+    { name: 'Resnorm (Simplified)', equation: 'Resnorm = (1/n) × √(Σ(ri²))' }
   ];
+
+  // Add grid parameter arrays display
+  const renderGridArrays = () => {
+    if (!gridParameterArrays) return null;
+
+    return (
+      <div className="mt-6 space-y-4">
+        <h3 className="text-sm font-medium text-neutral-200">Grid Parameter Values</h3>
+        <div className="grid grid-cols-5 gap-4">
+          <div>
+            <h4 className="text-xs font-medium text-neutral-400 mb-2">Rs (Ω)</h4>
+            <div className="space-y-1">
+              {gridParameterArrays.Rs.map((value, idx) => (
+                <div key={`rs-${idx}`} className="text-xs font-mono text-neutral-300">
+                  {value.toFixed(1)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-xs font-medium text-neutral-400 mb-2">Ra (Ω)</h4>
+            <div className="space-y-1">
+              {gridParameterArrays.Ra.map((value, idx) => (
+                <div key={`ra-${idx}`} className="text-xs font-mono text-neutral-300">
+                  {value.toFixed(1)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-xs font-medium text-neutral-400 mb-2">Rb (Ω)</h4>
+            <div className="space-y-1">
+              {gridParameterArrays.Rb.map((value, idx) => (
+                <div key={`rb-${idx}`} className="text-xs font-mono text-neutral-300">
+                  {value.toFixed(1)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-xs font-medium text-neutral-400 mb-2">Ca (µF)</h4>
+            <div className="space-y-1">
+              {gridParameterArrays.Ca.map((value, idx) => (
+                <div key={`ca-${idx}`} className="text-xs font-mono text-neutral-300">
+                  {value.toFixed(2)}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <h4 className="text-xs font-medium text-neutral-400 mb-2">Cb (µF)</h4>
+            <div className="space-y-1">
+              {gridParameterArrays.Cb.map((value, idx) => (
+                <div key={`cb-${idx}`} className="text-xs font-mono text-neutral-300">
+                  {value.toFixed(2)}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Function to format parameter values
+  const formatValue = (value: number | undefined, isCapacitance: boolean): string => {
+    if (value === undefined) return 'N/A';
+    if (isCapacitance) {
+      // For capacitance, show in µF with 2 decimal places
+      return value.toFixed(2);
+    }
+    // For resistance, show appropriate decimal places based on magnitude
+    return value < 1000 ? value.toFixed(1) : value.toFixed(0);
+  };
+
+  // Function to get parameter statistics
+  const getParameterStats = (values: number[] | undefined, isCapacitance: boolean) => {
+    if (!values || values.length === 0) return { min: 'N/A', max: 'N/A', count: 0 };
+    
+    const processedValues = isCapacitance ? values.map(v => v * 1e6) : values;
+    const min = Math.min(...processedValues);
+    const max = Math.max(...processedValues);
+    
+    return {
+      min: formatValue(min, isCapacitance),
+      max: formatValue(max, isCapacitance),
+      count: values.length
+    };
+  };
 
   return (
     <div className="card p-6 space-y-6">
@@ -234,22 +328,47 @@ const MathDetailsTab: React.FC<MathDetailsTabProps> = ({
             <div className="p-3 bg-neutral-700/30 rounded">
               <div className="text-xs text-neutral-400">Rs</div>
               <div className="font-mono font-medium text-neutral-200">{parameters.Rs.toFixed(2)} Ω</div>
+              {gridParameterArrays && (
+                <div className="text-xs text-neutral-500 mt-1">
+                  Range: {getParameterStats(gridParameterArrays.Rs, false).min} - {getParameterStats(gridParameterArrays.Rs, false).max} Ω
+                </div>
+              )}
             </div>
             <div className="p-3 bg-neutral-700/30 rounded">
               <div className="text-xs text-neutral-400">Ra</div>
               <div className="font-mono font-medium text-neutral-200">{parameters.Ra.toFixed(0)} Ω</div>
+              {gridParameterArrays && (
+                <div className="text-xs text-neutral-500 mt-1">
+                  Range: {getParameterStats(gridParameterArrays.Ra, false).min} - {getParameterStats(gridParameterArrays.Ra, false).max} Ω
+                </div>
+              )}
             </div>
             <div className="p-3 bg-neutral-700/30 rounded">
               <div className="text-xs text-neutral-400">Ca</div>
               <div className="font-mono font-medium text-neutral-200">{(parameters.Ca * 1e6).toFixed(2)} μF</div>
+              {gridParameterArrays && (
+                <div className="text-xs text-neutral-500 mt-1">
+                  Range: {getParameterStats(gridParameterArrays.Ca, true).min} - {getParameterStats(gridParameterArrays.Ca, true).max} μF
+                </div>
+              )}
             </div>
             <div className="p-3 bg-neutral-700/30 rounded">
               <div className="text-xs text-neutral-400">Rb</div>
               <div className="font-mono font-medium text-neutral-200">{parameters.Rb.toFixed(0)} Ω</div>
+              {gridParameterArrays && (
+                <div className="text-xs text-neutral-500 mt-1">
+                  Range: {getParameterStats(gridParameterArrays.Rb, false).min} - {getParameterStats(gridParameterArrays.Rb, false).max} Ω
+                </div>
+              )}
             </div>
             <div className="p-3 bg-neutral-700/30 rounded">
               <div className="text-xs text-neutral-400">Cb</div>
               <div className="font-mono font-medium text-neutral-200">{(parameters.Cb * 1e6).toFixed(2)} μF</div>
+              {gridParameterArrays && (
+                <div className="text-xs text-neutral-500 mt-1">
+                  Range: {getParameterStats(gridParameterArrays.Cb, true).min} - {getParameterStats(gridParameterArrays.Cb, true).max} μF
+                </div>
+              )}
             </div>
           </div>
 
@@ -317,7 +436,7 @@ const MathDetailsTab: React.FC<MathDetailsTabProps> = ({
             
             <div className="p-4 bg-neutral-700/30 rounded">
               <div className="text-sm text-neutral-400 mb-1">Transepithelial Capacitance (TEC)</div>
-              <div className="font-mono font-medium text-xl text-neutral-200">{tecValue.toFixed(3)} μF</div>
+              <div className="font-mono font-medium text-xl text-neutral-200">{(tecValue * 1e6).toFixed(2)} μF</div>
               <div className="text-xs text-neutral-500 mt-2">(Ca * Cb) / (Ca + Cb)</div>
               
               {referenceModel && (
@@ -325,7 +444,7 @@ const MathDetailsTab: React.FC<MathDetailsTabProps> = ({
                   <div className="flex justify-between items-center">
                     <div className="text-xs text-neutral-500">Reference TEC:</div>
                     <div className="font-mono text-xs text-white">
-                      {calculateTEC(referenceModel.parameters).toFixed(3)} μF
+                      {calculateTEC(referenceModel.parameters).toFixed(2)} μF
                     </div>
                   </div>
                 </div>
@@ -463,7 +582,7 @@ Z_imag = (Rs * Zab_imag) / denom = ${parameters.Rs.toFixed(1)} * ${(-2 * Math.PI
                         <div className="text-neutral-500">TER:</div>
                         <div className="text-right text-white">{terValue.toFixed(1)} Ω</div>
                         <div className="text-neutral-500">TEC:</div>
-                        <div className="text-right text-white">{tecValue.toFixed(3)} μF</div>
+                        <div className="text-right text-white">{(tecValue * 1e6).toFixed(2)} μF</div>
                         <div className="text-neutral-500">Ra/Rb:</div>
                         <div className="text-right text-white">{(parameters.Ra/parameters.Rb).toFixed(2)}</div>
                         <div className="text-neutral-500">Ca/Cb:</div>
@@ -477,7 +596,7 @@ Z_imag = (Rs * Zab_imag) / denom = ${parameters.Rs.toFixed(1)} * ${(-2 * Math.PI
                         <div className="text-neutral-500">TER:</div>
                         <div className="text-right text-white">{calculateTER(referenceModel.parameters).toFixed(1)} Ω</div>
                         <div className="text-neutral-500">TEC:</div>
-                        <div className="text-right text-white">{calculateTEC(referenceModel.parameters).toFixed(3)} μF</div>
+                        <div className="text-right text-white">{(calculateTEC(referenceModel.parameters) * 1e6).toFixed(2)} μF</div>
                         <div className="text-neutral-500">Ra/Rb:</div>
                         <div className="text-right text-white">{(referenceModel.parameters.Ra/referenceModel.parameters.Rb).toFixed(2)}</div>
                         <div className="text-neutral-500">Ca/Cb:</div>
@@ -732,7 +851,7 @@ Z_imag = (Rs * Zab_imag) / denom = ${parameters.Rs.toFixed(1)} * ${(-2 * Math.PI
           
           <div className="p-3 bg-neutral-700/30 rounded">
             <div className="text-xs text-neutral-400 mb-1">Diagnostics for Underdetermined Systems</div>
-            <div className="font-mono text-xs text-neutral-400 mt-2">
+            <div className="font-mono text-xs text-neutral-400 mt-2 bg-neutral-900/50 p-3 rounded-md">
               When multiple parameter combinations produce similar impedance spectra, check:
             </div>
             <div className="grid grid-cols-1 gap-2 mt-2">
@@ -796,6 +915,9 @@ Z_imag = (Rs * Zab_imag) / denom = ${parameters.Rs.toFixed(1)} * ${(-2 * Math.PI
 
       {/* ResnormDetails component to display detailed resnorm calculations */}
       <ResnormDetails resnorm={resnorm} />
+
+      {/* Add grid arrays section */}
+      {renderGridArrays()}
     </div>
   );
 };
@@ -895,6 +1017,4 @@ const ResnormDetails: React.FC<{ resnorm: number }> = ({ resnorm }) => {
       </div>
     </div>
   );
-};
-
-export default MathDetailsTab; 
+}; 

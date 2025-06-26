@@ -81,4 +81,9 @@ export interface ControlProps {
   multiplier?: number;
 }
 
-export type CompactControlProps = Omit<ControlProps, 'min' | 'max' | 'step'>; 
+export type CompactControlProps = Omit<ControlProps, 'min' | 'max' | 'step'>;
+
+export interface RadarDataPoint {
+  parameter: string;
+  [key: string]: number | string;
+} 

@@ -1,49 +1,154 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+
+export interface ComputationSummary {
+  title: string;
+  totalTime: string;
+  generationTime: string;
+  computationTime: string;
+  processingTime: string;
+  totalPoints: number;
+  validPoints: number;
+  groups: number;
+  cores: number;
+  throughput: number;
+  type: 'success' | 'error';
+  duration?: number;
+}
 
 interface ComputationNotificationProps {
-  showNotification: boolean;
-  computationLogs: string[];
-  isLoadingMesh: boolean;
-  setShowNotification: (show: boolean) => void;
+  summary: ComputationSummary | null;
+  onDismiss: () => void;
 }
 
 export const ComputationNotification: React.FC<ComputationNotificationProps> = ({
-  showNotification,
-  computationLogs,
-  isLoadingMesh,
-  setShowNotification
+  summary,
+  onDismiss
 }) => {
-  if (!showNotification || computationLogs.length === 0) return null;
+  const [isVisible, setIsVisible] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+
+  useEffect(() => {
+    if (summary) {
+      setIsVisible(true);
+      setIsExiting(false);
+      
+      // Auto-dismiss after specified duration
+      const timer = setTimeout(() => {
+        handleDismiss();
+      }, summary.duration || 6000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [summary]);
+
+  const handleDismiss = () => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      onDismiss();
+    }, 300); // Animation duration
+  };
+
+  if (!summary || !isVisible) return null;
+
+  const bgColor = summary.type === 'success' ? 'bg-green-900/90' : 'bg-red-900/90';
+  const borderColor = summary.type === 'success' ? 'border-green-500' : 'border-red-500';
+  const iconColor = summary.type === 'success' ? 'text-green-400' : 'text-red-400';
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 bg-white shadow-lg border border-gray-200 rounded-md p-3 max-w-xs">
-      <div className="flex justify-between items-center mb-1">
-        <h3 className="font-medium text-sm text-gray-700">Computation Logs</h3>
-        <button 
-          onClick={() => setShowNotification(false)}
-          className="text-gray-400 hover:text-gray-600 text-sm"
-        >
-          ×
-        </button>
-      </div>
-      <div className="max-h-32 overflow-y-auto text-xs text-gray-600">
-        {computationLogs.slice(-3).map((log, i) => (
-          <div key={i} className="py-1">
-            {log}
+    <div className="fixed top-4 right-4 z-50">
+      <div
+        className={`
+          ${bgColor} ${borderColor} border rounded-lg shadow-lg p-4 min-w-[400px] max-w-[500px]
+          transform transition-all duration-300 ease-in-out
+          ${isExiting ? 'translate-x-full opacity-0' : 'translate-x-0 opacity-100'}
+        `}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {summary.type === 'success' ? (
+              <svg className={`w-5 h-5 ${iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className={`w-5 h-5 ${iconColor}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            <h3 className="text-white font-semibold text-sm">{summary.title}</h3>
           </div>
-        ))}
-      </div>
-      {isLoadingMesh && (
-        <div className="mt-1 flex items-center text-xs text-blue-500">
-          <svg className="animate-spin -ml-1 mr-2 h-3 w-3 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          Processing...
+          <button
+            onClick={handleDismiss}
+            className="text-neutral-400 hover:text-white transition-colors p-1"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
-      )}
+
+        {/* Content */}
+        <div className="space-y-3">
+          {/* Overall timing */}
+          <div className="bg-black/20 rounded p-3">
+            <div className="text-white font-medium text-lg mb-2">
+              Total Time: {summary.totalTime}s
+            </div>
+            <div className="text-xs text-neutral-300">
+              Processed {summary.totalPoints.toLocaleString()} parameter combinations
+            </div>
+          </div>
+
+          {/* Phase breakdown */}
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="bg-blue-900/40 rounded p-2">
+              <div className="text-blue-300 font-medium">Generation</div>
+              <div className="text-white">{summary.generationTime}s</div>
+            </div>
+            <div className="bg-purple-900/40 rounded p-2">
+              <div className="text-purple-300 font-medium">Computation</div>
+              <div className="text-white">{summary.computationTime}s</div>
+            </div>
+            <div className="bg-orange-900/40 rounded p-2">
+              <div className="text-orange-300 font-medium">Processing</div>
+              <div className="text-white">{summary.processingTime}s</div>
+            </div>
+          </div>
+
+          {/* Performance metrics */}
+          <div className="flex justify-between items-center text-xs text-neutral-300">
+            <div>
+              <span className="text-white font-medium">{summary.throughput.toFixed(0)}</span> points/sec
+            </div>
+            <div>
+              <span className="text-white font-medium">{summary.cores}</span> CPU cores
+            </div>
+            <div>
+              <span className="text-white font-medium">{summary.groups}</span> result groups
+            </div>
+          </div>
+
+          {/* Results summary */}
+          <div className="bg-neutral-800/50 rounded p-2 text-xs">
+            <div className="text-neutral-300">
+              {summary.type === 'success' ? (
+                <>
+                  Results: <span className="text-white font-medium">{summary.validPoints}</span> valid points 
+                  in <span className="text-white font-medium">{summary.groups}</span> resnorm groups
+                </>
+              ) : (
+                <>
+                  <span className="text-red-300">Computation failed</span> - 
+                  check activity log for details
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

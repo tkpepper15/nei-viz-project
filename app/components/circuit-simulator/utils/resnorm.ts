@@ -2,16 +2,9 @@
  * Utility functions for calculating residual norms and circuit parameters
  */
 
-// Define local interfaces for clear types
-export interface CircuitParameters {
-  Rs: number;
-  Ra: number;
-  Ca: number;
-  Rb: number;
-  Cb: number;
-  frequency_range: [number, number];
-}
+import { CircuitParameters } from '../types/parameters';
 
+// Define local interfaces for clear types
 export interface Impedance {
   real: number;
   imaginary: number;
@@ -121,18 +114,23 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
 
 /**
  * Calculate residual norm (resnorm) between reference and test data.
- * Follows standard scientific practice for EIS (Electrochemical Impedance Spectroscopy).
+ * Uses the simplified formula: (1/n) * sqrt(sum(ri^2))
+ * With optional range amplification and frequency weighting.
  * 
  * @param testData Array of impedance points to compare against reference
  * @param referenceData Array of reference impedance points
  * @param logFunction Optional logging function for debugging
+ * @param useRangeAmplification Optional toggle for range amplification
+ * @param useFrequencyWeighting Optional toggle for frequency weighting
  * @returns The calculated resnorm value
  */
 export const calculateResnorm = (
   testData: ImpedancePoint[] | ImpedancePoint,
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
-  frequency?: number
+  frequency?: number,
+  useRangeAmplification: boolean = false,
+  useFrequencyWeighting: boolean = false
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
@@ -157,10 +155,10 @@ export const calculateResnorm = (
     };
     
     // Convert to arrays and call the main implementation
-    return calculateResnorm([testPoint], [refPoint]);
+    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification, useFrequencyWeighting);
   }
   
-  // Handle arrays case (original implementation)
+  // Handle arrays case (main implementation)
   const testDataArray = Array.isArray(testData) ? testData : [testData];
   const referenceDataArray = Array.isArray(referenceData) ? referenceData : [referenceData as unknown as ImpedancePoint];
   const logger = typeof logFunction === 'function' ? logFunction : undefined;
@@ -186,9 +184,13 @@ export const calculateResnorm = (
       Math.abs(p.frequency - testPoint.frequency) / testPoint.frequency < 0.01);
     
     if (refPoint) {
-      // Calculate weight (lower frequencies get higher weight as they're more important)
-      // Use logarithmic weighting: 1/log10(f)
-      const weight = 1 / Math.max(0.1, Math.log10(testPoint.frequency));
+      // Calculate weight based on frequency weighting toggle
+      let weight = 1.0; // Default: no weighting
+      
+      if (useFrequencyWeighting) {
+        // Apply frequency-based weighting: wi = 1 / max(1, log10(ωi))
+        weight = 1 / Math.max(1, Math.log10(testPoint.frequency));
+      }
       
       matchedData.push({
         frequency: testPoint.frequency,
@@ -206,45 +208,54 @@ export const calculateResnorm = (
 
   if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
-  // Calculate weighted sum of squared residuals
-  let sumWeightedSquaredResiduals = 0;
-  let sumWeights = 0;
+  // Calculate sum of squared residuals using new formula: (1/n) * sqrt(sum(ri^2))
+  let sumSquaredResiduals = 0;
+  const n = matchedData.length;
 
   for (const point of matchedData) {
-    // Calculate normalized residuals (relative to reference magnitude)
-    const refMagnitude = Math.sqrt(
-      point.reference.real * point.reference.real + 
-      point.reference.imaginary * point.reference.imaginary
-    );
+    // Calculate residuals for real and imaginary components
+    const realResidual = point.test.real - point.reference.real;
+    const imagResidual = point.test.imaginary - point.reference.imaginary;
     
-    // Avoid division by zero
-    const normFactor = Math.max(0.001, refMagnitude);
-    
-    // Calculate normalized residuals
-    const realResidual = (point.test.real - point.reference.real) / normFactor;
-    const imagResidual = (point.test.imaginary - point.reference.imaginary) / normFactor;
-    
-    // Calculate squared residual
+    // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    // Apply weight and accumulate
-    const weightedSquaredResidual = point.weight * squaredResidual;
-    sumWeightedSquaredResiduals += weightedSquaredResidual;
-    sumWeights += point.weight;
+    // Apply frequency weighting if enabled
+    const weightedSquaredResidual = useFrequencyWeighting ? point.weight * squaredResidual : squaredResidual;
+    
+    sumSquaredResiduals += weightedSquaredResidual;
     
     if (logger) {
       logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}, Weight: ${point.weight.toFixed(2)}`);
     }
   }
 
-  // Calculate weighted RMSE (Root Mean Square Error)
-  const weightedRMSE = Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
+  // Calculate base resnorm: (1/n) * sqrt(sum(ri^2))
+  const baseResnorm = (1 / n) * Math.sqrt(sumSquaredResiduals);
+  
+  // Apply range amplification if enabled
+  let finalResnorm = baseResnorm;
+  
+  if (useRangeAmplification && matchedData.length > 1) {
+    // Range Amplification: Amplifier = sqrt(log10(ωmax/ωmin))
+    const frequencies = matchedData.map(d => d.frequency);
+    const ωmax = Math.max(...frequencies);
+    const ωmin = Math.min(...frequencies);
+    const amplifier = Math.sqrt(Math.log10(ωmax / ωmin));
+    
+    // Final Resnorm = Resnorm · Amplifier
+    finalResnorm = baseResnorm * amplifier;
+    
+    if (logger) {
+      logger(`Range amplification: ωmax=${ωmax.toFixed(2)}, ωmin=${ωmin.toFixed(2)}, amplifier=${amplifier.toFixed(4)}`);
+    }
+  }
   
   if (logger) {
-    logger(`Weighted RMSE: ${weightedRMSE.toFixed(6)}`);
+    logger(`Base resnorm: ${baseResnorm.toFixed(6)}, Final resnorm: ${finalResnorm.toFixed(6)}`);
   }
 
-  return weightedRMSE;
+  return finalResnorm;
 };
 
 /**

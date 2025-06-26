@@ -25,10 +25,10 @@ export const GridTable: React.FC<GridTableProps> = ({ models }) => {
             <tr key={model.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{model.name}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.parameters.Rs.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.parameters.ra.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(model.parameters.ca * 1e6).toFixed(2)} μF</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.parameters.rb.toFixed(2)}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(model.parameters.cb * 1e6).toFixed(2)} μF</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.parameters.Ra.toFixed(2)}</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(model.parameters.Ca * 1e6).toFixed(2)} μF</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.parameters.Rb.toFixed(2)}</td>
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{(model.parameters.Cb * 1e6).toFixed(2)} μF</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{model.resnorm?.toExponential(3) || '0'}</td>
             </tr>
           ))}

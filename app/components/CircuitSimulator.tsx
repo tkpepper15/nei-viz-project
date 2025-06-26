@@ -2,28 +2,39 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import 'katex/dist/katex.min.css';
-import { CircuitParameters } from './circuit-simulator/utils/impedance';
-import { BackendMeshPoint, ModelSnapshot, ResnormGroup } from './circuit-simulator/utils/types';
-import { generateGridPoints } from './circuit-simulator/utils';
-import { ImpedancePoint as TypesImpedancePoint } from './circuit-simulator/utils/types';
+import { 
+  BackendMeshPoint, 
+  GridParameterArrays 
+} from './circuit-simulator/types';
+import { ModelSnapshot, ImpedancePoint as TypesImpedancePoint, ResnormGroup } from './circuit-simulator/utils/types';
+import { CircuitParameters } from './circuit-simulator/types/parameters';
+import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/workerManager';
 
 // Add imports for the new tab components at the top of the file
-import MathDetailsTab from './circuit-simulator/MathDetailsTab';
-import DataTableTab from './circuit-simulator/DataTableTab';
-import VisualizerTab from './circuit-simulator/VisualizerTab';
+import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
+import { DataTableTab } from './circuit-simulator/DataTableTab';
+import { VisualizerTab } from './circuit-simulator/VisualizerTab';
 
 // Import the new ToolboxComponent
-import ToolboxComponent from './circuit-simulator/controls/ToolboxComponent';
+import { ToolboxComponent } from './circuit-simulator/controls/ToolboxComponent';
+import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
+import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;
 
 export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
+  // Initialize worker manager for parallel computation
+  const { computeGridParallel, cancelComputation } = useWorkerManager();
+  
   // Add frequency control state
   const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz
   const [maxFreq, setMaxFreq] = useState<number>(10000); // 10 kHz
   const [numPoints, setNumPoints] = useState<number>(20); // Default number of frequency points
   const [frequencyPoints, setFrequencyPoints] = useState<number[]>([]);
+  
+  // Add progress tracking for worker computation
+  const [computationProgress, setComputationProgress] = useState<WorkerProgress | null>(null);
 
   // State for the circuit simulator
   const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
@@ -34,7 +45,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [gridError, setGridError] = useState<string | null>(null);
   const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
-  const [hiddenGroups, setHiddenGroups] = useState<number[]>([]);
+  // Initialize hidden groups state - start with only top 25% (excellent group) visible for performance
+  const [hiddenGroups, setHiddenGroups] = useState<number[]>([1, 2, 3, 4]); // Hide all except group 0 (excellent)
   const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data'>('visualizer');
   const [parameterChanged, setParameterChanged] = useState<boolean>(false);
   // Track if reference model was manually hidden
@@ -79,6 +91,26 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     frequency_range: [0.1, 10000]
   });
   
+  // Add state for grid parameter arrays
+  const [gridParameterArrays, setGridParameterArrays] = useState<GridParameterArrays | null>(null);
+  
+  // Add state for computation summary notification
+  const [computationSummary, setComputationSummary] = useState<ComputationSummary | null>(null);
+  
+  // Performance settings state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [performanceSettings, setPerformanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
+  
+  // Current memory usage for performance monitoring
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const getCurrentMemoryUsage = useCallback((): number => {
+    if (typeof window !== 'undefined' && 'performance' in window && 'memory' in performance) {
+      const memory = (performance as typeof performance & { memory: { usedJSHeapSize: number } }).memory;
+      return memory.usedJSHeapSize / (1024 * 1024);
+    }
+    return 0;
+  }, []);
+  
   // Update status message to also store in log history
   const updateStatusMessage = useCallback((message: string) => {
     setStatusMessage(message);
@@ -102,18 +134,31 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Initialize parameters
   useEffect(() => {
-    // Set default starting values
+    // Calculate 50% values for each parameter range
+    const rsRange = { min: 10, max: 10000 };
+    const raRange = { min: 10, max: 10000 };
+    const rbRange = { min: 10, max: 10000 };
+    const caRange = { min: 0.1e-6, max: 50e-6 };
+    const cbRange = { min: 0.1e-6, max: 50e-6 };
+
+    const rs50 = rsRange.min + (rsRange.max - rsRange.min) * 0.5;
+    const ra50 = raRange.min + (raRange.max - raRange.min) * 0.5;
+    const rb50 = rbRange.min + (rbRange.max - rbRange.min) * 0.5;
+    const ca50 = caRange.min + (caRange.max - caRange.min) * 0.5;
+    const cb50 = cbRange.min + (cbRange.max - cbRange.min) * 0.5;
+
+    // Set default starting values at 50% of ranges
     setGroundTruthParams({
-      Rs: 24,
-      Ra: 500,
-      Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
-      Rb: 500,
-      Cb: 0.5e-6, // 0.5 microfarads (converted to farads)
+      Rs: rs50,
+      Ra: ra50,
+      Ca: ca50,
+      Rb: rb50,
+      Cb: cb50,
       frequency_range: [minFreq, maxFreq]
     });
     
     // Initial reference params will be set after the state updates
-    updateStatusMessage('Initialized with default parameters');
+    updateStatusMessage('Initialized with default parameters at 50% of ranges');
   }, [updateStatusMessage, minFreq, maxFreq]);
 
   // Update reference parameters when slider values are initialized
@@ -142,15 +187,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // We'll calculate TER and TEC in the component where they're needed
   
-  // Define the ImpedancePoint interface if not already defined
-  interface ImpedancePoint {
-    frequency: number;
-    real: number;
-    imaginary: number;
-    magnitude: number;
-    phase: number;
-  }
-
   // Create a reference model (current circuit parameters)
   const createReferenceModel = useCallback((): ModelSnapshot => {
     // Generate frequencies to compute impedance at (logarithmically spaced)
@@ -179,14 +215,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const { Rs, Ra, Ca, Rb, Cb } = groundTruthParams;
     
     // Compute impedance at each frequency
-    const impedanceData: ImpedancePoint[] = [];
+    const impedanceData: TypesImpedancePoint[] = [];
     
-    // Generate detailed logs for the first calculation
-    const isLogging = logMessages.length === 0;
-    if (isLogging) {
-      updateStatusMessage(`MATH: Calculating impedance for reference model at ${freqs.length} frequency points`);
-      updateStatusMessage(`MATH: Circuit parameters: Rs=${Rs.toFixed(2)}Ω, Ra=${Ra.toFixed(2)}Ω, Ca=${(Ca*1e6).toFixed(2)}µF, Rb=${Rb.toFixed(2)}Ω, Cb=${(Cb*1e6).toFixed(2)}µF`);
-    }
+    // Generate detailed logs for the first calculation (avoid calling updateStatusMessage in callback)
     
     for (const f of freqs) {
       // Calculate impedance for a single frequency
@@ -195,10 +226,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         f
       );
       
-      // Log first few frequency points for visibility
-      if (isLogging && impedanceData.length < 3) {
-        updateStatusMessage(`MATH: At f=${f.toFixed(2)} Hz: Z = ${impedance.real.toFixed(2)} - j${Math.abs(impedance.imaginary).toFixed(2)} Ω`);
-      }
+      // Log removed to avoid circular dependencies
       
       impedanceData.push({
         frequency: f,
@@ -212,15 +240,16 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return {
       id: 'dynamic-reference',
       name: 'Reference',
-      data: impedanceData,
       parameters: { Rs, Ra, Ca, Rb, Cb, frequency_range: [minFreq, maxFreq] },
-      timestamp: Date.now(),
+      data: impedanceData,
       color: '#FFFFFF',
       isVisible: true,
       opacity: 1,
-      resnorm: 0
+      resnorm: 0,
+      timestamp: Date.now(),
+      ter: Rs + Ra + Rb
     };
-  }, [groundTruthParams, minFreq, maxFreq, numPoints, frequencyPoints, logMessages.length, updateStatusMessage]);
+  }, [groundTruthParams, minFreq, maxFreq, numPoints, frequencyPoints]);
 
   // Function to calculate impedance at a single frequency
   const calculateCircuitImpedance = (params: CircuitParameters, frequency: number) => {
@@ -228,17 +257,33 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const omega = 2 * Math.PI * frequency;
     
     // Calculate impedance of apical membrane (Ra || Ca)
-    // Note: Ca and Cb are in farads for impedance calculations
+    // Za(ω) = Ra/(1+jωRaCa)
     const Za_real = Ra / (1 + Math.pow(omega * Ra * Ca, 2));
     const Za_imag = -omega * Ra * Ra * Ca / (1 + Math.pow(omega * Ra * Ca, 2));
     
     // Calculate impedance of basal membrane (Rb || Cb)
+    // Zb(ω) = Rb/(1+jωRbCb)
     const Zb_real = Rb / (1 + Math.pow(omega * Rb * Cb, 2));
     const Zb_imag = -omega * Rb * Rb * Cb / (1 + Math.pow(omega * Rb * Cb, 2));
     
-    // Calculate total impedance
-    const real = Rs + Za_real + Zb_real;
-    const imaginary = Za_imag + Zb_imag;
+    // Calculate sum of membrane impedances (Za + Zb)
+    const Zab_real = Za_real + Zb_real;
+    const Zab_imag = Za_imag + Zb_imag;
+    
+    // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
+    // Numerator: Rs * (Za + Zb)
+    const num_real = Rs * Zab_real;
+    const num_imag = Rs * Zab_imag;
+    
+    // Denominator: Rs + Za + Zb
+    const denom_real = Rs + Zab_real;
+    const denom_imag = Zab_imag;
+    
+    // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+    const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+    
+    const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+    const imaginary = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
     
     return { real, imaginary };
   };
@@ -259,7 +304,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setManuallyHidden(false);
       updateStatusMessage('Reference model shown');
     }
-  }, [referenceModelId, createReferenceModel, updateStatusMessage, setManuallyHidden]);
+  }, [referenceModelId, createReferenceModel]);
 
   // Create and show reference model by default
   useEffect(() => {
@@ -270,7 +315,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setReferenceModelId('dynamic-reference');
       updateStatusMessage('Reference model created with current parameters');
     }
-  }, [groundTruthParams.Rs, referenceModelId, createReferenceModel, updateStatusMessage, manuallyHidden]);
+  }, [groundTruthParams.Rs, referenceModelId, createReferenceModel, manuallyHidden, updateStatusMessage]);
 
   // Update reference model when parameters change
   useEffect(() => {
@@ -279,7 +324,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setReferenceModel(updatedModel);
       updateStatusMessage('Reference model updated with current parameters');
     }
-  }, [groundTruthParams, createReferenceModel, referenceModelId, updateStatusMessage, manuallyHidden]);
+  }, [groundTruthParams, createReferenceModel, referenceModelId, manuallyHidden, updateStatusMessage]);
   
   // Add event listeners for custom events from VisualizerTab
   useEffect(() => {
@@ -351,479 +396,329 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       window.removeEventListener('toggleReferenceModel', handleToggleReference);
       window.removeEventListener('toggleResnormGroup', handleToggleResnormGroup);
     };
-  }, [toggleReferenceModel, hiddenGroups, updateStatusMessage, referenceModelId]);
+  }, [toggleReferenceModel, hiddenGroups, referenceModelId, createReferenceModel, updateStatusMessage]);
   
-  // Helper function to map BackendMeshPoint to ModelSnapshot
+  // Optimized helper function to map BackendMeshPoint to ModelSnapshot
   const mapBackendMeshToSnapshot = (meshPoint: BackendMeshPoint, index: number): ModelSnapshot => {
-    // Determine color based on resnorm
-    let color = '#3B82F6'; // Default blue
+    // Extract parameters efficiently (they should already be in Farads)
+    const { Rs, Ra, Ca, Rb, Cb, frequency_range } = meshPoint.parameters;
     
-    // Simple color mapping based on resnorm thresholds
-    // These should align with the thresholds used for resnorm groups
-    if (meshPoint.resnorm !== undefined) {
-      if (meshPoint.resnorm <= 0.001) {
-        color = '#10B981'; // Green - Very good
-      } else if (meshPoint.resnorm <= 0.01) {
-        color = '#3B82F6'; // Blue - Good
-      } else if (meshPoint.resnorm <= 0.1) {
-        color = '#F59E0B'; // Amber - Moderate
-      } else {
-        color = '#EF4444'; // Red - Poor
-      }
-    }
+    // Pre-calculate TER (Total Extracellular Resistance)
+    const ter = Ra + Rb;
+    
+    // Only convert spectrum if it exists and has data
+    const spectrumData = meshPoint.spectrum && meshPoint.spectrum.length > 0 
+      ? toImpedancePoints(meshPoint.spectrum) as TypesImpedancePoint[]
+      : [];
     
     return {
       id: `mesh-${index}`,
       name: `Mesh Point ${index}`,
-      timestamp: Date.now(),
       parameters: {
-        Rs: meshPoint.parameters.Rs,
-        Ra: meshPoint.parameters.Ra,
-        Ca: meshPoint.parameters.Ca,
-        Rb: meshPoint.parameters.Rb,
-        Cb: meshPoint.parameters.Cb,
-        frequency_range: meshPoint.parameters.frequency_range || parameters.frequency_range
+        Rs,
+        Ra,
+        Ca,
+        Rb,
+        Cb,
+        frequency_range: frequency_range || parameters.frequency_range
       },
-      data: toImpedancePoints(meshPoint.spectrum) as TypesImpedancePoint[],
-      resnorm: meshPoint.resnorm,
-      color: color,
-      opacity: meshPoint.alpha || 1,
+      data: spectrumData,
+      color: '#3B82F6',
       isVisible: true,
-      ter: meshPoint.parameters.Ra + meshPoint.parameters.Rb
+      opacity: 1,
+      resnorm: meshPoint.resnorm,
+      timestamp: Date.now(),
+      ter
     };
   };
 
-  // Update the grid computation to use consistent parameter names
+  // Updated grid computation using Web Workers for parallel processing
   const handleComputeRegressionMesh = async () => {
     // Validate grid size
-    if (gridSize < 2 || gridSize > 10) {
-      updateStatusMessage('Points per dimension must be between 2 and 10');
+    if (gridSize < 2 || gridSize > 25) {
+      updateStatusMessage('Points per dimension must be between 2 and 25');
       setTimeout(() => setStatusMessage(''), 3000);
       return;
     }
 
-    setIsComputingGrid(true); // Start loading
-    setGridResults([]); // Clear previous results
-    setGridError(null); // Clear previous errors
-    setResnormGroups([]); // Clear previous groups
-    setParameterChanged(false); // Reset parameter changed flag
-    setManuallyHidden(false); // Reset manually hidden flag
+    const totalPointsToCompute = Math.pow(gridSize, 5);
     
-    // Clear previous logs and switch to the activity tab
+    // Add warning for very large grids that might affect performance
+    if (gridSize > 20) {
+      const proceed = window.confirm(
+        `⚠️ Warning: You're about to compute ${totalPointsToCompute.toLocaleString()} parameter combinations.\n\n` +
+        `This will take several minutes and may make the page temporarily less responsive.\n\n` +
+        `Consider using a smaller grid size (15-20) for faster results.\n\n` +
+        `Continue with computation?`
+      );
+      if (!proceed) {
+        updateStatusMessage('Grid computation cancelled by user');
+        return;
+      }
+    }
+
+    // Start timing
+    const startTime = Date.now();
+    let generationStartTime = 0;
+    let computationStartTime = 0;
+    let processingStartTime = 0;
+
+    setIsComputingGrid(true);
+    setGridResults([]);
+    setGridError(null);
+    setResnormGroups([]);
+    setParameterChanged(false);
+    setManuallyHidden(false);
+    setComputationProgress(null);
+    
+    // Clear previous logs
     setLogMessages([]);
     
-    updateStatusMessage(`Starting grid computation with ${gridSize} points per dimension...`);
-    updateStatusMessage(`MATH: Using ${gridSize} points per dimension for 5 parameters exploring full parameter space`);
-    updateStatusMessage(`MATH: Computing all ${Math.pow(gridSize, 5).toLocaleString()} possible parameter combinations`);
+    const totalPoints = totalPointsToCompute;
+    updateStatusMessage(`Starting parallel grid computation with ${gridSize} points per dimension...`);
+    updateStatusMessage(`MATH: Computing all ${totalPoints.toLocaleString()} parameter combinations using ${navigator.hardwareConcurrency || 4} CPU cores`);
     updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rs in series with RC elements)`);
     updateStatusMessage(`MATH: Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`);
     updateStatusMessage(`MATH: Using frequency range ${minFreq.toFixed(1)}-${maxFreq.toFixed(1)} Hz with ${numPoints} points`);
-    updateStatusMessage(`MATH: Frequency range affects which parameters can be uniquely identified (underdetermined system)`);
-
-    // Use ground truth parameters as reference
-    const referenceParams: CircuitParameters = {
-        Rs: groundTruthParams.Rs,
-        Ra: groundTruthParams.Ra,
-        Ca: groundTruthParams.Ca,
-        Rb: groundTruthParams.Rb,
-        Cb: groundTruthParams.Cb,
-        frequency_range: parameters.frequency_range
-    };
 
     try {
-      // Generate grid points using our improved algorithm
-        const gridPoints = generateGridPoints(
-            {
-                Rs: referenceParams.Rs,
-                Ra: referenceParams.Ra,
-                Ca: referenceParams.Ca,
-                Rb: referenceParams.Rb,
-                Cb: referenceParams.Cb,
-                frequency_range: parameters.frequency_range
-            },
-            {
-                Rs: { min: 10, max: 10000 },
-                Ra: { min: 10, max: 10000 },
-                Ca: { min: 0.1e-6, max: 50e-6 },
-                Rb: { min: 10, max: 10000 },
-                Cb: { min: 0.1e-6, max: 50e-6 }
-            },
-            gridSize,
-            updateStatusMessage
-        );
-
-        // Generate frequency array for spectrum calculations - use the correct logarithmic spacing
-        const frequencyArray: number[] = [];
-        const logMin = Math.log10(minFreq);
-        const logMax = Math.log10(maxFreq);
-        const logStep = (logMax - logMin) / (numPoints - 1);
-
-        for (let i = 0; i < numPoints; i++) {
-            const logValue = logMin + i * logStep;
-            const frequency = Math.pow(10, logValue);
-            frequencyArray.push(frequency);
-        }
-
-        updateStatusMessage(`MATH: Using ${frequencyArray.length} frequency points from ${minFreq.toExponential(2)} to ${maxFreq.toExponential(2)} Hz`);
-
-        // Update parameter references in grid points
-        const updatedPoints = gridPoints.map(point => ({
-            ...point,
-            parameters: {
-                Rs: point.parameters.Rs,
-                Ra: point.parameters.Ra,
-                Ca: point.parameters.Ca,
-                Rb: point.parameters.Rb,
-                Cb: point.parameters.Cb,
-                frequency_range: [minFreq, maxFreq] as [number, number] // Use current frequency range with proper typing
-            }
-        }));
-
-        // Calculate impedance spectra for all points
-        const pointsWithSpectra = updatedPoints.map(point => {
-            const spectrum = calculateImpedanceSpectrum({
-                Rs: point.parameters.Rs,
-                Ra: point.parameters.Ra,
-                Ca: point.parameters.Ca,
-                Rb: point.parameters.Rb,
-                Cb: point.parameters.Cb
-            }, frequencyArray); // Use our generated frequency array
-            return {
-                ...point,
-                spectrum
-            };
-        });
-
-        // Calculate reference spectrum using ground truth parameters
-        const referenceSpectrum = calculateImpedanceSpectrum({
-          Rs: groundTruthParams.Rs,
-          Ra: groundTruthParams.Ra,
-          Ca: groundTruthParams.Ca,
-          Rb: groundTruthParams.Rb,
-          Cb: groundTruthParams.Cb
-        }, frequencyArray); // Use same frequency array for consistency
+      // Progress callback for worker updates
+      const handleProgress = (progress: WorkerProgress) => {
+        setComputationProgress(progress);
         
-        // Calculate resnorm for each point
-        const pointsWithResnorm = pointsWithSpectra.map(point => {
-            // Create clean parameter objects without frequency_range
-            const cleanParams: CircuitParameters = {
-                Rs: point.parameters.Rs,
-                Ra: point.parameters.Ra,
-                Ca: point.parameters.Ca,
-                Rb: point.parameters.Rb,
-                Cb: point.parameters.Cb,
-                frequency_range: parameters.frequency_range
-            };
-            
-            const cleanRefParams: CircuitParameters = {
-                Rs: groundTruthParams.Rs,
-                Ra: groundTruthParams.Ra,
-                Ca: groundTruthParams.Ca,
-                Rb: groundTruthParams.Rb,
-                Cb: groundTruthParams.Cb,
-                frequency_range: parameters.frequency_range
-            };
-            
-            const testModel: ModelSnapshot = {
-                id: `test-${Date.now()}`,
-                name: 'Test Model',
-                timestamp: Date.now(),
-                parameters: cleanParams,
-                data: toImpedancePoints(point.spectrum),
-                color: '#3B82F6',
-                isVisible: true,
-                opacity: 1,
-                resnorm: point.resnorm
-            };
-
-            const referenceModel: ModelSnapshot = {
-                id: 'reference',
-                name: 'Ground Truth Model',
-                timestamp: Date.now(),
-                parameters: cleanRefParams,
-                data: toImpedancePoints(referenceSpectrum),
-                color: '#10B981',
-                isVisible: true,
-                opacity: 1,
-                resnorm: 0
-            };
-
-            const resnorm = calculateResnorm(referenceModel, testModel);
-            return {
-                ...point,
-                resnorm
-            };
-        });
-        
-        // Sort by resnorm
-        const sortedPoints = pointsWithResnorm.sort((a, b) => a.resnorm - b.resnorm);
-        
-        // Update state with results
-        setGridResults(sortedPoints);
-        updateStatusMessage(`Grid computation complete: ${sortedPoints.length} points analyzed`);
-        
-        // Find min/max resnorm values for scaling
-        let minResnorm = Infinity;
-        let maxResnorm = 0;
-        sortedPoints.forEach(point => {
-            if (point.resnorm > 0) { // Skip the reference point which has resnorm = 0
-                minResnorm = Math.min(minResnorm, point.resnorm);
-                maxResnorm = Math.max(maxResnorm, point.resnorm);
-            }
-        });
-        
-        // Log resnorm range
-        updateStatusMessage(`MATH: Resnorm range: ${minResnorm.toExponential(3)} to ${maxResnorm.toExponential(3)}`);
-        updateStatusMessage(`MATH: This wide range indicates the underdetermined nature of the system`);
-        
-        // Provide information about frequency range effect on resnorm
-        if (maxFreq - minFreq < 100) {
-          updateStatusMessage(`MATH: Narrow frequency range (${minFreq}-${maxFreq} Hz) makes the system more underdetermined`);
-          updateStatusMessage(`MATH: Many parameter sets can produce similar impedance patterns in this frequency range`);
-        } else if (maxFreq - minFreq > 500) {
-          updateStatusMessage(`MATH: Wide frequency range (${minFreq}-${maxFreq} Hz) improves parameter separation`);
-          updateStatusMessage(`MATH: Different parameter combinations are more distinguishable across this frequency range`);
-        }
-        
-        // Apply log scaling for better visualization - map to [0.15, 1] range
-        sortedPoints.forEach(point => {
-            if (point.resnorm === 0) {
-                // Reference point gets full opacity
-                point.alpha = 1;
-            } else {
-                // Map resnorm to alpha value using log scale - better points have higher opacity
-                const logMin = Math.log10(minResnorm);
-                const logMax = Math.log10(maxResnorm);
-                const logVal = Math.log10(point.resnorm);
-                
-                // Invert scale: 1 = best fit (lowest resnorm), 0.15 = worst fit (highest resnorm)
-                point.alpha = 1 - (0.85 * ((logVal - logMin) / (logMax - logMin)));
-                
-                // Ensure alpha is within bounds
-                point.alpha = Math.max(0.15, Math.min(0.95, point.alpha));
-            }
-        });
-        
-        // We'll show all computed points, not just a percentage
-        updateStatusMessage(`Grid computation complete. All ${sortedPoints.length} points will be displayed.`);
-        
-        // Reset to page 1 when results change
-        setCurrentPage(1);
-        
-        // Map to ModelSnapshot format for visualization - will be filtered by maxGridPoints in the rendering
-        const models = sortedPoints.map((point, idx) => 
-            mapBackendMeshToSnapshot(point, idx)
-        );
-        
-        // Calculate resnorm grouping thresholds using logarithmic scale
-        const groups: ResnormGroup[] = [];
-        
-        // Add detailed logging about the resnorm range and grouping
-        updateStatusMessage(`MATH: Resnorm calculation uses weighted RMSE of normalized impedance differences`);
-        updateStatusMessage(`MATH: Lower frequencies are weighted more heavily (weight = 1/log10(f))`);
-        updateStatusMessage(`MATH: Residuals are normalized by reference impedance magnitude at each frequency`);
-        updateStatusMessage(`MATH: Min resnorm: ${minResnorm.toExponential(5)}, Max resnorm: ${maxResnorm.toExponential(5)}`);
-        
-        // Calculate frequency range ratio for dynamic thresholds
-        const freqRangeRatio = maxFreq / minFreq;
-        const isNarrowRange = freqRangeRatio < 100;
-        const isWideRange = freqRangeRatio > 1000;
-
-        // Adjust threshold multipliers based on frequency range
-        const thresholdMultiplier = isNarrowRange ? 1.2 : 
-                                   isWideRange ? 2.0 : 1.5;
-
-        // Log the effect of frequency range on thresholds
-        updateStatusMessage(`MATH: Frequency range ratio: ${freqRangeRatio.toFixed(1)}, threshold adjustment: ${thresholdMultiplier.toFixed(1)}x`);
-        updateStatusMessage(`MATH: ${isNarrowRange ? "Narrow" : isWideRange ? "Wide" : "Moderate"} frequency range affects parameter sensitivity`);
-
-        // Group 1: Very good fits (reference and very close matches)
-        // With our improved normalization, thresholds are different
-        const veryGoodThreshold = Math.min(0.03 * thresholdMultiplier, minResnorm * 1.5 * thresholdMultiplier);
-
-        // Group 2: Good fits - more conservative threshold
-        const goodThreshold = Math.min(0.08 * thresholdMultiplier, minResnorm * 3 * thresholdMultiplier);
-
-        // Group 3: Moderate fits
-        const moderateThreshold = Math.min(0.2 * thresholdMultiplier, minResnorm * 8 * thresholdMultiplier);
-        
-        // Group 4: Poor fits (everything else)
-        
-        // Log the thresholds for educational purposes
-        updateStatusMessage(`MATH: Grouping thresholds: Very Good (0-${veryGoodThreshold.toExponential(3)}), Good (${veryGoodThreshold.toExponential(3)}-${goodThreshold.toExponential(3)}), Moderate (${goodThreshold.toExponential(3)}-${moderateThreshold.toExponential(3)}), Poor (>${moderateThreshold.toExponential(3)})`);
-        updateStatusMessage(`MATH: Resnorm < 0.05 typically indicates excellent model fit in impedance spectroscopy`);
-        
-        // Create the groups with appropriate colors
-        const veryGoodGroup: ResnormGroup = {
-            range: [0, veryGoodThreshold] as [number, number],
-            color: '#10B981', // Green
-            items: models
-              .filter(m => m.resnorm !== undefined && m.resnorm <= veryGoodThreshold)
-              .map(item => ({
-                ...item,
-                color: '#10B981' // Ensure every item has the group color
-              }))
-        };
-        
-        const goodGroup: ResnormGroup = {
-            range: [veryGoodThreshold, goodThreshold] as [number, number],
-            color: '#3B82F6', // Blue
-            items: models
-              .filter(m => m.resnorm !== undefined && m.resnorm > veryGoodThreshold && m.resnorm <= goodThreshold)
-              .map(item => ({
-                ...item,
-                color: '#3B82F6' // Ensure every item has the group color
-              }))
-        };
-        
-        const moderateGroup: ResnormGroup = {
-            range: [goodThreshold, moderateThreshold] as [number, number],
-            color: '#F59E0B', // Amber
-            items: models
-              .filter(m => m.resnorm !== undefined && m.resnorm > goodThreshold && m.resnorm <= moderateThreshold)
-              .map(item => ({
-                ...item,
-                color: '#F59E0B' // Ensure every item has the group color
-              }))
-        };
-        
-        const poorGroup: ResnormGroup = {
-            range: [moderateThreshold, maxResnorm] as [number, number],
-            color: '#EF4444', // Red
-            items: models
-              .filter(m => m.resnorm !== undefined && m.resnorm > moderateThreshold)
-              .map(item => ({
-                ...item,
-                color: '#EF4444' // Ensure every item has the group color
-              }))
-        };
-        
-        // Only add groups that have items
-        if (veryGoodGroup.items.length > 0) groups.push(veryGoodGroup);
-        if (goodGroup.items.length > 0) groups.push(goodGroup);
-        if (moderateGroup.items.length > 0) groups.push(moderateGroup);
-        if (poorGroup.items.length > 0) groups.push(poorGroup);
-        
-        // Log a detailed sample calculation for educational purposes - choose a few representative points
-        const samplePoints = [
-          // Best fit point
-          sortedPoints[0],
-          // Middle point
-          sortedPoints[Math.floor(sortedPoints.length / 2)],
-          // Worst fit point
-          sortedPoints[sortedPoints.length - 1]
-        ];
-        
-        updateStatusMessage(`MATH: Detailed resnorm calculations for sample grid points`);
-        
-        for (const point of samplePoints) {
-          const pointType = point === sortedPoints[0] ? "Best fit" : 
-                           point === sortedPoints[sortedPoints.length - 1] ? "Worst fit" : "Median fit";
+        if (progress.type === 'GENERATION_PROGRESS') {
+          if (generationStartTime === 0) {
+            generationStartTime = Date.now();
+            updateStatusMessage(`[TIMING] Grid generation phase started`);
+          }
+          if (progress.generated && progress.generated > 0) {
+            updateStatusMessage(`Generating grid points: ${progress.generated.toLocaleString()}/${progress.total.toLocaleString()} (${progress.overallProgress.toFixed(1)}%)`);
+          }
           
-          updateStatusMessage(`MATH: --- ${pointType} point (resnorm = ${point.resnorm.toExponential(5)}) ---`);
-          updateStatusMessage(`MATH: Parameters: Rs=${point.parameters.Rs.toFixed(1)}Ω, Ra=${point.parameters.Ra.toFixed(0)}Ω, Ca=${(point.parameters.Ca*1e6).toFixed(2)}µF, Rb=${point.parameters.Rb.toFixed(0)}Ω, Cb=${(point.parameters.Cb*1e6).toFixed(2)}µF`);
+          // Add small delay for large grids to keep UI responsive
+          if (totalPoints > 100000 && progress.generated && progress.generated % 50000 === 0) {
+            setTimeout(() => {}, 10);
+          }
+        } else if (progress.type === 'CHUNK_PROGRESS') {
+          if (computationStartTime === 0) {
+            computationStartTime = Date.now();
+            const generationTime = ((computationStartTime - generationStartTime) / 1000).toFixed(2);
+            updateStatusMessage(`[TIMING] Grid generation completed in ${generationTime}s, starting spectrum computation`);
+          }
+          const processedStr = progress.processed ? progress.processed.toLocaleString() : '0';
+          const totalStr = progress.total.toLocaleString();
+          updateStatusMessage(`Computing spectra & resnorms: ${processedStr}/${totalStr} points (${progress.overallProgress.toFixed(1)}%)`);
           
-          // Sample a few frequencies for the log - first, middle, last
-          if (point.spectrum && point.spectrum.length > 0) {
-            const freqSamples = [
-              point.spectrum[0],
-              point.spectrum[Math.floor(point.spectrum.length / 2)],
-              point.spectrum[point.spectrum.length - 1]
-            ];
-            
-            for (const freqSample of freqSamples) {
-              // Find matching reference frequency point
-              const refSample = referenceSpectrum.find(ref => 
-                Math.abs(ref.freq - freqSample.freq) / freqSample.freq < 0.001
-              );
-              
-              if (refSample) {
-                const freq = freqSample.freq;
-                const weight = 1 / Math.max(1, Math.log10(freq));
-                const refMagnitude = Math.sqrt(refSample.real * refSample.real + refSample.imag * refSample.imag);
-                const normFactor = refMagnitude > 0 ? refMagnitude : 1;
-                
-                const realResidual = (freqSample.real - refSample.real) / normFactor;
-                const imagResidual = (freqSample.imag - refSample.imag) / normFactor;
-                const residualSquared = (realResidual * realResidual + imagResidual * imagResidual) * weight;
-                
-                updateStatusMessage(`MATH:   At f=${freq.toFixed(1)}Hz: weight=${weight.toFixed(3)}, normalized residual=${Math.sqrt(realResidual*realResidual + imagResidual*imagResidual).toExponential(3)}, contribution=${residualSquared.toExponential(3)}`);
-              }
-            }
+          // Add periodic UI updates for better responsiveness
+          if (totalPoints > 500000 && progress.processed && progress.processed % 100000 === 0) {
+            setTimeout(() => {}, 5);
           }
         }
-        
-        setResnormGroups(groups);
-        updateStatusMessage(`Grid visualization ready with ${models.length} points grouped by resnorm`);
+      };
+
+      // Error callback for worker errors
+      const handleError = (error: string) => {
+        setGridError(`Parallel computation failed: ${error}`);
+        updateStatusMessage(`Error in parallel computation: ${error}`);
         setIsComputingGrid(false);
+      };
+
+      // Run the parallel computation
+      const results = await computeGridParallel(
+        groundTruthParams,
+        gridSize,
+        minFreq,
+        maxFreq,
+        numPoints,
+        handleProgress,
+        handleError
+      );
+
+      if (results.length === 0) {
+        throw new Error('No results returned from computation');
+      }
+
+      // Start processing phase timing
+      processingStartTime = Date.now();
+      const computationTime = ((processingStartTime - computationStartTime) / 1000).toFixed(2);
+      updateStatusMessage(`[TIMING] Spectrum computation completed in ${computationTime}s, starting results processing`);
+
+      // Sort results by resnorm
+      const sortingStart = Date.now();
+      const sortedResults = results.sort((a, b) => a.resnorm - b.resnorm);
+      const sortingTime = ((Date.now() - sortingStart) / 1000).toFixed(3);
+      
+      updateStatusMessage(`Parallel computation complete: ${sortedResults.length} points analyzed`);
+      updateStatusMessage(`[TIMING] Results sorted by resnorm in ${sortingTime}s`);
+
+      // Calculate resnorm range for grouping
+      const groupingStart = Date.now();
+      const resnorms = sortedResults.map(p => p.resnorm).filter(r => r > 0);
+      
+      // Use iterative approach to avoid stack overflow with large arrays
+      let minResnorm = Infinity;
+      let maxResnorm = -Infinity;
+      for (const resnorm of resnorms) {
+        if (resnorm < minResnorm) minResnorm = resnorm;
+        if (resnorm > maxResnorm) maxResnorm = resnorm;
+      }
+
+      // Intelligent memory management for large datasets
+      const estimateMemoryUsage = (count: number) => {
+        // Rough estimate: each model ~500 bytes + spectrum data
+        const avgSpectrumSize = numPoints * 40; // bytes per spectrum point
+        return count * (500 + avgSpectrumSize) / 1024 / 1024; // MB
+      };
+
+      let MAX_VISUALIZATION_MODELS = 100000;
+      const estimatedMemory = estimateMemoryUsage(sortedResults.length);
+      
+      // Adaptive limits based on dataset size and estimated memory usage
+      if (estimatedMemory > 500) { // > 500MB
+        MAX_VISUALIZATION_MODELS = 50000;
+        updateStatusMessage(`Large dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using aggressive sampling`);
+      } else if (estimatedMemory > 200) { // > 200MB  
+        MAX_VISUALIZATION_MODELS = 75000;
+        updateStatusMessage(`Medium dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using moderate sampling`);
+      }
+      
+      const shouldLimitModels = sortedResults.length > MAX_VISUALIZATION_MODELS;
+      const modelsToProcess = shouldLimitModels ? sortedResults.slice(0, MAX_VISUALIZATION_MODELS) : sortedResults;
+      
+      updateStatusMessage(`Processing ${modelsToProcess.length}/${sortedResults.length} models for visualization ${shouldLimitModels ? '(limited for performance)' : ''}`);
+
+      // Map to ModelSnapshot format for visualization (optimized)
+      const mappingStart = Date.now();
+      const models: ModelSnapshot[] = [];
+      
+      // Process in smaller chunks to avoid stack overflow with spread operator
+      const CHUNK_SIZE = 1000; // Reduced from 10000 to prevent spread operator stack overflow
+      for (let i = 0; i < modelsToProcess.length; i += CHUNK_SIZE) {
+        const chunk = modelsToProcess.slice(i, i + CHUNK_SIZE);
+        const chunkModels = chunk.map((point, localIdx) => 
+          mapBackendMeshToSnapshot(point, i + localIdx)
+        );
         
-        // Add unique IDs based on resnorm sorting
-        const sortedByResnorm = [...sortedPoints].sort((a, b) => a.resnorm - b.resnorm);
-        const pointsWithIds = sortedByResnorm.map((point, idx) => ({
-            ...point,
-            id: idx + 1 // ID starts from 1
+        // Use Array.prototype.push.apply instead of spread operator to avoid stack overflow
+        Array.prototype.push.apply(models, chunkModels);
+        
+        // Allow UI to update during processing
+        if (i % (CHUNK_SIZE * 10) === 0) {
+          setTimeout(() => {
+            updateStatusMessage(`Mapping models for visualization: ${Math.min(i + CHUNK_SIZE, modelsToProcess.length)}/${modelsToProcess.length}`);
+          }, 1);
+        }
+      }
+      
+      const mappingTime = ((Date.now() - mappingStart) / 1000).toFixed(3);
+      updateStatusMessage(`[TIMING] Model mapping completed in ${mappingTime}s`);
+
+      // Create resnorm groups
+      updateStatusMessage('Creating visualization groups...');
+      const groups = createResnormGroups(models, minResnorm, maxResnorm);
+      setResnormGroups(groups);
+      const groupingTime = ((Date.now() - groupingStart) / 1000).toFixed(3);
+      updateStatusMessage(`[TIMING] Visualization groups created in ${groupingTime}s`);
+
+      // Add unique IDs for table display (chunked to avoid memory issues)
+      const pointsWithIds: (BackendMeshPoint & { id: number })[] = [];
+      const ID_CHUNK_SIZE = 5000;
+      
+      for (let i = 0; i < sortedResults.length; i += ID_CHUNK_SIZE) {
+        const chunk = sortedResults.slice(i, i + ID_CHUNK_SIZE);
+        const chunkWithIds = chunk.map((point, localIdx) => ({
+          ...point,
+          id: i + localIdx + 1
         }));
-        
-        // Store all computed points in both state variables
-        setGridResultsWithIds(pointsWithIds);
-        setGridResults(sortedPoints);
-        updateStatusMessage(`Stored and displaying all ${sortedPoints.length} computed grid points.`);
-        
-        // Always update reference model after computing grid
-        const updatedModel = createReferenceModel();
-        setReferenceModel(updatedModel);
-        
-        // If reference model is not visible, make it visible
-        if (!referenceModelId) {
-          setReferenceModelId('dynamic-reference');
-          updateStatusMessage('Reference model created and shown');
-        } else {
-          updateStatusMessage('Reference model updated');
-        }
-        
-        // Add to the logs after the frequency range is updated
-        updateStatusMessage(`MATH: Frequency range updated to ${minFreq.toExponential(2)}-${maxFreq.toExponential(2)} Hz with ${numPoints} points`);
-        updateStatusMessage(`MATH: Resnorm calculation is frequency-sensitive. Changing the range affects parameter sensitivity:`);
-        if (minFreq < 1.0) {
-          updateStatusMessage(`MATH: Very low frequencies (< 1 Hz) highlight capacitive effects (Ca, Cb)`);
-        }
-        if (minFreq < 10.0 && maxFreq > 100) {
-          updateStatusMessage(`MATH: Mid-range frequencies (10-100 Hz) highlight RC time constants`);
-        }
-        if (maxFreq > 1000) {
-          updateStatusMessage(`MATH: High frequencies (> 1000 Hz) emphasize series resistance (Rs)`);
-        }
+        Array.prototype.push.apply(pointsWithIds, chunkWithIds);
+      }
 
-        // Also add these status messages during grid computation, before calculating spectra
-        updateStatusMessage(`MATH: Frequency range ${minFreq.toExponential(2)}-${maxFreq.toExponential(2)} Hz affects parameter sensitivity:`);
-        if (maxFreq / minFreq < 100) {
-          updateStatusMessage(`MATH: Narrow frequency range (ratio ${(maxFreq/minFreq).toFixed(1)}) means fewer distinguishing features`);
-          updateStatusMessage(`MATH: Some parameter combinations may appear similar in this range`);
-        } else if (maxFreq / minFreq > 1000) {
-          updateStatusMessage(`MATH: Wide frequency range (ratio ${(maxFreq/minFreq).toFixed(1)}) provides better parameter discrimination`);
-          updateStatusMessage(`MATH: This helps distinguish between different circuit parameter sets`);
-        }
-        
+      // Update state
+      setGridResults(sortedResults);
+      setGridResultsWithIds(pointsWithIds);
+      
+      // Calculate final timing
+      const endTime = Date.now();
+      const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+      const generationTime = ((computationStartTime - generationStartTime) / 1000).toFixed(2);
+      const spectrumTime = ((processingStartTime - computationStartTime) / 1000).toFixed(2);
+      const processingTime = ((endTime - processingStartTime) / 1000).toFixed(2);
+
+      // Log detailed timing breakdown
+      updateStatusMessage(`[TIMING] Results processing completed in ${processingTime}s`);
+      updateStatusMessage(`[SUMMARY] Grid computation completed successfully in ${totalTime}s total`);
+      updateStatusMessage(`[BREAKDOWN] Grid generation: ${generationTime}s | Spectrum computation: ${spectrumTime}s | Results processing: ${processingTime}s`);
+      updateStatusMessage(`[PERFORMANCE] Processed ${totalPoints.toLocaleString()} parameter combinations using ${navigator.hardwareConcurrency || 4} CPU cores`);
+      updateStatusMessage(`[RESULTS] ${sortedResults.length} valid points, ${groups.length} resnorm groups created`);
+      updateStatusMessage(`Resnorm range: ${minResnorm.toExponential(3)} to ${maxResnorm.toExponential(3)}`);
+      updateStatusMessage(`Memory usage optimized: ${results.filter(r => r.spectrum.length > 0).length} points with full spectra`);
+      
+      // Create and show summary notification
+      const summaryData: ComputationSummary = {
+        title: 'Grid Computation Complete',
+        totalTime,
+        generationTime,
+        computationTime: spectrumTime,
+        processingTime,
+        totalPoints,
+        validPoints: sortedResults.length,
+        groups: groups.length,
+        cores: navigator.hardwareConcurrency || 4,
+        throughput: totalPoints / parseFloat(totalTime),
+        type: 'success',
+        duration: 8000
+      };
+
+      // Log the summary to activity log with detailed breakdown
+      updateStatusMessage(`[COMPLETION SUMMARY] Total: ${totalTime}s | Generation: ${generationTime}s | Computation: ${spectrumTime}s | Processing: ${processingTime}s | Throughput: ${(totalPoints / parseFloat(totalTime)).toFixed(0)} pts/s`);
+
+      // Show the notification
+      setComputationSummary(summaryData);
+
+      // Update reference model
+      const updatedModel = createReferenceModel();
+      setReferenceModel(updatedModel);
+
+      if (!referenceModelId) {
+        setReferenceModelId('dynamic-reference');
+        updateStatusMessage('Reference model created and shown');
+      } else {
+        updateStatusMessage('Reference model updated');
+      }
+
+      setIsComputingGrid(false);
+      setComputationProgress(null);
+
     } catch (error) {
-        console.error("Error computing grid:", error);
-        setGridError(`Grid computation failed: ${error instanceof Error ? error.message : String(error)}`);
-        updateStatusMessage(`Error computing grid: ${error instanceof Error ? error.message : String(error)}`);
-        setIsComputingGrid(false);
+      console.error("Error in parallel computation:", error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorTime = ((Date.now() - startTime) / 1000).toFixed(2);
+      
+      setGridError(`Parallel grid computation failed: ${errorMessage}`);
+      updateStatusMessage(`[ERROR] Computation failed after ${errorTime}s: ${errorMessage}`);
+      updateStatusMessage(`[TIMING] Error occurred during computation phase`);
+      
+      // Show error notification
+      const errorSummary: ComputationSummary = {
+        title: '❌ Grid Computation Failed',
+        totalTime: errorTime,
+        generationTime: generationStartTime > 0 ? ((Date.now() - generationStartTime) / 1000).toFixed(2) : '0',
+        computationTime: computationStartTime > 0 ? ((Date.now() - computationStartTime) / 1000).toFixed(2) : '0',
+        processingTime: '0',
+        totalPoints,
+        validPoints: 0,
+        groups: 0,
+        cores: navigator.hardwareConcurrency || 4,
+        throughput: 0,
+        type: 'error',
+        duration: 10000 // Show error longer
+      };
+      
+      setComputationSummary(errorSummary);
+      
+      setIsComputingGrid(false);
+      setComputationProgress(null);
     }
-  };
-
-  // Function to apply parameters from a grid result
-  const handleApplyParameters = (point: BackendMeshPoint) => {
-    setParameters({
-      Rs: point.parameters.Rs,
-      Ra: point.parameters.Ra,
-      Ca: point.parameters.Ca,
-      Rb: point.parameters.Rb,
-      Cb: point.parameters.Cb,
-      frequency_range: point.parameters.frequency_range
-    });
-    setParameterChanged(true);
-    updateStatusMessage(`Applied parameters from grid result with resnorm ${point.resnorm.toExponential(3)}`);
   };
 
   // Add pagination state - used by child components
@@ -859,7 +754,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setNumPoints(points);
     
     // Update parameters with the new frequency range
-    setParameters(prev => ({
+    setParameters((prev: CircuitParameters) => ({
       ...prev,
       frequency_range: [min, max] // Keep the [min, max] format for backward compatibility
     }));
@@ -920,24 +815,76 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [frequencyPoints, referenceModel, manuallyHidden, createReferenceModel]);
 
-  // Update reference model when frequency parameters change
+  // Update reference model when frequency settings change
   useEffect(() => {
-    // Only update if reference model is already visible and not manually hidden
-    if (referenceModelId === 'dynamic-reference' && !manuallyHidden && frequencyPoints.length > 0) {
+    if (referenceModelId === 'dynamic-reference' && !manuallyHidden) {
       const updatedModel = createReferenceModel();
       setReferenceModel(updatedModel);
       updateStatusMessage('Reference model updated with new frequency range');
     }
   }, [minFreq, maxFreq, numPoints, frequencyPoints.length, referenceModelId, manuallyHidden, createReferenceModel, updateStatusMessage]);
 
+  // Handler for grid values generated by spider plot
+  const handleGridValuesGenerated = useCallback((values: GridParameterArrays) => {
+    if (!values) return;
+    
+    // Log the values for debugging
+    console.log('Grid values received:', values);
+    
+    // Only update if values have actually changed
+    setGridParameterArrays(prev => {
+      if (!prev) return values;
+      
+      // Quick equality check for performance
+      if (prev === values) return prev;
+      
+      // Check if any arrays have changed length
+      const keys = Object.keys(values) as Array<keyof GridParameterArrays>;
+      const hasLengthChanged = keys.some(key => 
+        !prev[key] || prev[key].length !== values[key].length
+      );
+      
+      if (hasLengthChanged) return values;
+      
+      // Deep compare arrays
+      const hasChanged = keys.some(key => {
+        const prevArr = prev[key];
+        const newArr = values[key];
+        return !prevArr.every((val, idx) => val === newArr[idx]);
+      });
+      
+      return hasChanged ? values : prev;
+    });
+  }, []);
+
+  // Note: Grid generation and spectrum calculation now handled by Web Workers
+
+  // State for collapsible sidebar
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   // Modify the main content area to show the correct tab content
   return (
-    <div className="circuit-container">
+    <div className="min-h-screen bg-slate-900 text-white flex flex-col">
       <div className="flex flex-col h-full">
-        {/* Header - Modernized */}
-        <header className="circuit-header">
+        {/* Header - Sticky and Modernized */}
+        <header className="sticky top-0 z-50 bg-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <h1 className="text-title">Circuit Simulator</h1>
+            {/* Sidebar toggle button */}
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
+              title={sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {sidebarCollapsed ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
+                )}
+              </svg>
+            </button>
+
+            <h1 className="text-2xl font-bold text-white">Circuit Simulator</h1>
             
             {/* Visualization tabs */}
             <div className="flex bg-neutral-800 rounded-md overflow-hidden">
@@ -974,48 +921,49 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           </div>
         </header>
         
-        {/* Main content with sidebar and visualization area */}
+        {/* Main content with collapsible sidebar and visualization area */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar */}
-          <ToolboxComponent 
-            // Grid computation props
-            gridSize={gridSize}
-            setGridSize={setGridSize}
-            minFreq={minFreq}
-            setMinFreq={setMinFreq}
-            maxFreq={maxFreq}
-            setMaxFreq={setMaxFreq}
-            numPoints={numPoints}
-            setNumPoints={setNumPoints}
-            updateFrequencies={updateFrequencies}
-            updateStatusMessage={updateStatusMessage}
-            parameterChanged={parameterChanged}
-            setParameterChanged={setParameterChanged}
-            handleComputeRegressionMesh={handleComputeRegressionMesh}
-            isComputingGrid={isComputingGrid}
-            gridResults={gridResults}
-            handleApplyParameters={handleApplyParameters}
-            
-            // Circuit parameters props
-            groundTruthParams={groundTruthParams}
-            setGroundTruthParams={setGroundTruthParams}
-            referenceModelId={referenceModelId}
-            createReferenceModel={createReferenceModel}
-            setReferenceModel={setReferenceModel}
-            
-            // Utility functions
-            logToLinearSlider={logToLinearSlider}
-            linearSliderToLog={linearSliderToLog}
-            
-            // Log messages
-            logMessages={logMessages}
-          />
+          {/* Collapsible Sidebar */}
+          <div className={`transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-0 -ml-4' : 'w-[350px]'} overflow-hidden`}>
+            <ToolboxComponent 
+              // Grid computation props
+              gridSize={gridSize}
+              setGridSize={setGridSize}
+              minFreq={minFreq}
+              setMinFreq={setMinFreq}
+              maxFreq={maxFreq}
+              setMaxFreq={setMaxFreq}
+              numPoints={numPoints}
+              setNumPoints={setNumPoints}
+              updateFrequencies={updateFrequencies}
+              updateStatusMessage={updateStatusMessage}
+              parameterChanged={parameterChanged}
+              setParameterChanged={setParameterChanged}
+              handleComputeRegressionMesh={handleComputeRegressionMesh}
+              isComputingGrid={isComputingGrid}
+              gridResults={gridResults}
+              
+              // Circuit parameters props
+              groundTruthParams={groundTruthParams}
+              setGroundTruthParams={setGroundTruthParams}
+              referenceModelId={referenceModelId}
+              createReferenceModel={createReferenceModel}
+              setReferenceModel={setReferenceModel}
+              
+              // Utility functions
+              logToLinearSlider={logToLinearSlider}
+              linearSliderToLog={linearSliderToLog}
+              
+              // Log messages
+              logMessages={logMessages}
+            />
+          </div>
                   
           {/* Main Content Area */}
-          <div className="circuit-main">
+          <div className="flex-1 bg-slate-900 overflow-y-auto">
             {/* Status message bar */}
             {statusMessage && (
-              <div className="circuit-status">
+              <div className="bg-blue-600 text-white px-4 py-2 text-sm border-b border-slate-700">
                 <div className="flex items-center">
                   <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1026,14 +974,44 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             )}
                     
             {/* Main visualization area */}
-            <div className="circuit-visualization" style={{ minHeight: '600px' }}>
+            <div className="p-6 bg-slate-900" style={{ minHeight: '600px' }}>
               {isComputingGrid ? (
-                <div className="flex items-center justify-center p-6 h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md">
-                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
-                  <div>
-                    <p className="text-sm text-primary font-medium">Computing grid points...</p>
-                    <p className="text-xs text-neutral-400 mt-1">This may take a moment depending on grid size</p>
+                <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md">
+                  <div className="flex items-center mb-4">
+                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
+                    <div>
+                      <p className="text-sm text-primary font-medium">
+                        {computationProgress?.type === 'GENERATION_PROGRESS' 
+                          ? 'Generating grid points...' 
+                          : 'Computing in parallel...'}
+                      </p>
+                      <p className="text-xs text-neutral-400 mt-1">
+                        {computationProgress ? 
+                          `${computationProgress.overallProgress.toFixed(1)}% complete` : 
+                          'Using multiple CPU cores for faster computation'}
+                      </p>
+                    </div>
                   </div>
+                  
+                  {/* Progress bar */}
+                  {computationProgress && (
+                    <div className="w-full max-w-md">
+                      <div className="w-full bg-neutral-700 rounded-full h-2">
+                        <div 
+                          className="bg-primary h-2 rounded-full transition-all duration-300" 
+                          style={{ width: `${computationProgress.overallProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Cancel button */}
+                  <button
+                    onClick={cancelComputation}
+                    className="mt-4 px-4 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+                  >
+                    Cancel Computation
+                  </button>
                 </div>
               ) : gridError ? (
                 <div className="p-4 bg-danger-light border border-danger rounded-lg text-sm text-danger">
@@ -1054,6 +1032,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   maxFreq={maxFreq}
                   numPoints={numPoints}
                   referenceModel={referenceModel}
+                  gridParameterArrays={gridParameterArrays}
                 />
               ) : visualizationTab === 'data' ? (
                 gridResults.length > 0 ? (
@@ -1066,6 +1045,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     gridSize={gridSize}
                     parameters={parameters}
                     groundTruthParams={groundTruthParams}
+                    gridParameterArrays={gridParameterArrays}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-5">
@@ -1081,17 +1061,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 )
               ) : visualizationTab === 'visualizer' ? (
                 <div className="space-y-5">
-                  {/* Spider Plot Visualization - Always render regardless of data */}
                   <VisualizerTab 
                     resnormGroups={resnormGroups}
                     hiddenGroups={hiddenGroups}
-                    maxGridPoints={Math.pow(gridSize, 5)}
                     opacityLevel={opacityLevel}
-                    logScalar={logScalar}
                     referenceModelId={referenceModelId}
-                    referenceModel={referenceModel}
-                    minFreq={minFreq}
-                    maxFreq={maxFreq}
+                    gridSize={gridSize}
+                    onGridValuesGenerated={handleGridValuesGenerated}
                   />
                 </div>
               ) : (
@@ -1110,218 +1086,162 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           </div>
         </div>
       </div>
+      
+      {/* Computation Summary Notification */}
+      <ComputationNotification 
+        summary={computationSummary}
+        onDismiss={() => setComputationSummary(null)}
+      />
     </div>
   );
 } 
 
 // Helper to convert backend spectrum to ImpedancePoint[] (types.ts shape)
-function toImpedancePoints(spectrum: { freq?: number; frequency?: number; real: number; imag?: number; imaginary?: number; mag?: number; magnitude?: number; phase: number; }[], forImpedance?: boolean): TypesImpedancePoint[] {
-  return spectrum.map(p => ({
-    frequency: p.frequency ?? p.freq ?? 0,
+function toImpedancePoints(spectrum: { freq: number; real: number; imag: number; mag: number; phase: number; }[]): TypesImpedancePoint[] {
+  return spectrum.map((p): TypesImpedancePoint => ({
+    frequency: p.freq,
     real: p.real,
-    imaginary: forImpedance ? (p.imag ?? p.imaginary ?? 0) : (p.imag ?? 0),
-    magnitude: p.magnitude ?? p.mag ?? 0,
+    imaginary: p.imag,
+    magnitude: p.mag,
     phase: p.phase
   }));
 }
 
-// --- Utility functions for circuit simulation ---
+// --- Complex math operations now handled in Web Workers ---
 
-// Complex number type
-type Complex = {
-  real: number;
-  imag: number;
-};
+// Note: Complex number operations, impedance calculations, and resnorm calculations
+// are now handled efficiently in Web Workers for parallel processing
 
-// Complex number operations
-const complex = {
-  add: (a: Complex, b: Complex): Complex => ({
-    real: a.real + b.real,
-    imag: a.imag + b.imag
-  }),
-  multiply: (a: Complex, b: Complex): Complex => ({
-    real: a.real * b.real - a.imag * b.imag,
-    imag: a.real * b.imag + a.imag * b.real
-  }),
-  divide: (a: Complex, b: Complex): Complex => {
-    const denom = b.real * b.real + b.imag * b.imag;
-    return {
-      real: (a.real * b.real + a.imag * b.imag) / denom,
-      imag: (a.imag * b.real - a.real * b.imag) / denom
-    };
+// Optimized resnorm grouping logic using percentiles instead of hardline boundaries
+const createResnormGroups = (models: ModelSnapshot[], minResnorm: number, maxResnorm: number): ResnormGroup[] => {
+  // Limit processing for very large datasets to prevent memory issues
+  const MAX_MODELS_PER_GROUP = 50000;
+  const shouldSample = models.length > MAX_MODELS_PER_GROUP;
+  
+  console.log(`Creating percentile-based resnorm groups for ${models.length} models (sampling: ${shouldSample})`);
+  
+  // Extract all finite resnorm values for percentile calculation
+  const validResnorms = models
+    .map(m => m.resnorm)
+    .filter(r => r !== undefined && isFinite(r)) as number[];
+  
+  if (validResnorms.length === 0) {
+    console.warn('No valid resnorm values found for grouping');
+    return [];
   }
-};
 
-// Impedance spectrum calculation for epithelial model
-function calculateImpedanceSpectrum(params: {
-  Rs: number;
-  Ra: number;
-  Rb: number;
-  Ca: number;
-  Cb: number;
-}, freqs: number[]): { freq: number; real: number; imag: number; mag: number; phase: number }[] {
-  return freqs.map(freq => {
-    const omega = 2 * Math.PI * freq;
-    
-    // Za = Ra/(1+jωRaCa)
-    const Za_denom = complex.add(
-      { real: 1, imag: 0 },
-      { real: 0, imag: omega * params.Ra * params.Ca }
-    );
-    const Za = complex.divide(
-      { real: params.Ra, imag: 0 },
-      Za_denom
-    );
-    
-    // Zb = Rb/(1+jωRbCb)
-    const Zb_denom = complex.add(
-      { real: 1, imag: 0 },
-      { real: 0, imag: omega * params.Rb * params.Cb }
-    );
-    const Zb = complex.divide(
-      { real: params.Rb, imag: 0 },
-      Zb_denom
-    );
-    
-    // Z_eq = Rs + Za + Zb
-    const Z_eq = complex.add(
-      { real: params.Rs, imag: 0 },
-      complex.add(Za, Zb)
-    );
-    
-    // Magnitude and phase
-    const magnitude = Math.sqrt(Z_eq.real * Z_eq.real + Z_eq.imag * Z_eq.imag);
-    const phase = Math.atan2(Z_eq.imag, Z_eq.real) * (180 / Math.PI);
-    return {
-      freq,
-      real: Z_eq.real,
-      imag: Z_eq.imag,
-      mag: magnitude,
-      phase
-    };
-  });
-}
-
-// These calculateTER and calculateTEC functions are now handled in the MathDetailsTab component
-// TEC is calculated as CaCb/(Ca+Cb)
-
-// Calculate resnorm between reference and test models
-function calculateResnorm(reference: ModelSnapshot, test: ModelSnapshot): number {
-  if (!reference.data.length || !test.data.length) return Infinity;
+  // Sort resnorms for percentile calculation
+  validResnorms.sort((a, b) => a - b);
   
-  // Collect all impedance points from both models
-  const referenceData = reference.data;
-  const testData = test.data;
-  
-  // Define a logging function that adds detailed calculations to the status log
-  const logFunction = (message: string) => {
-    // Add to console but not UI to avoid too much noise
-    console.log(message);
+  // Calculate percentile thresholds
+  const calculatePercentile = (arr: number[], percentile: number): number => {
+    const index = Math.ceil((percentile / 100) * arr.length) - 1;
+    return arr[Math.max(0, Math.min(index, arr.length - 1))];
   };
-  
-  // Extract frequency range from the data
-  const minFreq = Math.min(...referenceData.map(p => p.frequency));
-  const maxFreq = Math.max(...referenceData.map(p => p.frequency));
-  
-  // Log the frequency range being used
-  logFunction(`Resnorm calculation using frequency range: ${minFreq.toFixed(2)} - ${maxFreq.toFixed(2)} Hz (${referenceData.length} points)`);
-  
-  // Calculate the weighted sum of squared residuals
-  let sumWeightedSquaredResiduals = 0;
-  let sumWeights = 0;
-  
-  // Go through each frequency point
-  for (let i = 0; i < Math.min(referenceData.length, testData.length); i++) {
-    const refPoint = referenceData[i];
-    const testPoint = testData[i];
+
+  const percentileThresholds = {
+    p25: calculatePercentile(validResnorms, 25),  // Top 25% (best fits)
+    p50: calculatePercentile(validResnorms, 50),  // Top 50% (good fits)
+    p75: calculatePercentile(validResnorms, 75),  // Top 75% (moderate fits)
+    p90: calculatePercentile(validResnorms, 90)   // Top 90% (acceptable fits)
+  };
+
+  console.log('Percentile thresholds:', percentileThresholds);
+
+  // Pre-allocate arrays for each percentile group
+  const excellentItems: ModelSnapshot[] = [];  // Top 25%
+  const goodItems: ModelSnapshot[] = [];       // 25-50%
+  const moderateItems: ModelSnapshot[] = [];   // 50-75%
+  const acceptableItems: ModelSnapshot[] = []; // 75-90%
+  const poorItems: ModelSnapshot[] = [];       // Bottom 10%
+
+  // Single pass classification with performance optimization
+  let processed = 0;
+  const maxToProcess = shouldSample ? MAX_MODELS_PER_GROUP : models.length;
+  const step = shouldSample ? Math.ceil(models.length / MAX_MODELS_PER_GROUP) : 1;
+
+  for (let i = 0; i < models.length && processed < maxToProcess; i += step) {
+    const model = models[i];
     
-    if (!refPoint || !testPoint) continue;
+    if (!model || model.resnorm === undefined || !isFinite(model.resnorm)) continue;
     
-    // Ensure the frequencies match (within tolerance)
-    if (Math.abs(refPoint.frequency - testPoint.frequency) / refPoint.frequency > 0.001) {
-      continue; // Skip if frequencies don't match
-    }
+    const resnorm = model.resnorm;
     
-    // Extract real and imaginary components
-    const refReal = refPoint.real;
-    const refImag = refPoint.imaginary ?? 0;
-    const testReal = testPoint.real;
-    const testImag = testPoint.imaginary ?? 0;
-    
-    // Enhanced frequency weighting: give more weight to specific frequency ranges
-    // Low frequencies are weighted heavily as they reflect capacitive behavior
-    const freq = refPoint.frequency;
-    
-    // Calculate logarithmic weight
-    // Frequencies closer to the low end of the range get higher weight
-    // This ensures frequency range changes have significant impact
-    let frequencyWeight;
-    
-    // Determine which weighting scheme to use based on frequency range span
-    // If the range spans less than 2 decades, use a more aggressive weighting
-    const isNarrowRange = maxFreq / minFreq < 100;
-    
-    if (freq < 10) {
-      // Low frequencies: enhanced weight for capacitive effects
-      frequencyWeight = isNarrowRange ? 5.0 / Math.max(0.1, Math.log10(freq)) : 3.0 / Math.max(0.1, Math.log10(freq));
-    } else if (freq < 1000) {
-      // Mid frequencies: moderate weight for RC time constants
-      frequencyWeight = isNarrowRange ? 2.5 / Math.max(0.5, Math.log10(freq)) : 1.5 / Math.max(0.5, Math.log10(freq));
+    // Classify into percentile groups with performance-optimized colors
+    if (resnorm <= percentileThresholds.p25) {
+      excellentItems.push({ ...model, color: '#059669' }); // Emerald-600 (excellent)
+    } else if (resnorm <= percentileThresholds.p50) {
+      goodItems.push({ ...model, color: '#10B981' });      // Emerald-500 (good)
+    } else if (resnorm <= percentileThresholds.p75) {
+      moderateItems.push({ ...model, color: '#F59E0B' }); // Amber-500 (moderate)
+    } else if (resnorm <= percentileThresholds.p90) {
+      acceptableItems.push({ ...model, color: '#F97316' }); // Orange-500 (acceptable)
     } else {
-      // Higher frequencies: lower weight
-      frequencyWeight = isNarrowRange ? 1.5 / Math.max(1.0, Math.log10(freq)) : 1.0 / Math.max(1.0, Math.log10(freq));
+      poorItems.push({ ...model, color: '#DC2626' });      // Red-600 (poor)
     }
     
-    // Calculate the normalized residuals using reference magnitude
-    const refMagnitude = Math.sqrt(refReal * refReal + refImag * refImag);
-    const normFactor = refMagnitude > 0 ? refMagnitude : 1;
+    processed++;
     
-    // Calculate normalized residuals - separate real and imaginary components
-    const realResidual = (testReal - refReal) / normFactor;
-    const imagResidual = (testImag - refImag) / normFactor;
-    
-    // Calculate the weighted squared Euclidean distance in the complex plane
-    // Give slightly more emphasis to imaginary component at low frequencies (capacitive behavior)
-    const realWeight = freq < 100 ? 1.0 : 1.5;  // More weight to real component at higher freqs
-    const imagWeight = freq < 100 ? 1.5 : 1.0;  // More weight to imaginary component at lower freqs
-    
-    const squaredResidual = (realWeight * realResidual * realResidual + 
-                             imagWeight * imagResidual * imagResidual) * frequencyWeight;
-    
-    // Add to running total
-    sumWeightedSquaredResiduals += squaredResidual;
-    sumWeights += frequencyWeight;
-    
-    // Log detailed calculations for a few representative points
-    if (i === 0 || i === Math.floor(referenceData.length / 2) || i === referenceData.length - 1) {
-      logFunction(`Resnorm detail at ${refPoint.frequency.toExponential(2)} Hz:
-  Reference: Z = ${refReal.toExponential(4)} + j${refImag.toExponential(4)} Ω
-  Test: Z = ${testReal.toExponential(4)} + j${testImag.toExponential(4)} Ω
-  |Z_ref| = ${refMagnitude.toExponential(4)} Ω
-  Normalized residuals: real=${realResidual.toExponential(4)}, imag=${imagResidual.toExponential(4)}
-  Frequency weight: ${frequencyWeight.toFixed(4)}
-  Component weights: real=${realWeight.toFixed(1)}, imag=${imagWeight.toFixed(1)}
-  Weighted squared residual: ${squaredResidual.toExponential(4)}`);
+    // Progress logging for large datasets
+    if (processed % 10000 === 0) {
+      console.log(`Processed ${processed}/${maxToProcess} models for percentile grouping`);
     }
   }
-  
-  // Apply an amplification factor to make differences more visible
-  // This helps distinguish between small but significant differences
-  const freqRangeRatio = maxFreq / minFreq;
-  const rangeBasedAmplifier = freqRangeRatio < 100 ? 3.0 : 
-                              freqRangeRatio < 1000 ? 2.5 : 2.0;
-  
-  // Calculate the final resnorm with dynamic amplification
-  const finalResnorm = Math.sqrt(sumWeightedSquaredResiduals / sumWeights) * rangeBasedAmplifier;
-  
-  logFunction(`Final resnorm calculation:
-  Total frequency points: ${Math.min(referenceData.length, testData.length)}
-  Sum of weighted squared residuals: ${sumWeightedSquaredResiduals.toExponential(4)}
-  Sum of weights: ${sumWeights.toFixed(4)}
-  Frequency range ratio: ${freqRangeRatio.toFixed(1)} (${minFreq.toExponential(2)}-${maxFreq.toExponential(2)} Hz)
-  Range-based amplifier: ${rangeBasedAmplifier.toFixed(1)}
-  Raw resnorm value: ${(Math.sqrt(sumWeightedSquaredResiduals / sumWeights)).toExponential(4)}
-  Amplified resnorm value (×${rangeBasedAmplifier}): ${finalResnorm.toExponential(4)}`);
-  
-  return finalResnorm;
-}
+
+  console.log(`Percentile group sizes: Excellent(≤25%): ${excellentItems.length}, Good(25-50%): ${goodItems.length}, Moderate(50-75%): ${moderateItems.length}, Acceptable(75-90%): ${acceptableItems.length}, Poor(>90%): ${poorItems.length}`);
+
+  // Create groups array with performance focus - excellent group visible by default
+  const groups: ResnormGroup[] = [];
+
+  if (excellentItems.length > 0) {
+    groups.push({
+      range: [minResnorm, percentileThresholds.p25] as [number, number],
+      color: '#059669',
+      label: 'Excellent Fit (Top 25%)',
+      description: `Resnorm ≤ ${percentileThresholds.p25.toExponential(2)} (best ${excellentItems.length} models)`,
+      items: excellentItems
+    });
+  }
+
+  if (goodItems.length > 0) {
+    groups.push({
+      range: [percentileThresholds.p25, percentileThresholds.p50] as [number, number],
+      color: '#10B981',
+      label: 'Good Fit (25-50%)',
+      description: `${percentileThresholds.p25.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p50.toExponential(2)} (${goodItems.length} models)`,
+      items: goodItems
+    });
+  }
+
+  if (moderateItems.length > 0) {
+    groups.push({
+      range: [percentileThresholds.p50, percentileThresholds.p75] as [number, number],
+      color: '#F59E0B',
+      label: 'Moderate Fit (50-75%)',
+      description: `${percentileThresholds.p50.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p75.toExponential(2)} (${moderateItems.length} models)`,
+      items: moderateItems
+    });
+  }
+
+  if (acceptableItems.length > 0) {
+    groups.push({
+      range: [percentileThresholds.p75, percentileThresholds.p90] as [number, number],
+      color: '#F97316',
+      label: 'Acceptable Fit (75-90%)',
+      description: `${percentileThresholds.p75.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p90.toExponential(2)} (${acceptableItems.length} models)`,
+      items: acceptableItems
+    });
+  }
+
+  if (poorItems.length > 0) {
+    groups.push({
+      range: [percentileThresholds.p90, maxResnorm] as [number, number],
+      color: '#DC2626',
+      label: 'Poor Fit (Bottom 10%)',
+      description: `Resnorm > ${percentileThresholds.p90.toExponential(2)} (worst ${poorItems.length} models)`,
+      items: poorItems
+    });
+  }
+
+  return groups;
+};

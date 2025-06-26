@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { CircuitParameters } from '../../circuit-simulator/utils/impedance';
+import { CircuitParameters } from '../../circuit-simulator/types/parameters';
 import { ParamSlider } from '../ParamSlider';
 import { BackendMeshPoint, ModelSnapshot } from '../../circuit-simulator/utils/types';
+import { generateLogSpace } from '../../circuit-simulator/utils/parameter-space';
+
+import { SystemMonitor } from './SystemMonitor';
 
 // Props interface for the ToolboxComponent
 interface ToolboxComponentProps {
@@ -21,7 +24,6 @@ interface ToolboxComponentProps {
   handleComputeRegressionMesh: () => void;
   isComputingGrid: boolean;
   gridResults: BackendMeshPoint[];
-  handleApplyParameters: (point: BackendMeshPoint) => void;
   
   // Circuit parameters
   groundTruthParams: CircuitParameters;
@@ -36,6 +38,8 @@ interface ToolboxComponentProps {
   
   // Log messages
   logMessages: { time: string; message: string }[];
+  
+
 }
 
 // CollapsibleSection component definition
@@ -75,7 +79,10 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   );
 };
 
-const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
+const formatTickValue = (v: number, unit: string, digits = 2) =>
+  unit === 'Ω' ? Number(v).toPrecision(3) : Number(v).toFixed(digits);
+
+export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   // Grid computation props
   gridSize,
   setGridSize,
@@ -92,7 +99,6 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   handleComputeRegressionMesh,
   isComputingGrid,
   gridResults,
-  handleApplyParameters,
   
   // Circuit parameters props
   groundTruthParams,
@@ -111,8 +117,8 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   // Local state for collapsible sections and tab management
   const [currentTab, setCurrentTab] = useState<'toolbox' | 'activity'>('toolbox');
   const [gridSettingsOpen, setGridSettingsOpen] = useState(true);
-  const [circuitParamsOpen, setCircuitParamsOpen] = useState(true);
-  
+  const [circuitParamsOpen, setCircuitParamsOpen] = useState(false);
+
   return (
     <div className="circuit-sidebar">
       {/* Tab Switcher */}
@@ -151,14 +157,15 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     id="gridSize"
                     value={gridSize}
                     onChange={(e) => {
-                      const size = Math.max(2, Math.min(10, parseInt(e.target.value) || 2));
+                      const size = Math.max(2, Math.min(25, parseInt(e.target.value) || 2));
                       setGridSize(size);
                       const totalPoints = Math.pow(size, 5);
-                      updateStatusMessage(`Grid size set to ${size} (${totalPoints.toLocaleString()} total points to compute)`);
+                      const warningMessage = size > 15 ? ` - This will take significant computation time!` : '';
+                      updateStatusMessage(`Grid size set to ${size} (${totalPoints.toLocaleString()} total points to compute)${warningMessage}`);
                     }} 
                     min="2"
-                    max="10"
-                    className="w-16 p-1 border rounded text-xs text-center"
+                    max="25"
+                    className="w-16 p-1 border border-neutral-700 rounded text-xs text-center bg-neutral-800 text-neutral-200"
                   />
                 </div>
 
@@ -236,7 +243,7 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                       <div className="form_control_container">
                         <div className="form_control_container__time text-[11px] text-neutral-400 mb-1">Min Frequency (Hz)</div>
                         <input 
-                          className="form_control_container__time__input w-24 p-1.5 border rounded text-xs text-center" 
+                          className="form_control_container__time__input w-24 p-1.5 border border-neutral-700 rounded text-xs text-center bg-neutral-800 text-neutral-200" 
                           type="number" 
                           id="fromInput" 
                           value={parseFloat(minFreq.toFixed(2))}
@@ -256,7 +263,7 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                       <div className="form_control_container">
                         <div className="form_control_container__time text-[11px] text-neutral-400 mb-1">Max Frequency (Hz)</div>
                         <input 
-                          className="form_control_container__time__input w-24 p-1.5 border rounded text-xs text-center" 
+                          className="form_control_container__time__input w-24 p-1.5 border border-neutral-700 rounded text-xs text-center bg-neutral-800 text-neutral-200" 
                           type="number" 
                           id="toInput" 
                           value={parseFloat(maxFreq.toFixed(1))}
@@ -334,53 +341,22 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                           setNumPoints(value);
                           updateFrequencies(minFreq, maxFreq, value);
                           setParameterChanged(true);
-                          updateStatusMessage(`Frequency points set to ${value}. Recompute grid to see effect.`);
                         }
                       }}
                       className="w-16 p-1 border border-neutral-700 rounded text-xs text-center bg-neutral-800 text-neutral-200"
                     />
                   </div>
                 </div>
-                
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="slider-label-text font-medium text-xs text-neutral-300 block">
-                      Grid Summary:
-                    </label>
-                  </div>
-                  <div className="text-xs text-neutral-400 space-y-1 mt-2">
-                    <div className="flex justify-between">
-                      <span className="text-[11px]">Total points to compute:</span>
-                      <span className="font-medium text-neutral-300">{Math.pow(gridSize, 5).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[11px]">Computed points:</span>
-                      <span className="font-medium text-neutral-300">
-                        {gridResults.length > 0 ? gridResults.length.toLocaleString() : Math.pow(gridSize, 5).toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[11px]">Frequency range:</span>
-                      <span className="font-medium text-neutral-300">
-                        {minFreq < 1 ? minFreq.toFixed(2) : minFreq.toFixed(1)}Hz - 
-                        {maxFreq < 1000 ? maxFreq.toFixed(1) : (maxFreq/1000).toFixed(1)+'k'}Hz
-                      </span>
-                    </div>
-                    {parameterChanged && (
-                      <div className="text-amber-500 text-[11px]">Parameters modified</div>
-                    )}
-                  </div>
-                </div>
 
                 <button
                   onClick={handleComputeRegressionMesh}
                   disabled={isComputingGrid}
-                  className={`w-full mt-2 py-2.5 rounded-lg ${
+                  className={`w-full mt-2 py-2.5 rounded-lg font-medium text-white transition-colors ${
                     isComputingGrid
                       ? 'bg-gray-600 cursor-not-allowed'
                       : parameterChanged 
                         ? 'bg-amber-600 hover:bg-amber-700' 
-                        : 'button-primary'
+                        : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
                   {isComputingGrid ? (
@@ -393,18 +369,20 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     </span>
                   ) : (parameterChanged ? 'Recompute Grid' : 'Compute Grid')}
                 </button>
-                
-                {/* Apply Best Fit Button - only shown when grid results are available */}
-                {gridResults.length > 0 && gridResults[0].resnorm > 0 && (
-                  <button
-                    onClick={() => handleApplyParameters(gridResults[0])}
-                    className="button-success w-full mt-2"
-                  >
-                    Use Best Fit (Resnorm: {gridResults[0].resnorm.toExponential(3)})
-                  </button>
-                )}
               </div>
             </CollapsibleSection>
+
+            {/* Enhanced Performance & System Monitor */}
+            <SystemMonitor
+              gridSize={gridSize}
+              totalGridPoints={Math.pow(gridSize, 5)}
+              computedGridPoints={gridResults.length}
+              onGridFilterChanged={(settings) => {
+                updateStatusMessage(`Grid filtering updated: ${settings.enableSmartFiltering ? `${settings.visibilityPercentage}% visible` : 'Disabled'}`);
+              }}
+            />
+
+
 
             {/* Circuit Parameters Section */}
             <CollapsibleSection 
@@ -412,10 +390,15 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
               isOpen={circuitParamsOpen} 
               toggleOpen={() => setCircuitParamsOpen(!circuitParamsOpen)}
             >
-              <div className="space-y-4 pt-1">
-                <div className="space-y-3">
+              <div className="space-y-4 pt-2">
+                {/* Rs Parameter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Rs (Ω)</span>
+                    <span className="text-xs text-neutral-400">{gridSize} points</span>
+                  </div>
                   <ParamSlider 
-                    label="Rs" 
+                    label="" 
                     value={groundTruthParams.Rs} 
                     min={10} 
                     max={10000} 
@@ -424,16 +407,26 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     onChange={(val: number) => {
                       setGroundTruthParams(prev => ({ ...prev, Rs: val }));
                       updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
-                      // Update reference model immediately if visible
                       if (referenceModelId === 'dynamic-reference') {
                         const updatedModel = createReferenceModel();
                         setReferenceModel(updatedModel);
                       }
                     }} 
+                    ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                    log={true}
+                    tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                    readOnlyRange={true}
                   />
-                  
+                </div>
+
+                {/* Ra Parameter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Ra (Ω)</span>
+                    <span className="text-xs text-neutral-400">{gridSize} points</span>
+                  </div>
                   <ParamSlider 
-                    label="Ra" 
+                    label="" 
                     value={groundTruthParams.Ra} 
                     min={10} 
                     max={10000} 
@@ -442,16 +435,26 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     onChange={(val: number) => {
                       setGroundTruthParams(prev => ({ ...prev, Ra: val }));
                       updateStatusMessage(`Ra set to ${val.toFixed(0)} Ω`);
-                      // Update reference model immediately if visible
                       if (referenceModelId === 'dynamic-reference') {
                         const updatedModel = createReferenceModel();
                         setReferenceModel(updatedModel);
                       }
                     }} 
+                    ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                    log={true}
+                    tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                    readOnlyRange={true}
                   />
-                  
+                </div>
+
+                {/* Ca Parameter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Ca (μF)</span>
+                    <span className="text-xs text-neutral-400">{gridSize} points</span>
+                  </div>
                   <ParamSlider 
-                    label="Ca" 
+                    label="" 
                     value={groundTruthParams.Ca * 1e6} 
                     min={0.1} 
                     max={50} 
@@ -460,16 +463,27 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     onChange={(val: number) => {
                       setGroundTruthParams(prev => ({ ...prev, Ca: val / 1e6 }));
                       updateStatusMessage(`Ca set to ${val.toFixed(2)} μF`);
-                      // Update reference model immediately if visible
                       if (referenceModelId === 'dynamic-reference') {
                         const updatedModel = createReferenceModel();
                         setReferenceModel(updatedModel);
                       }
                     }} 
+                    ticks={generateLogSpace(0.1, 50, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                    transformValue={(v) => v.toFixed(2)}
+                    log={true}
+                    tickLabels={generateLogSpace(0.1, 50, gridSize).map(v => formatTickValue(v, 'μF', 2))}
+                    readOnlyRange={true}
                   />
-                  
+                </div>
+
+                {/* Rb Parameter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Rb (Ω)</span>
+                    <span className="text-xs text-neutral-400">{gridSize} points</span>
+                  </div>
                   <ParamSlider 
-                    label="Rb" 
+                    label="" 
                     value={groundTruthParams.Rb} 
                     min={10} 
                     max={10000} 
@@ -478,16 +492,26 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     onChange={(val: number) => {
                       setGroundTruthParams(prev => ({ ...prev, Rb: val }));
                       updateStatusMessage(`Rb set to ${val.toFixed(0)} Ω`);
-                      // Update reference model immediately if visible
                       if (referenceModelId === 'dynamic-reference') {
                         const updatedModel = createReferenceModel();
                         setReferenceModel(updatedModel);
                       }
                     }} 
+                    ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                    log={true}
+                    tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                    readOnlyRange={true}
                   />
-                  
+                </div>
+
+                {/* Cb Parameter */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Cb (μF)</span>
+                    <span className="text-xs text-neutral-400">{gridSize} points</span>
+                  </div>
                   <ParamSlider 
-                    label="Cb" 
+                    label="" 
                     value={groundTruthParams.Cb * 1e6} 
                     min={0.1} 
                     max={50} 
@@ -496,16 +520,22 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
                     onChange={(val: number) => {
                       setGroundTruthParams(prev => ({ ...prev, Cb: val / 1e6 }));
                       updateStatusMessage(`Cb set to ${val.toFixed(2)} μF`);
-                      // Update reference model immediately if visible
                       if (referenceModelId === 'dynamic-reference') {
                         const updatedModel = createReferenceModel();
                         setReferenceModel(updatedModel);
                       }
                     }} 
+                    ticks={generateLogSpace(0.1, 50, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                    transformValue={(v) => v.toFixed(2)}
+                    log={true}
+                    tickLabels={generateLogSpace(0.1, 50, gridSize).map(v => formatTickValue(v, 'μF', 2))}
+                    readOnlyRange={true}
                   />
                 </div>
               </div>
             </CollapsibleSection>
+
+
           </div>
         )}
           
@@ -532,6 +562,4 @@ const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
       </div>
     </div>
   );
-};
-
-export default ToolboxComponent; 
+}; 

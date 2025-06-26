@@ -1,17 +1,11 @@
+import { CircuitParameters } from './types/parameters';
+
 export interface ImpedancePoint {
   real: number;
   imaginary: number;
-  frequency: number;
   magnitude: number;
   phase: number;
-}
-
-export interface CircuitParameters {
-  Rs: number;
-  ra: number;
-  ca: number;
-  rb: number;
-  cb: number;
+  frequency: number;
 }
 
 export type ReferenceType = 'ground-truth' | 'custom';
@@ -19,15 +13,7 @@ export type ReferenceType = 'ground-truth' | 'custom';
 export interface ModelSnapshot {
   id: string;
   name: string;
-  parameters: {
-    Rs: number;
-    ra: number;
-    ca: number;
-    rb: number;
-    cb: number;
-    R_blank: number;
-    frequency_range: [number, number];
-  };
+  parameters: CircuitParameters;
   resnorm?: number;
   color: string;
   timestamp: number;
@@ -93,42 +79,24 @@ export interface CompactControlProps {
 }
 
 export interface BackendMeshPoint {
-  parameters: {
-    Rs: number;
-    ra: number;
-    ca: number;
-    rb: number;
-    cb: number;
-    frequency_range: number[];
-  };
+  parameters: CircuitParameters;
   resnorm: number;
-  alpha: number;
+  alpha?: number;
+  spectrum: {
+    freq: number;
+    real: number;
+    imag: number;
+    mag: number;
+    phase: number;
+  }[];
 }
 
-export interface ResnormGroupItem {
-  id: string;
-  name: string;
-  parameters: {
-    Rs: number;
-    ra: number;
-    ca: number;
-    rb: number;
-    cb: number;
-    [key: string]: number;
-  };
-  resnorm?: number;
-  color: string;
-  timestamp: number;
-  data: ImpedancePoint[];
-  isVisible: boolean;
-  opacity: number;
-  ter?: number;
-}
-
-export interface ResnormGroup {
-  range: [number, number];
-  color: string;
-  items: ResnormGroupItem[];
+export interface GridParameterArrays {
+  Rs: number[];
+  Ra: number[];
+  Rb: number[];
+  Ca: number[];
+  Cb: number[];
 }
 
 export interface CircuitSimulatorProps {
