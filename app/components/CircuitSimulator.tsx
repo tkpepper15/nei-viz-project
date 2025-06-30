@@ -39,15 +39,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // State for the circuit simulator
   const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
   const [gridResultsWithIds, setGridResultsWithIds] = useState<(BackendMeshPoint & { id: number })[]>([]);
-  const [logMessages, setLogMessages] = useState<{time: string; message: string}[]>([]);
+  const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
   const [gridSize, setGridSize] = useState<number>(3);
   const [gridError, setGridError] = useState<string | null>(null);
   const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
   // Initialize hidden groups state - start with only top 25% (excellent group) visible for performance
-  const [hiddenGroups, setHiddenGroups] = useState<number[]>([1, 2, 3, 4]); // Hide all except group 0 (excellent)
-  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data'>('visualizer');
+  const [hiddenGroups, setHiddenGroups] = useState<number[]>([]); // Show all groups by default
+  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
   const [parameterChanged, setParameterChanged] = useState<boolean>(false);
   // Track if reference model was manually hidden
   const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
@@ -769,22 +769,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setParameterChanged(true);
   };
   
-  // Helper functions for logarithmic slider
-  const logToLinearSlider = (logValue: number) => {
-    // Convert a log scale value to linear slider position (0-100)
-    const minLog = Math.log10(0.01);
-    const maxLog = Math.log10(10000);
-    const scale = (Math.log10(logValue) - minLog) / (maxLog - minLog);
-    return scale * 100;
-  };
-  
-  const linearSliderToLog = (sliderPosition: number) => {
-    // Convert linear slider position (0-100) to log scale value
-    const minLog = Math.log10(0.01);
-    const maxLog = Math.log10(10000);
-    const logValue = minLog + (sliderPosition / 100) * (maxLog - minLog);
-    return Math.pow(10, logValue);
-  };
+
 
   // No longer need TER and TEC display in the header
   // Removed unused variables and the resetToReference function
@@ -861,181 +846,229 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // State for collapsible sidebar
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [leftNavCollapsed, setLeftNavCollapsed] = useState(false);
 
   // Modify the main content area to show the correct tab content
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col">
-      <div className="flex flex-col h-full">
-        {/* Header - Sticky and Modernized */}
-        <header className="sticky top-0 z-50 bg-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            {/* Sidebar toggle button */}
-            <button
-              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-              className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
-              title={sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {sidebarCollapsed ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
-                )}
-              </svg>
-            </button>
-
-            <h1 className="text-2xl font-bold text-white">Circuit Simulator</h1>
-            
-            {/* Visualization tabs */}
-            <div className="flex bg-neutral-800 rounded-md overflow-hidden">
-              <button 
-                className={`px-4 py-1.5 text-sm font-medium ${visualizationTab === 'visualizer' ? 'bg-primary text-white' : 'text-neutral-300 hover:bg-neutral-700 transition-colors'}`}
-                onClick={() => setVisualizationTab('visualizer')}
-              >
-                Visualizer
-              </button>
-              <button 
-                className={`px-4 py-1.5 text-sm font-medium ${visualizationTab === 'math' ? 'bg-primary text-white' : 'text-neutral-300 hover:bg-neutral-700 transition-colors'}`}
-                onClick={() => setVisualizationTab('math')}
-              >
-                Math Details
-              </button>
-              <button 
-                className={`px-4 py-1.5 text-sm font-medium ${visualizationTab === 'data' ? 'bg-primary text-white' : 'text-neutral-300 hover:bg-neutral-700 transition-colors'}`}
-                onClick={() => setVisualizationTab('data')}
-              >
-                Data Table
-              </button>
-            </div>
+    <div className="h-screen bg-background text-text-primary flex flex-col overflow-hidden">
+      {/* Header - Minimal */}
+      <header className="bg-surface border-b border-neutral-700 px-6 py-3 flex items-center justify-between z-30 flex-shrink-0">
+        <div className="flex items-center gap-4">
+          {/* Left nav toggle button */}
+          <button
+            onClick={() => setLeftNavCollapsed(!leftNavCollapsed)}
+            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
+            title={leftNavCollapsed ? "Show Navigation" : "Hide Navigation"}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="text-xl font-bold text-text-primary">SpideyPlot</h1>
+        </div>
+        
+        {/* Grid point counter, predicted count, frequency info, and refresh button */}
+        <div className="flex items-center gap-3">
+          <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
+            <span className="text-text-secondary">Grid Points: </span>
+            <span className="text-text-primary font-medium">{gridResults.length}</span>
+            {gridResults.length !== Math.pow(gridSize, 5) && (
+              <>
+                <span className="text-text-secondary ml-1.5">/</span>
+                <span className="text-amber-300 font-semibold ml-1">{Math.pow(gridSize, 5).toLocaleString()}</span>
+                <span className="text-amber-500 text-[10px] ml-1 px-1 py-0.5 bg-amber-500/10 rounded">predicted</span>
+              </>
+            )}
+            <span className="text-text-secondary ml-1.5">|</span>
+            <span className="text-text-secondary ml-1.5">Freq: </span>
+            <span className="text-text-primary font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
           </div>
           
-          {/* Grid point counter and frequency info */}
-          <div className="flex items-center gap-4">
-            <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-              <span className="text-neutral-400">Grid Points: </span>
-              <span className="text-white font-medium">{gridResults.length}</span>
-              <span className="text-neutral-400 ml-1.5">|</span>
-              <span className="text-neutral-400 ml-1.5">Freq: </span>
-              <span className="text-white font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
-            </div>
-          </div>
-        </header>
-        
-        {/* Main content with collapsible sidebar and visualization area */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Collapsible Sidebar */}
-          <div className={`transition-all duration-300 ease-in-out ${sidebarCollapsed ? 'w-0 -ml-4' : 'w-[350px]'} overflow-hidden`}>
-            <ToolboxComponent 
-              // Grid computation props
-              gridSize={gridSize}
-              setGridSize={setGridSize}
-              minFreq={minFreq}
-              setMinFreq={setMinFreq}
-              maxFreq={maxFreq}
-              setMaxFreq={setMaxFreq}
-              numPoints={numPoints}
-              setNumPoints={setNumPoints}
-              updateFrequencies={updateFrequencies}
-              updateStatusMessage={updateStatusMessage}
-              parameterChanged={parameterChanged}
-              setParameterChanged={setParameterChanged}
-              handleComputeRegressionMesh={handleComputeRegressionMesh}
-              isComputingGrid={isComputingGrid}
-              gridResults={gridResults}
-              
-              // Circuit parameters props
-              groundTruthParams={groundTruthParams}
-              setGroundTruthParams={setGroundTruthParams}
-              referenceModelId={referenceModelId}
-              createReferenceModel={createReferenceModel}
-              setReferenceModel={setReferenceModel}
-              
-              // Utility functions
-              logToLinearSlider={logToLinearSlider}
-              linearSliderToLog={linearSliderToLog}
-              
-              // Log messages
-              logMessages={logMessages}
-            />
-          </div>
-                  
-          {/* Main Content Area */}
-          <div className="flex-1 bg-slate-900 overflow-y-auto">
-            {/* Status message bar */}
-            {statusMessage && (
-              <div className="bg-blue-600 text-white px-4 py-2 text-sm border-b border-slate-700">
-                <div className="flex items-center">
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          {/* Toolbox toggle button */}
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
+            title={sidebarCollapsed ? "Show Toolbox" : "Hide Toolbox"}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+            </svg>
+          </button>
+          
+          {/* Refresh button */}
+          <button
+            onClick={() => window.location.reload()}
+            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors text-neutral-300 hover:text-white"
+            title="Refresh Page"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      
+      {/* Main layout */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Navigation Tabs - Collapsible with improved animation */}
+        <div className={`${leftNavCollapsed ? 'w-0' : 'w-48'} bg-surface border-r border-neutral-700 flex flex-col transition-all duration-300 ease-in-out overflow-hidden`}>
+          {!leftNavCollapsed && (
+            <div className="flex flex-col p-2 gap-1 animate-fadeIn">
+              <button 
+                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
+                  visualizationTab === 'visualizer' 
+                    ? 'bg-accent text-white shadow-sm' 
+                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                }`}
+                onClick={() => setVisualizationTab('visualizer')}
+              >
+                <div className="flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
-                  {statusMessage}
+                  <span>Visualizer</span>
+                </div>
+              </button>
+              <button 
+                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
+                  visualizationTab === 'math' 
+                    ? 'bg-accent text-white shadow-sm' 
+                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                }`}
+                onClick={() => setVisualizationTab('math')}
+              >
+                <div className="flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                  <span>Math Details</span>
+                </div>
+              </button>
+              <button 
+                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
+                  visualizationTab === 'data' 
+                    ? 'bg-accent text-white shadow-sm' 
+                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                }`}
+                onClick={() => setVisualizationTab('data')}
+              >
+                <div className="flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  <span>Data Table</span>
+                </div>
+              </button>
+              <button 
+                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
+                  visualizationTab === 'activity' 
+                    ? 'bg-accent text-white shadow-sm' 
+                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+                }`}
+                onClick={() => setVisualizationTab('activity')}
+              >
+                <div className="flex items-center gap-3">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>Activity Log</span>
+                </div>
+              </button>
+            </div>
+          )}
+          
+          {/* Tab indicator area */}
+          {!leftNavCollapsed && (
+            <div className="flex-1 border-t border-neutral-700 mt-2 pt-2 px-2 animate-fadeIn">
+              <div className="text-xs text-text-muted px-4 py-2">
+                {visualizationTab === 'visualizer' && 'Spider plot visualization'}
+                {visualizationTab === 'math' && 'Mathematical equations'}
+                {visualizationTab === 'data' && 'Raw data analysis'}
+                {visualizationTab === 'activity' && 'Computation log'}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="flex-1 bg-background overflow-hidden relative flex flex-col">
+          {/* Status message bar - sticky at top */}
+          {statusMessage && (
+            <div className="flex-shrink-0 bg-blue-600 text-white px-4 py-2 text-sm border-b border-neutral-700 z-20">
+              <div className="flex items-center">
+                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {statusMessage}
+              </div>
+            </div>
+          )}
+                  
+          {/* Main visualization area */}
+          <div className="flex-1 p-4 bg-background overflow-hidden">
+            {isComputingGrid ? (
+              <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md">
+                <div className="flex items-center mb-4">
+                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
+                  <div>
+                    <p className="text-sm text-primary font-medium">
+                      {computationProgress?.type === 'GENERATION_PROGRESS' 
+                        ? 'Generating grid points...' 
+                        : 'Computing in parallel...'}
+                    </p>
+                    <p className="text-xs text-neutral-400 mt-1">
+                      {computationProgress ? 
+                        `${computationProgress.overallProgress.toFixed(1)}% complete` : 
+                        'Using multiple CPU cores for faster computation'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Progress bar */}
+                {computationProgress && (
+                  <div className="w-full max-w-md">
+                    <div className="w-full bg-neutral-700 rounded-full h-2">
+                      <div 
+                        className="bg-primary h-2 rounded-full transition-all duration-300" 
+                        style={{ width: `${computationProgress.overallProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Cancel button */}
+                <button
+                  onClick={cancelComputation}
+                  className="mt-4 px-4 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
+                >
+                  Cancel Computation
+                </button>
+              </div>
+            ) : gridError ? (
+              <div className="p-4 bg-danger-light border border-danger rounded-lg text-sm text-danger">
+                <div className="flex items-start">
+                  <svg className="w-5 h-5 mr-2 mt-0.5 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div>
+                    <p className="font-medium">Error occurred</p>
+                    <p className="mt-1">{gridError}</p>
+                  </div>
                 </div>
               </div>
-            )}
-                    
-            {/* Main visualization area */}
-            <div className="p-6 bg-slate-900" style={{ minHeight: '600px' }}>
-              {isComputingGrid ? (
-                <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md">
-                  <div className="flex items-center mb-4">
-                    <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
-                    <div>
-                      <p className="text-sm text-primary font-medium">
-                        {computationProgress?.type === 'GENERATION_PROGRESS' 
-                          ? 'Generating grid points...' 
-                          : 'Computing in parallel...'}
-                      </p>
-                      <p className="text-xs text-neutral-400 mt-1">
-                        {computationProgress ? 
-                          `${computationProgress.overallProgress.toFixed(1)}% complete` : 
-                          'Using multiple CPU cores for faster computation'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {/* Progress bar */}
-                  {computationProgress && (
-                    <div className="w-full max-w-md">
-                      <div className="w-full bg-neutral-700 rounded-full h-2">
-                        <div 
-                          className="bg-primary h-2 rounded-full transition-all duration-300" 
-                          style={{ width: `${computationProgress.overallProgress}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Cancel button */}
-                  <button
-                    onClick={cancelComputation}
-                    className="mt-4 px-4 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
-                  >
-                    Cancel Computation
-                  </button>
-                </div>
-              ) : gridError ? (
-                <div className="p-4 bg-danger-light border border-danger rounded-lg text-sm text-danger">
-                  <div className="flex items-start">
-                    <svg className="w-5 h-5 mr-2 mt-0.5 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div>
-                      <p className="font-medium">Error occurred</p>
-                      <p className="mt-1">{gridError}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : visualizationTab === 'math' ? (
+            ) : visualizationTab === 'math' ? (
+              <div className="h-full overflow-y-auto">
                 <MathDetailsTab 
                   parameters={parameters}
                   minFreq={minFreq}
                   maxFreq={maxFreq}
                   numPoints={numPoints}
                   referenceModel={referenceModel}
-                  gridParameterArrays={gridParameterArrays}
                 />
-              ) : visualizationTab === 'data' ? (
-                gridResults.length > 0 ? (
+              </div>
+            ) : visualizationTab === 'data' ? (
+              gridResults.length > 0 ? (
+                <div className="h-full overflow-y-auto">
                   <DataTableTab 
                     gridResults={gridResults}
                     gridResultsWithIds={gridResultsWithIds}
@@ -1047,47 +1080,94 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     groundTruthParams={groundTruthParams}
                     gridParameterArrays={gridParameterArrays}
                   />
-                ) : (
-                  <div className="flex items-center justify-center h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-5">
-                    <div className="text-center">
-                      <svg className="w-10 h-10 mx-auto mb-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <p className="text-sm text-neutral-400">
-                        No data to display. Compute a grid first.
-                      </p>
-                    </div>
-                  </div>
-                )
-              ) : visualizationTab === 'visualizer' ? (
-                <div className="space-y-5">
-                  <VisualizerTab 
-                    resnormGroups={resnormGroups}
-                    hiddenGroups={hiddenGroups}
-                    opacityLevel={opacityLevel}
-                    referenceModelId={referenceModelId}
-                    gridSize={gridSize}
-                    onGridValuesGenerated={handleGridValuesGenerated}
-                  />
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-5">
+                <div className="flex items-center justify-center h-32 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-4">
                   <div className="text-center">
-                    <svg className="w-10 h-10 mx-auto mb-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                     </svg>
                     <p className="text-sm text-neutral-400">
-                      Unknown tab selected. Please select a valid tab.
+                      No data to display. Compute a grid first.
                     </p>
                   </div>
                 </div>
-              )}
-            </div>
+              )
+            ) : visualizationTab === 'activity' ? (
+              <div className="h-full flex flex-col overflow-hidden">
+                <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
+                <div className="flex-1 overflow-y-auto space-y-1">
+                  {logMessages.length === 0 ? (
+                    <div className="text-neutral-400 text-sm italic px-2">No activity yet...</div>
+                  ) : (
+                    logMessages.map((message, index) => (
+                      <div key={index} className="text-sm font-mono text-neutral-300 px-3 py-2 hover:bg-neutral-800/50 border-l-2 border-transparent hover:border-blue-500/50 transition-colors">
+                        <span className="text-neutral-500 text-xs">[{message.time}]</span>{' '}
+                        <span className="text-neutral-200">{message.message}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) :             visualizationTab === 'visualizer' ? (
+              <div className="h-full">
+                <VisualizerTab 
+                  resnormGroups={resnormGroups}
+                  hiddenGroups={hiddenGroups}
+                  opacityLevel={opacityLevel}
+                  referenceModelId={referenceModelId}
+                  gridSize={gridSize}
+                  onGridValuesGenerated={handleGridValuesGenerated}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-32 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-4">
+                <div className="text-center">
+                  <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <p className="text-sm text-neutral-400">
+                    Unknown tab selected. Please select a valid tab.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Right Toolbox Sidebar */}
+        <div className={`${sidebarCollapsed ? 'w-0' : 'w-80'} bg-surface border-l border-neutral-700 flex flex-col transition-all duration-300 ease-in-out overflow-hidden`}>
+          {!sidebarCollapsed && (
+            <div className="h-full animate-fadeIn">
+              <ToolboxComponent
+                gridSize={gridSize}
+                setGridSize={setGridSize}
+                minFreq={minFreq}
+                setMinFreq={setMinFreq}
+                maxFreq={maxFreq}
+                setMaxFreq={setMaxFreq}
+                numPoints={numPoints}
+                setNumPoints={setNumPoints}
+                updateFrequencies={updateFrequencies}
+                updateStatusMessage={updateStatusMessage}
+                parameterChanged={parameterChanged}
+                setParameterChanged={setParameterChanged}
+                handleComputeRegressionMesh={handleComputeRegressionMesh}
+                isComputingGrid={isComputingGrid}
+                gridResults={gridResults}
+                
+                groundTruthParams={groundTruthParams}
+                setGroundTruthParams={setGroundTruthParams}
+                referenceModelId={referenceModelId}
+                createReferenceModel={createReferenceModel}
+                setReferenceModel={setReferenceModel}
+              />
+            </div>
+          )}
         </div>
       </div>
       
-      {/* Computation Summary Notification */}
+      {/* Computation Summary Notification - Bottom Right */}
       <ComputationNotification 
         summary={computationSummary}
         onDismiss={() => setComputationSummary(null)}

@@ -3,6 +3,7 @@ import { BaseSpiderPlot } from './BaseSpiderPlot';
 import { ModelSnapshot, ResnormGroup } from './utils/types';
 import { GridParameterArrays } from './types';
 import { ExportModal } from './controls/ExportModal';
+import { ResizableSplitPane } from './controls/ResizableSplitPane';
 
 interface VisualizerTabProps {
   resnormGroups: ResnormGroup[];
@@ -23,11 +24,14 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 }) => {
 
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [visualizationMode, setVisualizationMode] = useState<'color' | 'opacity'>('opacity');
+  const [chromaEnabled, setChromaEnabled] = useState<boolean>(true); // Default to chroma enabled
   const [showDistribution, setShowDistribution] = useState(false);
   const [opacityIntensity, setOpacityIntensity] = useState<number>(1e-30);
   const [sliderValue, setSliderValue] = useState<number>(0);
   const [isClient, setIsClient] = useState(false);
+  
+  // Add state for selected groups for opacity contrast (multi-select)
+  const [selectedOpacityGroups, setSelectedOpacityGroups] = useState<number[]>([0]); // [0] means "Excellent" group by default
   
   // Logarithmic scale mapping for opacity intensity
   // Maps slider 0-100 to log scale 1e-30 to 10 (extreme range refined for usability)
@@ -43,20 +47,72 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // - opacityIntensity = 1e-3:     Math.pow(0.5, 1/1e-3) = 0.5^1000 ≈ 0    (virtually invisible)
   // - opacityIntensity = 1e-8:     Math.pow(0.5, 1/1e-8) = 0.5^1e8 ≈ 0     (only perfect matches visible)
   // - opacityIntensity = 1e-30:    Math.pow(0.5, 1/1e-30) = 0.5^1e30 = 0   (extreme precision for high grids)
-  //
+  // Dynamic contextual slider that adapts to selected groups' resnorm distributions
   // LOWER values = MORE CONTRAST (only the very best resnorms get any opacity)
   // HIGHER values = LESS CONTRAST (more models remain visible)
+  const getContextualRange = (): { min: number; max: number; dynamic: boolean } => {
+    if (selectedOpacityGroups.length === 0 || resnormGroups.length === 0) {
+      return { min: 1e-30, max: 10, dynamic: false };
+    }
+    
+    // Get resnorm values from selected groups
+    const selectedResnorms = selectedOpacityGroups
+      .flatMap(groupIndex => resnormGroups[groupIndex]?.items || [])
+      .map(model => model.resnorm)
+      .filter(r => r !== undefined && r > 0) as number[];
+    
+    if (selectedResnorms.length === 0) {
+      return { min: 1e-30, max: 10, dynamic: false };
+    }
+    
+    // Calculate contextual range based on selected groups
+    const sortedResnorms = [...selectedResnorms].sort((a, b) => a - b);
+    const minResnorm = sortedResnorms[0];
+    const maxResnorm = sortedResnorms[sortedResnorms.length - 1];
+    
+    // Calculate percentile thresholds for better contrast scaling
+    const p90 = sortedResnorms[Math.floor(sortedResnorms.length * 0.9)];
+    
+    // Use a dynamic range that focuses on the meaningful spread
+    const contextualMin = Math.max(minResnorm * 0.1, 1e-15); // Slightly below minimum
+    const contextualMax = Math.min(maxResnorm * 2, p90 * 10); // Focus on meaningful range
+    
+    return { min: contextualMin, max: contextualMax, dynamic: true };
+  };
+  
   const sliderToOpacityIntensity = (sliderVal: number): number => {
-    const minLog = Math.log10(1e-30);  // log10(1e-30) = -30
-    const maxLog = Math.log10(10);     // log10(10) = 1
+    const { min, max, dynamic } = getContextualRange();
+    
+    if (!dynamic) {
+      // Fallback to fixed range if no context
+      const minLog = Math.log10(1e-30);
+      const maxLog = Math.log10(10);
+      const logValue = minLog + (sliderVal / 100) * (maxLog - minLog);
+      return Math.pow(10, logValue);
+    }
+    
+    // Use contextual range for dynamic scaling
+    const minLog = Math.log10(min);
+    const maxLog = Math.log10(max);
     const logValue = minLog + (sliderVal / 100) * (maxLog - minLog);
     return Math.pow(10, logValue);
   };
   
   const opacityIntensityToSlider = (opacityValue: number): number => {
-    const minLog = Math.log10(1e-30);
-    const maxLog = Math.log10(10);
-    const logValue = Math.log10(Math.max(1e-30, Math.min(10, opacityValue)));
+    const { min, max, dynamic } = getContextualRange();
+    
+    if (!dynamic) {
+      // Fallback to fixed range
+      const minLog = Math.log10(1e-30);
+      const maxLog = Math.log10(10);
+      const logValue = Math.log10(Math.max(1e-30, Math.min(10, opacityValue)));
+      return ((logValue - minLog) / (maxLog - minLog)) * 100;
+    }
+    
+    // Use contextual range for dynamic scaling
+    const minLog = Math.log10(min);
+    const maxLog = Math.log10(max);
+    const logValue = Math.log10(Math.max(min, Math.min(max, opacityValue)));
     return ((logValue - minLog) / (maxLog - minLog)) * 100;
   };
   
@@ -74,13 +130,58 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     setSliderValue(initialSliderPos);
   }, []);
 
-  // Get all visible models across groups
-  const visibleModels: ModelSnapshot[] = resnormGroups
+  // Recalculate slider position when selected groups change for dynamic scaling
+  useEffect(() => {
+    if (selectedOpacityGroups.length > 0 && resnormGroups.length > 0) {
+      // Reset to high contrast when groups change to provide consistent starting point
+      const highContrastSliderPos = opacityIntensityToSlider(1e-20);
+      setSliderValue(highContrastSliderPos);
+      setOpacityIntensity(sliderToOpacityIntensity(highContrastSliderPos));
+    }
+  }, [selectedOpacityGroups, resnormGroups.length]);
+
+  // Reset selected groups if they don't exist or set default (fixed infinite loop)
+  useEffect(() => {
+    if (resnormGroups.length === 0) {
+      setSelectedOpacityGroups([]);
+    } else if (resnormGroups.length > 0 && selectedOpacityGroups.length === 0) {
+      // Default to "Excellent" group (index 0) when groups are available but none selected
+      setSelectedOpacityGroups([0]);
+    } else {
+      // Filter out groups that no longer exist
+      const validGroups = selectedOpacityGroups.filter(groupIndex => groupIndex < resnormGroups.length);
+      
+      if (validGroups.length !== selectedOpacityGroups.length) {
+        setSelectedOpacityGroups(validGroups.length > 0 ? validGroups : [0]);
+      }
+    }
+  }, [resnormGroups.length]); // Only depend on resnormGroups.length to avoid infinite loop
+
+  // Get all models from non-hidden groups for data preservation
+  const allAvailableModels: ModelSnapshot[] = resnormGroups
     .filter((_, index) => !hiddenGroups.includes(index))
     .flatMap(group => group.items);
 
+  // Get visible models based on selectedOpacityGroups for display
+  const visibleModels: ModelSnapshot[] = (() => {
+    // If no groups are selected for opacity, show all non-hidden groups
+    if (selectedOpacityGroups.length === 0) {
+      return allAvailableModels;
+    }
+    
+    // Only show models from selected opacity groups (and not hidden)
+    return resnormGroups
+      .filter((_, index) => selectedOpacityGroups.includes(index) && !hiddenGroups.includes(index))
+      .flatMap(group => group.items);
+  })();
+
   // Calculate resnorm statistics for distribution using iterative approach
-  const resnormValues = visibleModels.map(model => model.resnorm).filter(r => r !== undefined) as number[];
+  // Use only the selected groups' statistics if specific groups are selected
+  const relevantModels = selectedOpacityGroups.length > 0 && resnormGroups.length > 0
+    ? selectedOpacityGroups.flatMap(groupIndex => resnormGroups[groupIndex]?.items || [])
+    : visibleModels;
+    
+  const resnormValues = relevantModels.map(model => model.resnorm).filter(r => r !== undefined) as number[];
   const resnormStats = resnormValues.length > 0 ? (() => {
     // Use iterative approach to avoid stack overflow
     let min = Infinity;
@@ -100,53 +201,213 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     };
   })() : null;
 
-  return (
-    <div className="space-y-4">
-      {/* Main Controls Panel */}
-      <div className="bg-neutral-800 rounded-lg p-4 border border-neutral-700">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          
-          {/* Visualization Mode */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-neutral-200">Visualization Mode</label>
-            <div className="bg-neutral-700 rounded-md flex overflow-hidden">
-              <button
-                onClick={() => setVisualizationMode('color')}
-                className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                  visualizationMode === 'color'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-neutral-300 hover:bg-neutral-600'
-                }`}
-              >
-                Color Groups
-              </button>
-              <button
-                onClick={() => setVisualizationMode('opacity')}
-                className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                  visualizationMode === 'opacity'
-                    ? 'bg-blue-500 text-white'
-                    : 'text-neutral-300 hover:bg-neutral-600'
-                }`}
-              >
-                Monochrome
-              </button>
-            </div>
+  // Check if we have actual computed results to show
+  const hasComputedResults = resnormGroups.length > 0 && allAvailableModels.length > 0;
+
+  // Split visualization content
+  const spiderPlotContent = (
+    <>
+      {/* Export Modal */}
+      <ExportModal 
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        visibleModels={allAvailableModels}
+        referenceModelId={referenceModelId}
+        opacityLevel={opacityLevel}
+        onGridValuesGenerated={onGridValuesGenerated}
+        chromaEnabled={chromaEnabled}
+        opacityIntensity={opacityIntensity}
+        gridSize={gridSize}
+      />
+
+      {/* Spider Plot Visualization - Only show when we have computed results */}
+      {hasComputedResults ? (
+        <div className="bg-neutral-800 rounded border border-neutral-700 h-full">
+          <div className="spider-visualization h-full w-full">
+            <BaseSpiderPlot
+              meshItems={visibleModels.filter(model => model.parameters !== undefined)}
+              referenceId={referenceModelId || undefined}
+              opacityFactor={opacityLevel}
+              gridSize={gridSize}
+              onGridValuesGenerated={onGridValuesGenerated}
+              chromaEnabled={chromaEnabled}
+              opacityIntensity={opacityIntensity}
+              selectedOpacityGroups={selectedOpacityGroups}
+              resnormGroups={resnormGroups}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="bg-neutral-800 rounded border border-neutral-700 text-center h-full flex items-center justify-center">
+          <div className="text-neutral-400 text-sm">
+            No data to visualize. Run a computation to generate results.
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const controlsContent = hasComputedResults ? (
+    <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex flex-col">
+      {/* Controls Header */}
+      <div className="p-4 border-b border-neutral-600 flex-shrink-0">
+        <div className="flex gap-4 items-center">
+          {/* Left side - Chroma toggle and Export buttons */}
+          <div className="flex items-center gap-3">
+            {/* Chroma Toggle */}
+            <button
+              onClick={() => setChromaEnabled(!chromaEnabled)}
+              className={`px-3 py-2 text-xs font-medium rounded-md transition-colors ${
+                chromaEnabled
+                  ? 'bg-primary text-white'
+                  : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+              }`}
+            >
+              {chromaEnabled ? 'Chroma' : 'Mono'}
+            </button>
+
+            {/* Export Action */}
+            <button
+              onClick={() => setIsExportModalOpen(true)}
+              disabled={!hasComputedResults}
+              className={`px-4 py-2 text-xs font-medium rounded-md transition-colors ${
+                hasComputedResults 
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-neutral-600 text-neutral-400 cursor-not-allowed'
+              }`}
+            >
+              Export Plot
+            </button>
           </div>
 
-          {/* Opacity Control - Extended */}
-          <div className="lg:col-span-2 space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-neutral-200">Opacity Contrast</label>
-              <span className="text-xs font-mono text-neutral-400 bg-neutral-700 px-2 py-1 rounded">
-                {isClient 
-                  ? (opacityIntensity >= 0.01 
-                      ? (opacityIntensity < 1 ? opacityIntensity.toFixed(2) : opacityIntensity.toFixed(1)) + 'x'
-                      : opacityIntensity.toExponential(0) + 'x')
-                  : '1e-30x'
-                }
-              </span>
-            </div>
-            <div className="space-y-1">
+          {/* Right side - Mode-specific info */}
+          <div className="flex-1 flex justify-end items-center gap-4">
+            <span className="text-xs text-neutral-400">
+              {visibleModels.length} models visible
+            </span>
+            <span className="text-xs font-mono text-neutral-200 bg-neutral-700 px-2 py-1 rounded border">
+              {isClient 
+                ? (opacityIntensity >= 0.01 
+                    ? (opacityIntensity < 1 ? opacityIntensity.toFixed(2) : opacityIntensity.toFixed(1)) + 'x'
+                    : opacityIntensity.toExponential(0) + 'x')
+                : '1e-30x'
+              }
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Dynamic Content Panel - Scrollable only if needed */}
+      <div className="p-4 flex-1 min-h-0">
+        {/* Show Slider Controls */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium text-neutral-200">Opacity Contrast</h3>
+            <button
+              onClick={() => setShowDistribution(!showDistribution)}
+              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                showDistribution
+                  ? 'bg-amber-500 text-white hover:bg-amber-600'
+                  : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+              }`}
+            >
+              {showDistribution ? 'Hide' : 'Show'} Distribution
+            </button>
+          </div>
+
+          {/* Group Selection Toggle */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-neutral-300">Apply contrast to:</label>
+            
+            {/* Horizontal toggle buttons */}
+            {resnormGroups.length > 0 ? (
+              <div className="flex gap-1.5 flex-wrap">
+                {/* All Groups button */}
+                <button
+                  onClick={() => {
+                    // Toggle all groups - if all selected, deselect all; otherwise select all
+                    if (selectedOpacityGroups.length === resnormGroups.length) {
+                      setSelectedOpacityGroups([]);
+                    } else {
+                      setSelectedOpacityGroups(resnormGroups.map((_, index) => index));
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
+                    selectedOpacityGroups.length === resnormGroups.length
+                      ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
+                      : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
+                  }`}
+                >
+                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-400 to-red-500 opacity-70" />
+                  All{selectedOpacityGroups.length === resnormGroups.length ? ' ✓' : ''}
+                </button>
+                
+                {/* Individual group buttons */}
+                {resnormGroups.map((group, index) => {
+                  const isSelected = selectedOpacityGroups.includes(index);
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => {
+                        // Toggle individual group selection
+                        if (isSelected) {
+                          setSelectedOpacityGroups(selectedOpacityGroups.filter(i => i !== index));
+                        } else {
+                          setSelectedOpacityGroups([...selectedOpacityGroups, index]);
+                        }
+                      }}
+                      className={`px-2.5 py-1.5 text-xs font-medium rounded transition-all flex items-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
+                          : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
+                      }`}
+                    >
+                      <div 
+                        className="w-2 h-2 rounded-full" 
+                        style={{ backgroundColor: group.color }}
+                      />
+                      {group.label.split(' ')[0]}{isSelected ? ' ✓' : ''}
+                      <span className="text-[10px] opacity-60 ml-0.5">({group.items.length})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-neutral-500 italic">
+                Run computation to enable group selection
+              </div>
+            )}
+            
+
+          </div>
+          
+          <div className="space-y-2">
+            {/* Dynamic range indicator */}
+            {(() => {
+              const { min, max, dynamic } = getContextualRange();
+              return dynamic && (
+                <div className="flex items-center justify-between text-xs mb-2">
+                  <span className="text-blue-400 font-medium flex items-center gap-1">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                    Dynamic Range Active
+                  </span>
+                  <span className="text-neutral-400 font-mono">
+                    {min.toExponential(1)} - {max.toExponential(1)}
+                  </span>
+                </div>
+              );
+            })()}
+
+            <div className="relative">
+              <div className="absolute top-1/2 left-0 right-0 h-2 bg-neutral-600 rounded-lg transform -translate-y-1/2"></div>
+              <div 
+                className={`absolute top-1/2 left-0 h-2 rounded-lg transform -translate-y-1/2 transition-all duration-200 ${
+                  getContextualRange().dynamic 
+                    ? 'bg-gradient-to-r from-blue-500/60 to-blue-400' 
+                    : 'bg-gradient-to-r from-primary/60 to-primary'
+                }`}
+                style={{ width: `${isClient ? sliderValue : 0}%` }}
+              ></div>
               <input
                 type="range"
                 min="0"
@@ -154,173 +415,73 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 step="1"
                 value={isClient ? sliderValue : 0}
                 onChange={(e) => handleOpacityChange(e.target.value)}
-                className="w-full h-3 bg-neutral-600 rounded-lg appearance-none cursor-pointer slider"
+                className="relative w-full h-4 bg-transparent appearance-none cursor-pointer slider z-10"
               />
-              <div className="flex justify-between text-[10px] text-neutral-500">
-                <span>1e-30x</span>
-                <span>10x</span>
+            </div>
+            <div className="flex justify-between text-xs text-neutral-400">
+              <span>High Contrast</span>
+              <span>Low Contrast</span>
+            </div>
+            {getContextualRange().dynamic && (
+              <div className="text-xs text-blue-300 text-center mt-1">
+                Contrast optimized for selected groups
+              </div>
+            )}
+          </div>
+
+          {/* Distribution Panel for Opacity Mode */}
+          {showDistribution && resnormStats && (
+            <div className="mt-6 space-y-4 p-4 bg-neutral-900 rounded-lg border border-neutral-600">
+              <h4 className="text-sm font-medium text-neutral-200">
+                Distribution Analysis
+                {selectedOpacityGroups.length > 0 && selectedOpacityGroups.length < resnormGroups.length && (
+                                    <span className="text-xs font-normal text-neutral-400 ml-2">
+                  ({selectedOpacityGroups.map(i => resnormGroups[i]?.label.split(' ')[0]).join(', ')})
+                </span>
+                )}
+              </h4>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="bg-neutral-700 p-2 rounded">
+                  <div className="text-xs text-neutral-400">Count</div>
+                  <div className="text-sm font-mono text-neutral-200">{resnormValues.length}</div>
+                </div>
+                <div className="bg-neutral-700 p-2 rounded">
+                  <div className="text-xs text-neutral-400">Min</div>
+                  <div className="text-sm font-mono text-neutral-200">{resnormStats.min.toExponential(2)}</div>
+                </div>
+                <div className="bg-neutral-700 p-2 rounded">
+                  <div className="text-xs text-neutral-400">Max</div>
+                  <div className="text-sm font-mono text-neutral-200">{resnormStats.max.toExponential(2)}</div>
+                </div>
+                <div className="bg-neutral-700 p-2 rounded">
+                  <div className="text-xs text-neutral-400">Median</div>
+                  <div className="text-sm font-mono text-neutral-200">{resnormStats.median.toExponential(2)}</div>
+                </div>
               </div>
             </div>
-          </div>
-
-          {/* Export Action */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-neutral-200">Export</label>
-            <button
-              onClick={() => setIsExportModalOpen(true)}
-              className="w-full px-3 py-2 text-xs font-medium rounded-md transition-colors bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              Export Plot
-            </button>
-          </div>
-
+          )}
         </div>
       </div>
-
-      {/* Spider Plot - Pentagon-based visualization */}
-      <div className="spider-visualization">
-        <BaseSpiderPlot
-          meshItems={visibleModels.filter(model => model.parameters !== undefined)}
-          referenceId={referenceModelId || undefined}
-          opacityFactor={opacityLevel}
-          gridSize={gridSize}
-          onGridValuesGenerated={onGridValuesGenerated}
-          visualizationMode={visualizationMode}
-          opacityIntensity={opacityIntensity}
-        />
+    </div>
+  ) : (
+    <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex items-center justify-center">
+      <div className="text-neutral-400 text-sm">
+        No controls available. Run a computation to enable controls.
       </div>
+    </div>
+  );
 
-      {/* Distribution Toggle */}
-      <div className="flex justify-center">
-        <button
-          onClick={() => setShowDistribution(!showDistribution)}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-            showDistribution
-              ? 'bg-amber-500 text-white hover:bg-amber-600'
-              : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-          }`}
-        >
-          {showDistribution ? 'Hide' : 'Show'} Resnorm Distribution
-        </button>
-      </div>
-
-      {/* Model Groups Control Panel */}
-      <div className="bg-neutral-800 rounded-lg p-4 border border-neutral-700">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-neutral-200">Model Groups</h3>
-          <span className="text-xs text-neutral-400">
-            {visibleModels.length} total models
-          </span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {resnormGroups.map((group, index) => {
-            const isHidden = hiddenGroups.includes(index);
-            
-            return (
-              <button
-                key={index}
-                onClick={() => {
-                  // Dispatch custom event to toggle group visibility
-                  window.dispatchEvent(new CustomEvent('toggleResnormGroup', {
-                    detail: { groupIndex: index }
-                  }));
-                }}
-                className={`p-3 rounded-lg border transition-all text-left ${
-                  isHidden 
-                    ? 'border-neutral-600 bg-neutral-700/30 opacity-50 hover:opacity-75' 
-                    : 'border-neutral-600 bg-neutral-700 hover:bg-neutral-600 hover:border-neutral-500'
-                }`}
-              >
-                <div className="flex items-center space-x-2 mb-2">
-                  <div 
-                    className="w-3 h-3 rounded-full border border-neutral-500" 
-                    style={{ backgroundColor: group.color }}
-                  />
-                  <span className="text-xs font-medium text-neutral-200">
-                    {group.label}
-                  </span>
-                  {isHidden && <span className="text-[10px] text-neutral-500 ml-auto">Hidden</span>}
-                </div>
-                <div className="text-[10px] text-neutral-400 mb-1">
-                  {group.items.length} models
-                </div>
-                <div className="text-[9px] text-neutral-500 leading-tight">
-                  {group.description}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Resnorm Distribution Panel */}
-      {showDistribution && resnormStats && (
-        <div className="bg-neutral-800 rounded-lg border border-neutral-700 p-4">
-          <h4 className="text-sm font-medium text-white mb-3">Resnorm Distribution ({resnormValues.length} models)</h4>
-          
-          {/* Statistics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="text-center">
-              <div className="text-xs text-neutral-400">Minimum</div>
-              <div className="text-sm font-mono text-green-400">{resnormStats.min.toExponential(2)}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-neutral-400">Maximum</div>
-              <div className="text-sm font-mono text-red-400">{resnormStats.max.toExponential(2)}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-neutral-400">Mean</div>
-              <div className="text-sm font-mono text-blue-400">{resnormStats.mean.toExponential(2)}</div>
-            </div>
-            <div className="text-center">
-              <div className="text-xs text-neutral-400">Median</div>
-              <div className="text-sm font-mono text-cyan-400">{resnormStats.median.toExponential(2)}</div>
-            </div>
-          </div>
-
-          {/* Simple Histogram */}
-          <div className="space-y-2">
-            <div className="text-xs text-neutral-400 mb-2">Distribution (logarithmic scale)</div>
-            <div className="flex items-end h-20 space-x-1">
-              {Array.from({ length: 20 }, (_, i) => {
-                const logMin = Math.log10(resnormStats.min);
-                const logMax = Math.log10(resnormStats.max);
-                const binStart = Math.pow(10, logMin + (i / 20) * (logMax - logMin));
-                const binEnd = Math.pow(10, logMin + ((i + 1) / 20) * (logMax - logMin));
-                const count = resnormValues.filter(r => r >= binStart && r < binEnd).length;
-                const maxCount = Math.max(...Array.from({ length: 20 }, (_, j) => {
-                  const bStart = Math.pow(10, logMin + (j / 20) * (logMax - logMin));
-                  const bEnd = Math.pow(10, logMin + ((j + 1) / 20) * (logMax - logMin));
-                  return resnormValues.filter(r => r >= bStart && r < bEnd).length;
-                }));
-                const height = maxCount > 0 ? (count / maxCount) * 100 : 0;
-                
-                return (
-                  <div
-                    key={i}
-                    className="bg-gradient-to-t from-blue-500 to-cyan-400 rounded-t-sm flex-1 transition-all hover:opacity-80"
-                    style={{ height: `${height}%`, minHeight: count > 0 ? '2px' : '0px' }}
-                    title={`Range: ${binStart.toExponential(1)} - ${binEnd.toExponential(1)}, Count: ${count}`}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Export Modal */}
-      <ExportModal
-        isOpen={isExportModalOpen}
-        onClose={() => setIsExportModalOpen(false)}
-        visibleModels={visibleModels}
-        referenceModelId={referenceModelId}
-        opacityLevel={opacityLevel}
-        onGridValuesGenerated={onGridValuesGenerated}
-        visualizationMode={visualizationMode}
-        opacityIntensity={opacityIntensity}
-        gridSize={gridSize}
-      />
+  return (
+    <div className="h-full">
+      <ResizableSplitPane 
+        defaultSplitHeight={35}
+        minTopHeight={250}
+        minBottomHeight={200}
+      >
+        <div key="spider-plot">{spiderPlotContent}</div>
+        <div key="controls">{controlsContent}</div>
+      </ResizableSplitPane>
     </div>
   );
 }; 

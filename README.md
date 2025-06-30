@@ -1,117 +1,16 @@
-# Circuit Simulator & Spider Plot Visualization for EIS
-
-This project provides an interactive circuit simulator with visualization tools for electrochemical impedance spectroscopy (EIS), including spider plots, nyquist plots, and residual norm analytics.
-
-## Project Structure
-
-The project follows modern Next.js application architecture with a clear separation of concerns:
-
-```
-src/
-├── app/                  # Next.js app router
-│   ├── components/       # App-specific components
-│   ├── globals.css       # Global styles
-│   ├── layout.tsx        # Root layout
-│   └── page.tsx          # Homepage
-├── components/           # Shared React components
-│   └── circuit-simulator/ # Circuit simulator components
-│       ├── controls/     # UI controls
-│       ├── visualizations/ # Visualization components
-│       └── CircuitSimulator.tsx # Main component
-├── lib/                  # Shared libraries 
-│   └── python/           # Python backend code
-├── types/                # TypeScript type definitions
-│   └── circuit-simulator.ts # Circuit simulator types
-├── utils/                # Utility functions
-│   └── circuit-simulator/ # Circuit-specific utilities
-├── hooks/                # Custom React hooks
-├── services/             # API services
-└── styles/               # Shared styles
-```
-
-## Core Features
-
-- Interactive circuit simulation with RC-RC circuit model
-- Parameter visualization via spider plots
-- Nyquist plot for impedance visualization
-- Residual norm calculations for model comparison with frequency weighting
-- Mathematical insights into impedance calculations
-- Grid parameter space exploration
-
-## Recent Improvements
-
-### Enhanced Frequency Controls
-- Extended minimum frequency from 0.1Hz down to 0.01Hz for better low-frequency response analysis
-- Added more precise tick marks on logarithmic sliders for improved usability
-- Added a control for number of frequency points (10-200) to adjust computational detail
-
-### Complete Grid Point Computation
-- Modified to display all computed parameter combinations instead of just a subset
-- Enhanced `generateGridPoints` function to compute all possible parameter combinations
-- Updated UI to reflect the total points being displayed
-
-### Improved Resnorm Calculations
-- Enhanced the residual norm calculation to follow industry-standard practices for EIS
-- Added frequency-weighting to give more importance to lower frequencies
-- Improved normalization using reference magnitude
-- Added detailed debugging information showing calculation steps
-- Created better data structures with proper type definitions
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+ 
-- Python 3.8+
-
-### Installation
-
-1. Clone the repository
-2. Install dependencies:
-
-```bash
-yarn install
-pip install -r requirements.txt
-```
-
-### Development
-
-Start the development server:
-
-```bash
-yarn dev
-```
-
-This will start both the Next.js frontend and the Python backend for circuit calculations.
-
-### Building for Production
-
-```bash
-yarn build
-```
-
-## Technologies
-
-- Next.js 14
-- React 18
-- TypeScript
-- Python for backend calculations
-- Material UI components
-- D3.js and Recharts for visualizations
-
-# RPE Impedance Simulator
+# SpideyPlot - Interactive EIS Circuit Simulator & Visualization
 
 [![Live Demo](https://img.shields.io/badge/demo-online-green.svg)](https://nei-viz-project.vercel.app/)
 [![Next.js](https://img.shields.io/badge/built%20with-Next.js-black)](https://nextjs.org)
 [![TailwindCSS](https://img.shields.io/badge/styled%20with-TailwindCSS-06B6D4)](https://tailwindcss.com)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/tkpepper15/nei-viz-project/releases/tag/v1.1.0)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/tkpepper15/nei-viz-project/releases/tag/v2.0.0)
 
-> 🎉 RPE Impedance Simulator - Advanced circuit modeling and visualization for electrochemical impedance spectroscopy
+> 🕸️ **SpideyPlot** - Advanced electrochemical impedance spectroscopy (EIS) simulation and visualization for retinal pigment epithelium (RPE) research
 
-An interactive web application for simulating and visualizing retinal pigment epithelium (RPE) impedance characteristics using equivalent circuit models.
+An interactive web application for simulating and visualizing RPE impedance characteristics using equivalent circuit models, featuring spider plots, parallel computation, and comprehensive parameter space exploration.
 
 <div align="center">
-  <img src="public/screenshot.png" alt="RPE Impedance Simulator Screenshot" width="800"/>
+  <img src="public/screenshot.png" alt="SpideyPlot Screenshot" width="800"/>
 </div>
 
 ## 🚀 Quick Start
@@ -131,175 +30,253 @@ Then open [http://localhost:3000](http://localhost:3000) to see the application.
 
 ## 🎯 Overview
 
-This simulator empowers researchers and students to:
-- 🔬 Explore RPE electrical properties through an equivalent circuit model
-- 📊 Visualize impedance characteristics using Nyquist plots
-- 🕸️ Analyze parameter relationships through spider plots
-- 📈 Compare multiple states and track changes
-- 💾 Save and load simulation states locally
-- 🧮 Explore the full parameter space with enhanced computational capabilities
+SpideyPlot empowers researchers and students to:
+- 🔬 Explore RPE electrical properties through a sophisticated equivalent circuit model
+- 🕸️ Visualize parameter relationships using advanced spider plot technology
+- 🚀 Leverage Web Workers for parallel computation of large parameter spaces
+- 📊 Analyze impedance data with industry-standard resnorm calculations
+- 🎛️ Navigate through an intuitive tabbed interface for different analysis modes
+- 📈 Track computation progress with real-time performance monitoring
+- 💾 Export data and visualizations for further analysis
 
-## ✨ Features
+## ✨ Key Features
 
-### 🔧 Circuit Model
-- Complete equivalent circuit model for RPE cells
-- Interactive parameter controls with real-time updates
-- Parameters include:
-  - Blank resistance (Rblank): 10-50 Ω
-  - Shunt resistance (Rs): 0.1-10 kΩ
-  - Apical resistance (Ra): 0.1-10 kΩ
-  - Apical capacitance (Ca): 0.1-10 µF
-  - Basal resistance (Rb): 0.1-10 kΩ
-  - Basal capacitance (Cb): 0.1-10 µF
+### 🎛️ Modern Interface
+- **Tabbed Navigation**: Visualizer, Math Details, Data Table, and Activity Log
+- **Collapsible Panels**: Left navigation and right toolbox for customizable workspace
+- **Real-time Updates**: Live parameter changes with instant visual feedback
+- **Dark Theme**: Professional dark interface optimized for data visualization
+- **Responsive Design**: Works seamlessly across different screen sizes
 
-### 📊 Visualizations
+### 🔧 Advanced Circuit Model
+Interactive Randles equivalent circuit model with:
+- **Series Resistance (Rs)**: 10 - 10,000 Ω
+- **Apical Resistance (Ra)**: 10 - 10,000 Ω  
+- **Apical Capacitance (Ca)**: 0.1 - 50 µF
+- **Basal Resistance (Rb)**: 10 - 10,000 Ω
+- **Basal Capacitance (Cb)**: 0.1 - 50 µF
+- **Frequency Range**: 0.1 Hz - 10 kHz (configurable)
+- **Frequency Points**: 10 - 200 points (logarithmic spacing)
 
-#### Nyquist Plot
-- Real vs. imaginary impedance visualization
-- Frequency response from 0.01 Hz to 10 kHz
-- Interactive tooltips with detailed measurements:
-  - Frequency (Hz)
-  - Real impedance (Ω)
-  - Imaginary impedance (Ω)
-  - Magnitude (Ω)
-  - Phase (degrees)
+### 🚀 High-Performance Computation
+- **Web Workers**: Parallel processing using all available CPU cores
+- **Grid Computation**: Explore up to 25^5 parameter combinations (9.7M+ points)
+- **Real-time Progress**: Live computation tracking with cancellation support
+- **Memory Optimization**: Intelligent sampling for large datasets
+- **Performance Monitoring**: CPU usage, memory tracking, and throughput metrics
 
-#### Spider Plot
-- Parameter space visualization
-- Normalized parameter comparison (0-1 scale)
-- Multi-state overlay support
-- Real-time parameter mapping
+### 🕸️ Advanced Spider Plot Visualization
+- **Interactive Spider Charts**: Navigate parameter space with zoom and pan
+- **Resnorm Categorization**: Dynamic percentile-based grouping (25%, 50%, 75%, 90%)
+- **Reference Model**: Overlay ground truth parameters for comparison
+- **Group Toggling**: Show/hide different quality categories
+- **Color Coding**: Intuitive color scheme from excellent (green) to poor (red) fits
+- **Opacity Controls**: Adjust transparency for better data visibility
 
-### 💾 State Management
-- Save and load multiple simulation states
-- Compare parameter changes across states
-- Visual state tracking with customizable colors
-- Toggle state visibility in plots
-- Real-time parameter updates
-- Total Epithelial Resistance (TER) calculation
+### 📊 Comprehensive Data Analysis
+- **Sortable Data Table**: Explore all computed parameter combinations
+- **Dynamic Categorization**: Resnorm groups update based on current sort order
+- **Export Functionality**: Download data in multiple formats
+- **Mathematical Insights**: Detailed equation display with LaTeX rendering
+- **Activity Logging**: Complete computation history with timestamps
+
+### 🎯 Smart Performance Features
+- **Load Indicators**: Visual feedback for different computational loads:
+  - 🟢 Lo Load (≤3,000 points): Green indicator
+  - 🟡 Med Load (3,001-8,000 points): Yellow indicator  
+  - 🔴 Hi Load (>8,000 points): Red indicator
+- **Predicted Counts**: See estimated grid points before computation
+- **Adaptive Limits**: Automatic performance optimization for large datasets
+- **Background Processing**: Non-blocking computation with UI responsiveness
 
 ## 📐 Mathematical Model
 
-### Equivalent Circuit Model
+### Equivalent Circuit Architecture
 
-The RPE cellular layer is modeled as an equivalent circuit with the following components:
+The RPE cellular layer is modeled using a modified Randles circuit:
 
 ```
-Rs ────┬────────────┬──────
-       │            │
-       Ra           Rb
-       │            │
-       Ca           Cb
-       │            │
-       └────────────┘
+       Rs (Series Resistance)
+   ────[Rs]────┬──────────┬──────
+               │          │
+           [Ra]│      [Rb]│
+               │          │
+           [Ca]│      [Cb]│
+               │          │
+               └──────────┘
 ```
 
-Where:
-- Rs: Shunt resistance (paracellular pathway)
-- Ra: Apical membrane resistance
-- Ca: Apical membrane capacitance
-- Rb: Basal membrane resistance
-- Cb: Basal membrane capacitance
+**Circuit Components:**
+- **Rs**: Series resistance (solution + electrode resistance)
+- **Ra**: Apical membrane resistance  
+- **Ca**: Apical membrane capacitance
+- **Rb**: Basal membrane resistance
+- **Cb**: Basal membrane capacitance
 
 ### Impedance Calculation
 
-The impedance at a given frequency is calculated as:
+The total circuit impedance is calculated as a parallel combination:
 
 ```
-Zeq(ω) = Rs + Za(ω) + Zb(ω)
+Z_total(ω) = (Rs × Z_membranes) / (Rs + Z_membranes)
 ```
 
-Where Za and Zb are the impedances of the apical and basal membranes:
+Where the membrane impedances are:
 
 ```
-Za(ω) = Ra/(1 + jωRaCa)
-Zb(ω) = Rb/(1 + jωRbCb)
+Za(ω) = Ra / (1 + jωRaCa)
+Zb(ω) = Rb / (1 + jωRbCb)
+Z_membranes = Za(ω) + Zb(ω)
 ```
 
-### Residual Norm (Resnorm) Calculation
+**Complex Division Implementation:**
+```
+For Z = (num_real + j×num_imag) / (denom_real + j×denom_imag):
 
-The resnorm quantifies the difference between a test impedance spectrum and a reference spectrum. Our enhanced calculation includes:
+real_part = (num_real × denom_real + num_imag × denom_imag) / |denom|²
+imag_part = (num_imag × denom_real - num_real × denom_imag) / |denom|²
 
-1. **Frequency Weighting**: Lower frequencies are weighted more heavily to emphasize capacitive effects:
-   ```
-   frequencyWeight = 1 / max(0.1, log10(frequency))
-   ```
+where |denom|² = denom_real² + denom_imag²
+```
 
-2. **Magnitude Normalization**: Residuals are normalized by the reference impedance magnitude:
-   ```
-   normalizedResidual = (Z_test - Z_ref) / |Z_ref|
-   ```
+### Enhanced Resnorm Calculation
 
-3. **Component Weighting**: Different weights for real and imaginary components:
-   ```
-   For low frequencies (<100 Hz):
-     realWeight = 1.0, imagWeight = 1.5
-   For high frequencies (≥100 Hz):
-     realWeight = 1.5, imagWeight = 1.0
-   ```
+Our industry-standard resnorm calculation includes sophisticated weighting:
 
-4. **Final Calculation**:
-   ```
-   resnorm = sqrt(sum(weighted squared residuals) / sum(weights)) * rangeAmplifier
-   ```
+**1. Frequency Weighting**
+```
+weight_freq = 1 / max(0.1, log₁₀(frequency))
+```
+Emphasizes low-frequency capacitive behavior crucial for membrane characterization.
 
-   Where rangeAmplifier adjusts based on the frequency range ratio:
-   ```
-   rangeAmplifier = 
-     3.0 if ratio < 100 (narrow range)
-     2.5 if ratio < 1000 (moderate range)
-     2.0 otherwise (wide range)
-   ```
+**2. Component-Specific Weighting**
+```
+For f < 100 Hz:  w_real = 1.0, w_imag = 1.5
+For f ≥ 100 Hz:  w_real = 1.5, w_imag = 1.0
+```
+Balances resistive and capacitive contributions across frequency ranges.
 
-5. **Frequency Range Impact**: The simulator allows adjustment of the frequency range from 0.01 Hz to 10 kHz:
-   - Very low frequencies (0.01-1 Hz) are crucial for resolving capacitive elements (Ca, Cb)
-   - Mid-range frequencies (1-100 Hz) highlight the RC time constants and membrane properties
-   - High frequencies (>1 kHz) emphasize series resistance (Rs)
-   - The number of frequency points (10-200) controls the resolution of the analysis
+**3. Magnitude Normalization**
+```
+normalized_residual = (Z_test - Z_reference) / |Z_reference|
+```
+Ensures scale-independent comparison across different impedance magnitudes.
 
-This approach ensures:
-- Low-frequency capacitive behavior is emphasized
-- Impedance differences are properly normalized
-- The calculation is robust across different frequency ranges
-- The results align with industry-standard EIS analysis methods
+**4. Final Resnorm**
+```
+resnorm = √(Σ(weighted_residuals²) / Σ(weights)) × range_amplifier
+```
 
-### Parameter Space Exploration
+**Range Amplification**
+```
+range_amplifier = {
+  3.0  if frequency_ratio < 100    (narrow range)
+  2.5  if frequency_ratio < 1000   (moderate range)  
+  2.0  otherwise                   (wide range)
+}
+```
 
-The simulator explores the full parameter space by:
+### Dynamic Percentile Grouping
 
-1. Generating all possible combinations of the circuit parameters
-2. Computing the impedance spectrum for each parameter set
-3. Calculating the resnorm between each generated spectrum and the reference
-4. Grouping results by resnorm quality into:
-   - Very Good Fits (lowest resnorm)
-   - Good Fits
-   - Moderate Fits
-   - Poor Fits (highest resnorm)
+Results are categorized using adaptive percentiles:
+- **Excellent Fit** (Top 25%): resnorm ≤ P₂₅ 
+- **Good Fit** (25-50%): P₂₅ < resnorm ≤ P₅₀
+- **Moderate Fit** (50-75%): P₅₀ < resnorm ≤ P₇₅
+- **Acceptable Fit** (75-90%): P₇₅ < resnorm ≤ P₉₀
+- **Poor Fit** (Bottom 10%): resnorm > P₉₀
 
-This comprehensive approach allows users to visualize the entire solution space and understand which parameter combinations produce similar impedance responses.
+This approach ensures meaningful categorization regardless of parameter space size.
 
-## 🛠️ Technical Stack
+## 🏗️ Project Structure
 
-- **Framework**: [Next.js](https://nextjs.org/)
-- **Styling**: [TailwindCSS](https://tailwindcss.com/)
-- **Visualization**: [Recharts](https://recharts.org/)
-- **Math Typesetting**: [KaTeX](https://katex.org/)
-
-## 🧑‍💻 Development
-
-The main component is located at `/app/components/CircuitSimulator.tsx`. The application features hot reloading, so the page will auto-update as you edit the file.
-
-### Project Structure
 ```
 nei-viz-project/
 ├── app/
 │   ├── components/
-│   │   └── CircuitSimulator.tsx    # Main simulator component
+│   │   ├── circuit-simulator/
+│   │   │   ├── controls/           # UI control components
+│   │   │   │   ├── ExportModal.tsx
+│   │   │   │   ├── PerformanceControls.tsx
+│   │   │   │   ├── SystemMonitor.tsx
+│   │   │   │   └── ToolboxComponent.tsx
+│   │   │   ├── insights/           # Analysis components
+│   │   │   │   └── ResnormDisplay.tsx
+│   │   │   ├── notifications/      # Status notifications
+│   │   │   ├── types/              # TypeScript definitions
+│   │   │   ├── utils/              # Computation utilities
+│   │   │   │   ├── complex.ts      # Complex number operations
+│   │   │   │   ├── impedance.ts    # EIS calculations
+│   │   │   │   ├── resnorm.ts      # Residual norm algorithms
+│   │   │   │   ├── spider.ts       # Spider plot mathematics
+│   │   │   │   └── workerManager.ts # Web Worker coordination
+│   │   │   ├── visualizations/     # Plot components
+│   │   │   │   ├── SpiderPlot.tsx
+│   │   │   │   └── TiledSpiderPlot.tsx
+│   │   │   ├── DataTableTab.tsx    # Data analysis interface
+│   │   │   ├── MathDetailsTab.tsx  # Mathematical documentation
+│   │   │   └── VisualizerTab.tsx   # Main visualization
+│   │   └── CircuitSimulator.tsx    # Root component
+│   ├── globals.css                 # Global styles
 │   ├── layout.tsx                  # App layout
 │   └── page.tsx                    # Main page
-├── public/                         # Static assets
-└── styles/                         # Global styles
+├── public/
+│   ├── enhanced-tile-worker.js     # Web Worker for computation
+│   ├── grid-worker.js              # Grid generation worker
+│   └── tile-worker.js              # Tile rendering worker
+├── types/                          # Global type definitions
+└── README.md                       # This file
 ```
+
+## 🛠️ Technical Stack
+
+- **Framework**: [Next.js 14](https://nextjs.org/) with App Router
+- **Language**: [TypeScript](https://www.typescriptlang.org/) for type safety
+- **Styling**: [TailwindCSS](https://tailwindcss.com/) with custom dark theme
+- **Math Rendering**: [KaTeX](https://katex.org/) for LaTeX equations
+- **Visualization**: Custom React components with D3.js mathematics
+- **Computation**: Web Workers for parallel processing
+- **Performance**: Optimized for large-scale parameter exploration
+
+## 🧑‍💻 Development
+
+### Getting Started
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Start development server: `npm run dev`
+4. Open [http://localhost:3000](http://localhost:3000)
+
+### Key Development Features
+- **Hot Reloading**: Instant updates during development
+- **TypeScript**: Full type safety and IntelliSense
+- **Modular Architecture**: Clean separation of concerns
+- **Performance Monitoring**: Built-in computation profiling
+- **Error Handling**: Comprehensive error boundaries and logging
+
+### Performance Considerations
+- Computation complexity scales as O(n⁵) where n is grid size
+- Web Workers prevent UI blocking during large computations
+- Memory usage is optimized for datasets up to 10M+ parameter combinations
+- Adaptive rendering limits ensure smooth visualization performance
+
+## 📊 Usage Examples
+
+### Basic Parameter Exploration
+1. Adjust circuit parameters using the toolbox sliders
+2. Click "Compute Grid" to explore parameter space
+3. View results in the spider plot visualization
+4. Analyze data quality using resnorm categorization
+
+### Large-Scale Analysis
+1. Set grid size to 15-20 for comprehensive exploration
+2. Monitor computation progress in real-time
+3. Use the data table to examine specific parameter combinations
+4. Export results for external analysis
+
+### Mathematical Validation
+1. Switch to "Math Details" tab to view equations
+2. Verify impedance calculations against literature
+3. Understand resnorm weighting through detailed explanations
+4. Check frequency response characteristics
 
 ## 📄 License
 

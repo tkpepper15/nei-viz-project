@@ -8,7 +8,7 @@
 }
 
 .text-primary-light {
-  color: #60a5fa; /* blue-400 */
+  color: #007acc; /* VSCode blue */
 }
 
 .bg-primary {
@@ -52,6 +52,22 @@
   }
 }
 
+/* Animation for fade in effect */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-in-out;
+}
+
 html, body {
   padding: 0;
   margin: 0;
@@ -59,82 +75,109 @@ html, body {
     Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif;
 }
 
+/* Global border override to prevent white borders */
+* {
+  border-color: var(--border) !important;
+}
+
+/* Ensure all elements use consistent border colors */
+*[class*="border"]:not([class*="border-transparent"]):not([class*="border-blue"]):not([class*="border-primary"]):not([class*="border-red"]):not([class*="border-green"]):not([class*="border-yellow"]):not([class*="border-amber"]):not([class*="border-orange"]):not([class*="border-emerald"]) {
+  border-color: var(--border) !important;
+}
+
 :root {
-  --background: #0f172a; /* slate-900 */
-  --foreground: #f8fafc; /* slate-50 */
-  --primary: #3b82f6; /* blue-500 */
-  --primary-hover: #2563eb; /* blue-600 */
-  --neutral-50: #f8fafc;
-  --neutral-100: #f1f5f9;
-  --neutral-200: #e2e8f0;
-  --neutral-700: #334155;
-  --neutral-800: #1e293b;
-  --neutral-900: #0f172a;
+  /* Modern Dark Mode Color Palette - ChatGPT/Anthropic Style */
+  --background: #0d1117; /* Deep dark background */
+  --foreground: #e6edf3; /* High contrast text */
+  --primary: #2f81f7; /* Modern blue accent */
+  --primary-hover: #1f6feb; /* Blue hover state */
+  
+  /* Rich neutral grays - deeper and more sophisticated */
+  --neutral-50: #f6f8fa;
+  --neutral-100: #eaeef2;
+  --neutral-200: #d1d9e0;
+  --neutral-300: #adbac7;
+  --neutral-400: #768390; /* Subtle muted text */
+  --neutral-500: #636c76;
+  --neutral-600: #484f58;
+  --neutral-700: #32383f; /* Subtle borders */
+  --neutral-800: #24292f; /* Panel backgrounds */
+  --neutral-850: #1c2128; /* Elevated surfaces */
+  --neutral-900: #161b22; /* Card backgrounds */
+  --neutral-950: #0d1117; /* Deep background */
+  
+  /* Modern app specific colors */
+  --surface: #161b22;
+  --surface-hover: #21262d;
+  --border: #32383f; /* Consistent gray border */
+  --border-subtle: #21262d; /* Subtle gray border */
+  --accent: #2f81f7;
+  --accent-hover: #1f6feb;
+  --text-primary: #e6edf3;
+  --text-secondary: #7d8590;
+  --text-muted: #656d76;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
+  /* Ensure body doesn't have any white borders */
+  border: none;
 }
 
-/* Custom Range Slider Styles */
+/* Custom Range Slider Styles - VSCode themed */
 .slider {
   appearance: none;
   background: transparent;
   cursor: pointer;
+  border-radius: 2px;
+  height: 6px;
 }
 
 .slider::-webkit-slider-track {
-  background: #374151;
+  background: var(--neutral-700);
   height: 6px;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .slider::-webkit-slider-thumb {
   appearance: none;
-  height: 18px;
-  width: 18px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  border: 2px solid #1e293b;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  height: 14px;
+  width: 14px;
+  border-radius: 2px;
+  background: var(--primary);
+  border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.1s ease;
 }
 
 .slider::-webkit-slider-thumb:hover {
-  background: linear-gradient(135deg, #2563eb, #1e40af);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
-  transform: scale(1.1);
+  background: var(--primary-hover);
 }
 
 .slider::-webkit-slider-thumb:active {
-  transform: scale(0.95);
-  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.8);
+  background: var(--primary-hover);
 }
 
 .slider::-moz-range-track {
-  background: #374151;
+  background: var(--neutral-700);
   height: 6px;
-  border-radius: 3px;
   border: none;
+  border-radius: 2px;
 }
 
 .slider::-moz-range-thumb {
-  height: 18px;
-  width: 18px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  border: 2px solid #1e293b;
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  height: 14px;
+  width: 14px;
+  border-radius: 2px;
+  background: var(--primary);
+  border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.1s ease;
 }
 
 .slider::-moz-range-thumb:hover {
-  background: linear-gradient(135deg, #2563eb, #1e40af);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
-  transform: scale(1.1);
+  background: var(--primary-hover);
 }
 
 /* Parameter slider styles for the circuit simulator */
@@ -153,19 +196,19 @@ body {
 }
 
 .param-slider .slider-value {
-  background-color: var(--neutral-700);
-  color: var(--neutral-100);
+  background-color: var(--neutral-800);
+  color: var(--foreground);
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 12px;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: background-color 0.1s ease;
 }
 
 .param-slider input[type="range"].slider-input {
   width: 100%;
-  height: 8px;
-  border-radius: 4px;
+  height: 6px;
+  border-radius: 2px;
   background: var(--neutral-700);
   outline: none;
   -webkit-appearance: none;
@@ -175,186 +218,224 @@ body {
 
 .param-slider input[type="range"].slider-input::-webkit-slider-thumb {
   appearance: none;
-  height: 20px;
-  width: 20px;
-  border-radius: 50%;
+  height: 16px;
+  width: 16px;
+  border-radius: 2px;
   background: var(--primary);
-  border: 2px solid var(--neutral-800);
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.1s ease;
 }
 
 .param-slider input[type="range"].slider-input:focus::-webkit-slider-thumb {
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+  background: var(--primary-hover);
 }
 
 .param-slider input[type="range"].slider-input::-moz-range-thumb {
-  height: 20px;
-  width: 20px;
-  border-radius: 50%;
+  height: 16px;
+  width: 16px;
+  border-radius: 2px;
   background: var(--primary);
-  border: 2px solid var(--neutral-800);
-  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);
+  border: none;
   cursor: pointer;
+  transition: background-color 0.1s ease;
 }
 
 .param-slider input[type="range"].slider-input:focus::-moz-range-thumb {
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.6);
+  background: var(--primary-hover);
 }
 
 .param-slider .slider-label-text {
   font-size: 14px;
   font-weight: 500;
-  color: var(--neutral-200);
-  transition: color 0.2s ease;
+  color: var(--foreground);
 }
 
 .param-slider .slider-value {
-  background-color: var(--neutral-700);
-  color: var(--neutral-100);
+  background-color: var(--neutral-800);
+  color: var(--foreground);
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   font-size: 12px;
   font-weight: 600;
-  transition: all 0.2s ease;
+  min-width: 60px;
+  text-align: center;
 }
 
-/* Circuit sidebar specific styles that can't be easily replaced with Tailwind */
 .circuit-sidebar {
-  width: 350px;
-  min-width: 350px;
-  background-color: var(--neutral-800);
-  border-right: 1px solid var(--neutral-700);
+  background-color: var(--surface);
+  border-right: 1px solid var(--border);
+  color: var(--text-primary);
 }
 
 .circuit-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--neutral-700);
+  background-color: var(--neutral-800);
+  border-bottom: 1px solid var(--border);
 }
 
 .circuit-tab {
-  flex: 1;
-  padding: 12px 16px;
-  font-size: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
   font-weight: 500;
-  transition: all 0.2s ease;
   cursor: pointer;
-  background: none;
-  border: none;
-  color: var(--neutral-400);
+  transition: all 0.15s ease;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
 }
 
 .circuit-tab-active {
-  color: var(--primary);
-  background-color: var(--neutral-700);
-  border-bottom: 2px solid var(--primary);
+  background-color: var(--surface-hover);
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
 }
 
 .circuit-tab-inactive {
-  color: var(--neutral-400);
+  background-color: var(--neutral-800);
 }
 
 .circuit-tab-inactive:hover {
-  background-color: var(--neutral-700);
-  color: var(--neutral-200);
+  background-color: var(--surface-hover);
+  color: var(--text-primary);
 }
 
-/* Range slider container styles */
 .range_container {
-  position: relative;
-  margin: 16px 0;
+  margin: 8px 0;
 }
 
 .sliders_control {
-  position: relative;
-  height: 32px;
+  margin: 4px 0;
 }
 
 .slider-track {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
+  width: 100%;
   height: 6px;
-  background-color: var(--neutral-700);
-  border-radius: 3px;
-  transform: translateY(-50%);
+  background: var(--neutral-700);
+  border-radius: 2px;
+  position: relative;
+  cursor: pointer;
 }
 
 .slider-track-active {
-  position: absolute;
-  top: 50%;
+  background: var(--primary);
   height: 6px;
-  background-color: var(--primary);
-  border-radius: 3px;
-  transform: translateY(-50%);
+  border-radius: 2px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  transition: width 0.1s ease;
 }
 
 .form_control {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 16px;
+  margin: 8px 0;
 }
 
 .form_control_container {
-  display: flex;
-  flex-direction: column;
+  margin: 4px 0;
 }
 
 .form_control_container__time {
-  font-size: 11px;
-  color: var(--neutral-400);
-  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .form_control_container__time__input {
-  width: 96px;
-  padding: 6px;
-  border: 1px solid var(--neutral-700);
-  border-radius: 4px;
+  background: var(--neutral-800);
+  border: 1px solid var(--vscode-border);
+  color: var(--foreground);
+  padding: 4px 8px;
+  border-radius: 2px;
   font-size: 12px;
-  text-align: center;
-  background-color: var(--neutral-800);
-  color: var(--neutral-200);
+  outline: none;
+  transition: border-color 0.1s ease;
 }
 
-/* Spider plot specific styles */
+.form_control_container__time__input:focus {
+  border-color: var(--primary);
+}
+
 .spider-visualization {
-  width: 100%;
-  height: 100%;
-  position: relative;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .spider-svg {
-  width: 100%;
-  height: 100%;
-  background-color: var(--neutral-900);
-  border: 1px solid var(--neutral-700);
-  border-radius: 8px;
+  background-color: var(--surface);
+  border-radius: 6px;
 }
 
 .spider-plot {
-  width: 100%;
-  height: 500px;
-  position: relative;
+  background-color: var(--surface);
+  /* Remove any default padding that might interfere */
+  padding: 0;
+  margin: 0;
 }
 
 .spider-plot-container {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  background-color: var(--neutral-900);
-  border: 1px solid var(--neutral-700);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  /* Reduced padding for better space utilization */
+  padding: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .spider-plot-container .recharts-wrapper {
-  width: 100% !important;
-  height: 100% !important;
+  background-color: var(--surface);
 }
 
 .spider-plot-container .recharts-surface {
-  background-color: var(--neutral-900);
+  background-color: var(--surface);
+}
+
+/* Modern Resizable Split Pane - Ultra Clean */
+.resizable-split-pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--background);
+}
+
+.resizable-split-pane-top {
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--background);
+  position: relative;
+}
+
+.resizable-split-pane-bottom {
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--background);
+  position: relative;
+}
+
+/* Ultra-minimal separator - modern app style */
+.resizable-split-pane-resizer {
+  flex-shrink: 0;
+  height: 1px;
+  background: var(--border-subtle);
+  cursor: ns-resize;
+  position: relative;
+  transition: all 0.15s ease;
+  opacity: 0.6;
+}
+
+.resizable-split-pane-resizer:hover {
+  background: var(--accent);
+  height: 2px;
+  margin: -0.5px 0;
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(47, 129, 247, 0.2);
+}
+
+.resizable-split-pane-resizer:active,
+.resizable-split-pane-resizer.dragging {
+  background: var(--accent);
+  height: 2px;
+  margin: -0.5px 0;
+  opacity: 1;
+  box-shadow: 0 0 12px rgba(47, 129, 247, 0.3);
 }

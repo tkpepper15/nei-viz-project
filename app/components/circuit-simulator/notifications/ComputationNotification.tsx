@@ -58,12 +58,12 @@ export const ComputationNotification: React.FC<ComputationNotificationProps> = (
   const iconColor = summary.type === 'success' ? 'text-green-400' : 'text-red-400';
 
   return (
-    <div className="fixed top-4 right-4 z-50">
+    <div className="fixed bottom-4 right-4 z-50">
       <div
         className={`
-          ${bgColor} ${borderColor} border rounded-lg shadow-lg p-4 min-w-[400px] max-w-[500px]
+          ${bgColor} ${borderColor} border rounded-lg shadow-xl p-4 min-w-[400px] max-w-[500px]
           transform transition-all duration-300 ease-in-out
-          ${isExiting ? 'translate-x-full opacity-0' : 'translate-x-0 opacity-100'}
+          ${isExiting ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'}
         `}
       >
         {/* Header */}

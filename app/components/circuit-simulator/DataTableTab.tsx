@@ -48,8 +48,8 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     setSortColumn(column);
   };
 
-  // Function to get sorted grid results
-  const getSortedGridResults = () => {
+  // Memoized function to get sorted grid results
+  const getSortedGridResults = useMemo(() => {
     if (gridResultsWithIds.length === 0) return [];
     
     const sorted = [...gridResultsWithIds].sort((a, b) => {
@@ -102,7 +102,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
       return sorted; // Show all points
     }
     return sorted.slice(0, Math.min(maxGridPoints, sorted.length));
-  };
+  }, [gridResultsWithIds, sortColumn, sortDirection, maxGridPoints, gridSize]);
 
   // Calculate pagination values
   const displayCount = Math.min(maxGridPoints, gridResults.length);
@@ -112,7 +112,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   
   // Function to get paginated grid results
   const getPaginatedGridResults = () => {
-    return getSortedGridResults().slice(startIndex, endIndex);
+    return getSortedGridResults.slice(startIndex, endIndex);
   };
 
   // Function to handle page change
@@ -146,52 +146,73 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     );
   };
 
-  // Get quality label and color based on resnorm group
-  const getQualityInfo = (point: BackendMeshPoint & { id: number }) => {
-    const groupIndex = resnormGroups.findIndex(group => 
-      group.items.some(item => 
-        item.parameters.Rs === point.parameters.Rs &&
-        item.parameters.Ra === point.parameters.Ra &&
-        item.parameters.Ca === point.parameters.Ca &&
-        item.parameters.Rb === point.parameters.Rb &&
-        item.parameters.Cb === point.parameters.Cb
-      )
-    );
+  // Calculate dynamic resnorm percentiles from currently sorted data
+  const resnormPercentiles = useMemo(() => {
+    const sortedData = getSortedGridResults;
+    const resnormValues = sortedData.map((point: BackendMeshPoint & { id: number }) => point.resnorm || 0).filter((r: number) => r > 0);
     
-    // Determine quality category based on the group's color
-    let qualityCategory = 1; // Default to Good
-    let groupColor = '#3B82F6'; // Default blue
-    
-    if (groupIndex >= 0) {
-      const group = resnormGroups[groupIndex];
-      switch (group.color) {
-        case '#10B981': // Very Good - Green
-          qualityCategory = 0;
-          groupColor = '#10B981';
-          break;
-        case '#3B82F6': // Good - Blue
-          qualityCategory = 1;
-          groupColor = '#3B82F6';
-          break;
-        case '#F59E0B': // Moderate - Amber
-          qualityCategory = 2;
-          groupColor = '#F59E0B';
-          break;
-        case '#EF4444': // Poor - Red
-          qualityCategory = 3;
-          groupColor = '#EF4444';
-          break;
-      }
+    if (resnormValues.length === 0) {
+      return { p25: 0, p50: 0, p75: 0, p90: 0 };
     }
     
-    // Get quality label based on quality category
-    let qualityLabel = "Good";
-    if (qualityCategory === 0) qualityLabel = "Very Good";
-    else if (qualityCategory === 1) qualityLabel = "Good";
-    else if (qualityCategory === 2) qualityLabel = "Moderate";
-    else if (qualityCategory === 3) qualityLabel = "Poor";
+    // Sort resnorm values for percentile calculation
+    const sortedResnorms = [...resnormValues].sort((a, b) => a - b);
     
-    return { qualityLabel, groupColor, groupIndex, qualityCategory };
+    const calculatePercentile = (arr: number[], percentile: number): number => {
+      const index = Math.ceil((percentile / 100) * arr.length) - 1;
+      return arr[Math.max(0, Math.min(index, arr.length - 1))];
+    };
+    
+    return {
+      p25: calculatePercentile(sortedResnorms, 25),  // Top 25% (best fits)
+      p50: calculatePercentile(sortedResnorms, 50),  // Top 50% (good fits)
+      p75: calculatePercentile(sortedResnorms, 75),  // Top 75% (moderate fits)
+      p90: calculatePercentile(sortedResnorms, 90)   // Top 90% (acceptable fits)
+    };
+  }, [getSortedGridResults]);
+
+  // Get quality label and color based on resnorm value and dynamic percentiles
+  const getQualityInfo = (point: BackendMeshPoint & { id: number }) => {
+    const resnorm = point.resnorm || 0;
+    
+    let qualityCategory = 4; // Default to Poor
+    let groupColor = '#DC2626'; // Default red
+    let qualityLabel = "Poor";
+    
+    // Categorize based on dynamic percentiles
+    if (resnorm <= resnormPercentiles.p25) {
+      qualityCategory = 0;
+      groupColor = '#059669'; // Emerald-600
+      qualityLabel = "Excellent";
+    } else if (resnorm <= resnormPercentiles.p50) {
+      qualityCategory = 1;
+      groupColor = '#10B981'; // Emerald-500
+      qualityLabel = "Good";
+    } else if (resnorm <= resnormPercentiles.p75) {
+      qualityCategory = 2;
+      groupColor = '#F59E0B'; // Amber-500
+      qualityLabel = "Moderate";
+    } else if (resnorm <= resnormPercentiles.p90) {
+      qualityCategory = 3;
+      groupColor = '#F97316'; // Orange-500
+      qualityLabel = "Acceptable";
+    } else {
+      qualityCategory = 4;
+      groupColor = '#DC2626'; // Red-600
+      qualityLabel = "Poor";
+    }
+    
+    // Find corresponding group index from original resnorm groups for consistency
+    const groupIndex = resnormGroups.findIndex(group => 
+      group.color === groupColor || 
+      (qualityCategory === 0 && group.label.includes('Excellent')) ||
+      (qualityCategory === 1 && group.label.includes('Good')) ||
+      (qualityCategory === 2 && group.label.includes('Moderate')) ||
+      (qualityCategory === 3 && group.label.includes('Acceptable')) ||
+      (qualityCategory === 4 && group.label.includes('Poor'))
+    );
+    
+    return { qualityLabel, groupColor, groupIndex: groupIndex >= 0 ? groupIndex : qualityCategory, qualityCategory };
   };
 
   // Calculate unique values for each parameter
@@ -281,6 +302,66 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     <div className="space-y-4">
       {/* Add grid info section */}
       {renderGridInfo()}
+
+      {/* Dynamic Resnorm Percentiles Section */}
+      <div className="bg-blue-900/20 rounded-lg p-4 border border-blue-700/30">
+        <h3 className="text-sm font-medium text-blue-200 mb-3 flex items-center">
+          <svg className="w-4 h-4 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+          Dynamic Resnorm Categories 
+          <span className="text-xs text-blue-400 ml-2 font-normal">
+            (Updates with sorting: {sortColumn} {sortDirection})
+          </span>
+        </h3>
+        
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="bg-emerald-900/30 p-2.5 rounded border border-emerald-700/40">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-emerald-600"></div>
+              <span className="text-emerald-200 font-medium">Excellent (≤25%)</span>
+            </div>
+            <div className="font-mono text-emerald-300">
+              ≤ {resnormPercentiles.p25.toExponential(2)}
+            </div>
+          </div>
+          
+          <div className="bg-green-900/30 p-2.5 rounded border border-green-700/40">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <span className="text-green-200 font-medium">Good (25-50%)</span>
+            </div>
+            <div className="font-mono text-green-300">
+              ≤ {resnormPercentiles.p50.toExponential(2)}
+            </div>
+          </div>
+          
+          <div className="bg-amber-900/30 p-2.5 rounded border border-amber-700/40">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+              <span className="text-amber-200 font-medium">Moderate (50-75%)</span>
+            </div>
+            <div className="font-mono text-amber-300">
+              ≤ {resnormPercentiles.p75.toExponential(2)}
+            </div>
+          </div>
+          
+          <div className="bg-orange-900/30 p-2.5 rounded border border-orange-700/40">
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-orange-500"></div>
+              <span className="text-orange-200 font-medium">Acceptable (75-90%)</span>
+            </div>
+            <div className="font-mono text-orange-300">
+              ≤ {resnormPercentiles.p90.toExponential(2)}
+            </div>
+          </div>
+        </div>
+        
+        <div className="mt-3 text-xs text-blue-300/70">
+          <span className="font-medium">Note:</span> Categories are calculated dynamically from currently displayed data.
+          Poor fits (&gt;90%) are shown in red.
+        </div>
+      </div>
 
       {/* Debug section showing unique values */}
       <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
@@ -372,41 +453,41 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('parameters.Rs')}
+                    onClick={() => handleSort('Rs')}
                   >
-                    Rs (Ω) {renderSortArrow('parameters.Rs')}
+                    Rs (Ω) {renderSortArrow('Rs')}
                   </button>
                 </th>
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('parameters.Ra')}
+                    onClick={() => handleSort('Ra')}
                   >
-                    Ra (Ω) {renderSortArrow('parameters.Ra')}
+                    Ra (Ω) {renderSortArrow('Ra')}
                   </button>
                 </th>
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('parameters.Ca')}
+                    onClick={() => handleSort('Ca')}
                   >
-                    Ca (µF) {renderSortArrow('parameters.Ca')}
+                    Ca (µF) {renderSortArrow('Ca')}
                   </button>
                 </th>
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('parameters.Rb')}
+                    onClick={() => handleSort('Rb')}
                   >
-                    Rb (Ω) {renderSortArrow('parameters.Rb')}
+                    Rb (Ω) {renderSortArrow('Rb')}
                   </button>
                 </th>
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('parameters.Cb')}
+                    onClick={() => handleSort('Cb')}
                   >
-                    Cb (µF) {renderSortArrow('parameters.Cb')}
+                    Cb (µF) {renderSortArrow('Cb')}
                   </button>
                 </th>
                 <th className="p-2 text-left cursor-pointer" onClick={() => handleSort('resnorm')}>
@@ -448,7 +529,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
               {/* Paginated Results */}
               {getPaginatedGridResults()
                 // Show all points regardless of visibility status in the spider plot
-                .map((point, idx) => {
+                .map((point: BackendMeshPoint & { id: number }, idx: number) => {
                   const { qualityLabel, groupColor, groupIndex } = getQualityInfo(point);
                   // Calculate visibility status for UI indication
                   const isHidden = groupIndex >= 0 && hiddenGroups.includes(groupIndex);

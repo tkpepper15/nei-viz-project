@@ -12,7 +12,7 @@ interface ExportModalProps {
   referenceModelId: string | null;
   opacityLevel: number;
   onGridValuesGenerated: (values: GridParameterArrays) => void;
-  visualizationMode?: 'color' | 'opacity';
+  chromaEnabled?: boolean;
   opacityIntensity?: number;
   gridSize: number;
 }
@@ -33,7 +33,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   referenceModelId,
   opacityLevel,
   onGridValuesGenerated,
-  visualizationMode = 'color',
+  chromaEnabled = true,
   opacityIntensity = 1.0,
   gridSize
 }) => {
@@ -195,7 +195,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-neutral-400">Mode:</span>
-                <span className="text-neutral-300 capitalize">{visualizationMode}</span>
+                <span className="text-neutral-300">{chromaEnabled ? 'Chroma' : 'Mono'}</span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-neutral-400">Opacity:</span>
@@ -231,7 +231,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   opacityFactor={opacityLevel}
                   gridSize={gridSize}
                   onGridValuesGenerated={onGridValuesGenerated}
-                  visualizationMode={visualizationMode}
+                  chromaEnabled={chromaEnabled}
                   opacityIntensity={opacityIntensity}
                 />
               </div>
