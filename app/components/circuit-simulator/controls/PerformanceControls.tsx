@@ -204,10 +204,10 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
   const recommended = getRecommendedSettings();
 
   return (
-    <div className="border border-neutral-700 rounded-lg overflow-hidden">
+    <div className="border border-neutral-700 rounded overflow-hidden">
       {/* Header */}
       <button 
-        className="w-full p-3 bg-neutral-800 text-neutral-200 text-sm font-medium flex items-center justify-between hover:bg-neutral-750"
+        className="w-full p-3 bg-neutral-800 text-neutral-200 text-sm font-medium flex items-center justify-between hover:bg-neutral-600"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center gap-3">
@@ -235,7 +235,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
       {isExpanded && (
         <div className="bg-neutral-900">
           {/* System Info & Quick Actions */}
-          <div className="p-3 border-b border-neutral-700 bg-neutral-850">
+          <div className="p-3 border-b border-neutral-700 bg-neutral-800">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-neutral-400">System Memory: {getSystemMemoryMB().toLocaleString()}MB detected</span>
               <span className="text-xs text-green-400">Using intelligent defaults</span>
@@ -273,8 +273,8 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                 onClick={() => setActiveTab(tab.key as 'memory' | 'chunks' | 'quality' | 'advanced')}
                 className={`flex-1 p-2 text-xs font-medium transition-colors ${
                   activeTab === tab.key
-                    ? 'bg-neutral-700 text-white border-b-2 border-blue-500'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
+                    ? 'bg-neutral-900 text-white border-b-2 border-blue-500'
+                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-600'
                 }`}
               >
                 {tab.label}
@@ -504,7 +504,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                       updateSetting('canvasWidth', width);
                       updateSetting('canvasHeight', height);
                     }}
-                    className="w-full p-1 bg-neutral-800 border border-neutral-700 rounded text-xs"
+                    className="w-full p-1 bg-neutral-800 border border-neutral-700 rounded text-xs text-neutral-200"
                   >
                     <option value="400x400">400 × 400 (Fast)</option>
                     <option value="600x600">600 × 600 (Balanced)</option>
@@ -566,7 +566,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                         gcFrequency: 1,
                         yieldTimeMs: 50,
                       })}
-                      className="px-2 py-1 text-xs bg-red-900 hover:bg-red-800 text-white rounded"
+                      className="px-2 py-1 text-xs bg-red-800 hover:bg-red-700 text-white rounded"
                     >
                       Ultra Safe
                     </button>
@@ -579,7 +579,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                         gcFrequency: 2,
                         yieldTimeMs: 20,
                       })}
-                      className="px-2 py-1 text-xs bg-yellow-900 hover:bg-yellow-800 text-white rounded"
+                      className="px-2 py-1 text-xs bg-yellow-700 hover:bg-yellow-600 text-white rounded"
                     >
                       Balanced
                     </button>
@@ -592,7 +592,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                         gcFrequency: 3,
                         yieldTimeMs: 10,
                       })}
-                      className="px-2 py-1 text-xs bg-green-900 hover:bg-green-800 text-white rounded"
+                      className="px-2 py-1 text-xs bg-green-700 hover:bg-green-600 text-white rounded"
                     >
                       Performance
                     </button>
@@ -605,7 +605,7 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                         gcFrequency: 5,
                         yieldTimeMs: 5,
                       })}
-                      className="px-2 py-1 text-xs bg-blue-900 hover:bg-blue-800 text-white rounded"
+                      className="px-2 py-1 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded"
                     >
                       Maximum
                     </button>
@@ -613,9 +613,9 @@ export const PerformanceControls: React.FC<PerformanceControlsProps> = ({
                 </div>
 
                 {/* Current Settings Summary */}
-                <div className="mt-4 p-3 bg-neutral-800 rounded-lg">
+                <div className="mt-4 p-3 bg-neutral-800 rounded">
                   <div className="text-xs text-neutral-400 mb-2">Current Configuration:</div>
-                  <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                  <div className="grid grid-cols-2 gap-2 text-xs font-mono text-neutral-300">
                     <div>Memory: {settings.maxMemoryMB}MB</div>
                     <div>Chunks: {settings.chunkSize}</div>
                     <div>Polygons: {settings.maxPolygons.toLocaleString()}</div>
