@@ -67,7 +67,7 @@ const GridFilterControls: React.FC<{
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-neutral-200">Smart Filtering</span>
+        <span className="text-sm font-bold text-neutral-200">Smart Filtering</span>
         <input
           type="checkbox"
           checked={filterSettings.enableSmartFiltering}
@@ -158,14 +158,14 @@ export const SystemMonitor: React.FC<SystemMonitorProps> = ({
   const systemStatus = getSystemStatus();
 
   return (
-    <div className="border border-neutral-700 rounded overflow-hidden bg-neutral-900">
+    <div className="border-b border-neutral-700 last:border-b-0">
       {/* Header */}
       <button 
-        className="w-full px-4 py-3 bg-neutral-800/80 text-neutral-200 text-sm font-medium flex items-center justify-between hover:bg-neutral-750 transition-all"
+        className="w-full px-4 py-3 bg-neutral-800 text-neutral-300 text-sm font-medium flex items-center justify-between hover:bg-neutral-750 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm font-semibold">Performance</span>
+          <span className="text-sm font-bold">Performance</span>
           <div className="flex items-center gap-2 text-xs">
             <div className={`w-2 h-2 rounded-full ${systemStatus.dotColor}`}></div>
             <span className={`${systemStatus.color} font-medium`}>{systemStatus.text}</span>
@@ -186,7 +186,7 @@ export const SystemMonitor: React.FC<SystemMonitorProps> = ({
       </button>
 
       {isExpanded && (
-        <div className="p-4 space-y-4">
+        <div className="px-4 py-3 bg-neutral-800 transition-all space-y-3">
           {/* Grid Statistics */}
           <div className="flex justify-between items-center text-xs">
             <span className="text-neutral-400">Grid: {gridSize}^5</span>
@@ -204,11 +204,11 @@ export const SystemMonitor: React.FC<SystemMonitorProps> = ({
           {/* Quick Performance Settings */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-neutral-200">Auto-optimize</span>
+              <span className="text-sm font-bold text-neutral-200">Auto-optimize</span>
               <input type="checkbox" defaultChecked className="w-3 h-3" />
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-neutral-200">Performance warnings</span>
+              <span className="text-sm font-bold text-neutral-200">Performance warnings</span>
               <input type="checkbox" defaultChecked className="w-3 h-3" />
             </div>
           </div>

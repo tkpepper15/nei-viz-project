@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { ModelSnapshot, GridParameterArrays } from './utils/types';
 
 interface GridValue {
@@ -32,6 +32,7 @@ interface BaseSpiderPlotProps {
     description: string;
     items: ModelSnapshot[];
   }>;
+
 }
 
 interface Corner {
@@ -39,7 +40,16 @@ interface Corner {
   y: number;
 }
 
-export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({ 
+export interface BaseSpiderPlotRef {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
+  toggleLabels: () => void;
+  getZoomLevel: () => number;
+  getShowLabels: () => boolean;
+}
+
+export const BaseSpiderPlot = forwardRef<BaseSpiderPlotRef, BaseSpiderPlotProps>(({ 
   meshItems, 
   referenceId, 
   opacityFactor,
@@ -49,18 +59,75 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
   opacityIntensity = 1.0,
   selectedOpacityGroups = [],
   resnormGroups = []
-}) => {
+}, ref) => {
   const [gridValues, setGridValues] = useState<GridValue[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(0.6);
+  const [zoomLevel, setZoomLevel] = useState(1.0);
   const [panX, setPanX] = useState(0);
   const [panY, setPanY] = useState(0);
-  // Add state for labels toggle - on by default
   const [showLabels, setShowLabels] = useState(true);
+  
   // Enhanced panning state for smoother interactions
   const [isPanning, setIsPanning] = useState(false);
   const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 });
   const [isInteracting, setIsInteracting] = useState(false);
+
+
+
+  // Figma-like wheel event handling: completely capture wheel events when over spider plot
+  useEffect(() => {
+    let canvasElement: HTMLElement | null = null;
+    
+    // Find canvas element after component mounts
+    const findCanvas = () => {
+      canvasElement = document.querySelector('.spider-plot-canvas');
+    };
+    
+    // Wait for DOM to be ready
+    const timer = setTimeout(findCanvas, 100);
+    
+    const handleNativeWheel = (e: WheelEvent) => {
+      if (!canvasElement) {
+        findCanvas(); // Try to find it again
+      }
+      
+      // Check if mouse is over the spider plot area
+      if (canvasElement && e.target && canvasElement.contains(e.target as Node)) {
+        // Completely prevent all default wheel behavior
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        
+        // Apply zoom only to spider plot
+        const zoomSensitivity = 0.002;
+        const zoomDelta = -e.deltaY * zoomSensitivity;
+        setZoomLevel(prevZoom => {
+          const newZoomLevel = Math.max(0.2, Math.min(8.0, prevZoom * (1 + zoomDelta)));
+          return newZoomLevel;
+        });
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent browser zoom shortcuts when focus is on spider plot
+      if (canvasElement && document.activeElement && canvasElement.contains(document.activeElement)) {
+        if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '-' || e.key === '0' || e.key === '+')) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
+    // Add multiple event listeners for comprehensive coverage
+    document.addEventListener('wheel', handleNativeWheel, { passive: false, capture: true });
+    document.addEventListener('keydown', handleKeyDown, { passive: false, capture: true });
+    
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('wheel', handleNativeWheel, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []); // Remove zoomLevel dependency to avoid re-binding
 
   // Calculate more aggressive logarithmic opacity based on resnorm value with group-specific support
   const calculateLogOpacity = useCallback((resnorm: number): number => {
@@ -342,21 +409,6 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
     }
   };
 
-  // Smooth zoom and pan functions with reduced sensitivity
-  const handleZoomIn = () => {
-    setZoomLevel(prev => Math.min(prev * 1.15, 8.0)); // Reduced from 1.3 to 1.15 for smoother steps
-  };
-
-  const handleZoomOut = () => {
-    setZoomLevel(prev => Math.max(prev / 1.15, 0.2)); // Reduced from 1.3 to 1.15 for smoother steps
-  };
-
-  const handleResetZoom = () => {
-    setZoomLevel(1.0);
-    setPanX(0);
-    setPanY(0);
-  };
-
   // Enhanced mouse interaction handlers for smooth Desmos-like navigation
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -388,17 +440,12 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
     setIsInteracting(false);
   };
 
-  // Smooth wheel zoom with reduced sensitivity
+  // React wheel handler - simplified since native listener handles everything
   const handleWheel = (e: React.WheelEvent) => {
+    // Block React synthetic events - native listener handles the actual zoom
     e.preventDefault();
     e.stopPropagation();
-    
-    // Much more gradual zoom for smoother experience
-    const zoomSensitivity = 0.002; // Reduced sensitivity
-    const zoomDelta = -e.deltaY * zoomSensitivity;
-    const newZoomLevel = Math.max(0.2, Math.min(8.0, zoomLevel * (1 + zoomDelta)));
-    
-    setZoomLevel(newZoomLevel);
+    // Let native listener handle the zoom logic
   };
 
   // Calculate SVG viewBox based on zoom and pan with smooth transitions
@@ -416,80 +463,75 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
     if (zoomLevel > 1.0 || isInteracting) return 'cursor-grab';
     return 'cursor-default';
   };
-  
+
+  // Zoom functions for toolbox control
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(prev * 1.15, 8.0));
+  };
+
+  const handleZoomOut = () => {
+    setZoomLevel(prev => Math.max(prev / 1.15, 0.2));
+  };
+
+  const handleResetZoom = () => {
+    setZoomLevel(1.0);
+    setPanX(0);
+    setPanY(0);
+  };
+
+  const handleToggleLabels = () => {
+    setShowLabels(prev => !prev);
+  };
+
+  // Expose these functions to parent component
+  useImperativeHandle(ref, () => ({
+    zoomIn: handleZoomIn,
+    zoomOut: handleZoomOut,
+    resetZoom: handleResetZoom,
+    toggleLabels: handleToggleLabels,
+    getZoomLevel: () => zoomLevel,
+    getShowLabels: () => showLabels
+  }));
+
   return (
     <div className="spider-plot-wrapper h-full w-full relative">
-      {/* Zoom Controls - Outside scrollable content, positioned absolutely */}
-      <div className="absolute top-4 right-4 z-[100] pointer-events-none">
-        <div className="flex flex-col gap-0.5 bg-black/20 backdrop-blur-lg border border-white/10 rounded-xl p-2 shadow-2xl pointer-events-auto transition-all duration-200 hover:bg-black/30">
-          <button
-            onClick={handleZoomIn}
-            className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all duration-150 active:scale-95"
-            title="Zoom In"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-            </svg>
-          </button>
-          <button
-            onClick={handleZoomOut}
-            className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all duration-150 active:scale-95"
-            title="Zoom Out"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M20 12H4" />
-            </svg>
-          </button>
-          <button
-            onClick={handleResetZoom}
-            className="w-9 h-9 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/15 rounded-lg transition-all duration-150 active:scale-95 text-[10px] font-mono font-bold"
-            title="Reset Zoom (1:1)"
-          >
-            1:1
-          </button>
-          {/* Subtle divider */}
-          <div className="w-full h-px bg-white/10 my-1"></div>
-          {/* Labels Toggle */}
-          <button
-            onClick={() => setShowLabels(!showLabels)}
-            className={`w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-150 active:scale-95 ${
-              showLabels 
-                ? 'text-blue-300 bg-blue-500/25 hover:bg-blue-500/35' 
-                : 'text-white/50 hover:text-white/70 hover:bg-white/15'
-            }`}
-            title={showLabels ? "Hide Labels" : "Show Labels"}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-            </svg>
-          </button>
-          
-          {/* Zoom indicator */}
-          {zoomLevel !== 1.0 && (
-            <div className="mt-1 px-2 py-1 bg-black/40 rounded text-white/60 text-[9px] font-mono text-center border border-white/10">
-              {(zoomLevel * 100).toFixed(0)}%
-            </div>
-          )}
-        </div>
-      </div>
+
 
       {/* Spider Plot Container - No scrolling, only pan/zoom navigation */}
       <div 
         className="spider-plot h-full w-full bg-surface border border-neutral-700 rounded"
-        style={{ position: 'relative', overflow: 'hidden' }}
+        style={{ 
+          position: 'relative', 
+          overflow: 'hidden',
+          isolation: 'isolate' // Create new stacking context to contain events
+        }}
+        onWheel={(e) => {
+          // Container-level wheel event blocking
+          e.preventDefault();
+          e.stopPropagation();
+        }}
       >
         {/* Desmos-style Interactive Canvas */}
         <div 
-          className={`h-full w-full select-none ${getCursorStyle()} transition-all duration-75`}
+          className={`spider-plot-canvas h-full w-full select-none ${getCursorStyle()} transition-all duration-75`}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
           onWheel={handleWheel}
+          onKeyDown={(e) => {
+            // Prevent browser zoom shortcuts within the plot area
+            if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '-' || e.key === '0')) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
+          tabIndex={0} // Make focusable to capture keyboard events
           style={{ 
             touchAction: 'none', // Prevent default touch behaviors
             userSelect: 'none',   // Prevent text selection
-            position: 'relative'  // Ensure proper positioning context
+            position: 'relative', // Ensure proper positioning context
+            outline: 'none'       // Remove focus outline since it's not needed for interaction
           }}
         >
           <svg 
@@ -679,4 +721,6 @@ export const BaseSpiderPlot: React.FC<BaseSpiderPlotProps> = ({
       </div>
     </div>
   );
-}; 
+});
+
+BaseSpiderPlot.displayName = 'BaseSpiderPlot'; 

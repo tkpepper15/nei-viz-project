@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { BaseSpiderPlot } from './BaseSpiderPlot';
+import React, { useState, useEffect, useRef } from 'react';
+import { BaseSpiderPlot, BaseSpiderPlotRef } from './BaseSpiderPlot';
 import { ModelSnapshot, ResnormGroup } from './utils/types';
 import { GridParameterArrays } from './types';
 import { ExportModal } from './controls/ExportModal';
@@ -12,6 +12,13 @@ interface VisualizerTabProps {
   referenceModelId: string | null;
   gridSize: number;
   onGridValuesGenerated: (values: GridParameterArrays) => void;
+  // View control props
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onResetZoom?: () => void;
+  onToggleLabels?: () => void;
+  zoomLevel?: number;
+  showLabels?: boolean;
 }
 
 export const VisualizerTab: React.FC<VisualizerTabProps> = ({
@@ -20,7 +27,14 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   opacityLevel,
   referenceModelId,
   gridSize,
-  onGridValuesGenerated
+  onGridValuesGenerated,
+  // View control props
+  onZoomIn,
+  onZoomOut,
+  onResetZoom,
+  onToggleLabels,
+  zoomLevel,
+  showLabels
 }) => {
 
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -29,6 +43,29 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const [opacityIntensity, setOpacityIntensity] = useState<number>(1e-30);
   const [sliderValue, setSliderValue] = useState<number>(0);
   const [isClient, setIsClient] = useState(false);
+  
+  // Add view control state - use props if provided, otherwise internal state
+  const [internalZoomLevel, setInternalZoomLevel] = useState(1.0);
+  const [internalShowLabels, setInternalShowLabels] = useState(true);
+  
+  // Create ref to BaseSpiderPlot
+  const spiderPlotRef = useRef<BaseSpiderPlotRef>(null);
+  
+  // Use external props if provided, otherwise use internal state
+  const currentZoomLevel = zoomLevel !== undefined ? zoomLevel : internalZoomLevel;
+  const currentShowLabels = showLabels !== undefined ? showLabels : internalShowLabels;
+
+  // Update zoom level display periodically by polling the ref
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (spiderPlotRef.current) {
+        const currentZoom = spiderPlotRef.current.getZoomLevel();
+        setInternalZoomLevel(currentZoom);
+      }
+    }, 100); // Update every 100ms for smooth display
+
+    return () => clearInterval(interval);
+  }, []);
   
   // Add state for selected groups for opacity contrast (multi-select)
   const [selectedOpacityGroups, setSelectedOpacityGroups] = useState<number[]>([0]); // [0] means "Excellent" group by default
@@ -157,6 +194,43 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [resnormGroups.length]); // Only depend on resnormGroups.length to avoid infinite loop
 
+  // Zoom control functions - use external handlers if provided
+  const handleZoomIn = () => {
+    if (onZoomIn) {
+      onZoomIn();
+    } else {
+      spiderPlotRef.current?.zoomIn();
+      setInternalZoomLevel(prev => Math.min(prev * 1.15, 8.0));
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (onZoomOut) {
+      onZoomOut();
+    } else {
+      spiderPlotRef.current?.zoomOut();
+      setInternalZoomLevel(prev => Math.max(prev / 1.15, 0.2));
+    }
+  };
+
+  const handleResetZoom = () => {
+    if (onResetZoom) {
+      onResetZoom();
+    } else {
+      spiderPlotRef.current?.resetZoom();
+      setInternalZoomLevel(1.0);
+    }
+  };
+
+  const handleToggleLabels = () => {
+    if (onToggleLabels) {
+      onToggleLabels();
+    } else {
+      spiderPlotRef.current?.toggleLabels();
+      setInternalShowLabels(prev => !prev);
+    }
+  };
+
   // Get all models from non-hidden groups for data preservation
   const allAvailableModels: ModelSnapshot[] = resnormGroups
     .filter((_, index) => !hiddenGroups.includes(index))
@@ -220,21 +294,71 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         gridSize={gridSize}
       />
 
-      {/* Spider Plot Visualization - Only show when we have computed results */}
+      {/* Spider Plot with Controls */}
       {hasComputedResults ? (
-        <div className="bg-neutral-800 rounded border border-neutral-700 h-full">
-          <div className="spider-visualization h-full w-full">
-            <BaseSpiderPlot
-              meshItems={visibleModels.filter(model => model.parameters !== undefined)}
-              referenceId={referenceModelId || undefined}
-              opacityFactor={opacityLevel}
-              gridSize={gridSize}
-              onGridValuesGenerated={onGridValuesGenerated}
-              chromaEnabled={chromaEnabled}
-              opacityIntensity={opacityIntensity}
-              selectedOpacityGroups={selectedOpacityGroups}
-              resnormGroups={resnormGroups}
-            />
+        <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex flex-col">
+          {/* Spider Plot Controls Bar */}
+          <div className="flex-shrink-0 p-2 border-b border-neutral-600 bg-neutral-750">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-400">View:</span>
+                <button
+                  onClick={handleZoomIn}
+                  className="px-2 py-1 text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
+                  title="Zoom In"
+                >
+                  +
+                </button>
+                <button
+                  onClick={handleZoomOut}
+                  className="px-2 py-1 text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
+                  title="Zoom Out"
+                >
+                  −
+                </button>
+                <button
+                  onClick={handleResetZoom}
+                  className="px-2 py-1 text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
+                  title="Reset Zoom"
+                >
+                  ⌂
+                </button>
+                <button
+                  onClick={handleToggleLabels}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    currentShowLabels 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                  }`}
+                  title="Toggle Labels"
+                >
+                  Labels
+                </button>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-neutral-400">
+                <span>Zoom: {(currentZoomLevel * 100).toFixed(0)}%</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Spider Plot Visualization */}
+          <div className="flex-1 p-2 min-h-0">
+            <div className="spider-visualization w-full h-full min-h-0 flex items-center justify-center">
+              <div className="w-full h-full max-w-full max-h-full">
+                <BaseSpiderPlot
+                  ref={spiderPlotRef}
+                  meshItems={visibleModels.filter(model => model.parameters !== undefined)}
+                  referenceId={referenceModelId || undefined}
+                  opacityFactor={opacityLevel}
+                  gridSize={gridSize}
+                  onGridValuesGenerated={onGridValuesGenerated}
+                  chromaEnabled={chromaEnabled}
+                  opacityIntensity={opacityIntensity}
+                  selectedOpacityGroups={selectedOpacityGroups}
+                  resnormGroups={resnormGroups}
+                />
+              </div>
+            </div>
           </div>
         </div>
       ) : (
@@ -297,8 +421,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Content Panel - Scrollable only if needed */}
-      <div className="p-4 flex-1 min-h-0">
+      {/* Dynamic Content Panel - Always scrollable, proper overflow handling */}
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="p-4 space-y-4"
+             style={{ scrollbarWidth: 'thin', scrollbarColor: '#4B5563 #1F2937' }}>
         {/* Show Slider Controls */}
         <div className="space-y-4">
           <div className="flex items-center justify-between">
@@ -462,6 +588,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             </div>
           )}
         </div>
+        </div>
       </div>
     </div>
   ) : (
@@ -476,8 +603,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     <div className="h-full">
       <ResizableSplitPane 
         defaultSplitHeight={35}
-        minTopHeight={250}
-        minBottomHeight={200}
+        minTopHeight={280}
+        minBottomHeight={250}
       >
         <div key="spider-plot">{spiderPlotContent}</div>
         <div key="controls">{controlsContent}</div>
