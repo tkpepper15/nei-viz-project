@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import 'katex/dist/katex.min.css';
 import { 
   BackendMeshPoint, 
@@ -14,6 +15,7 @@ import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/work
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { DataTableTab } from './circuit-simulator/DataTableTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
+import { OrchestratorTab } from './circuit-simulator/OrchestratorTab';
 
 // Import the new ToolboxComponent
 import { ToolboxComponent } from './circuit-simulator/controls/ToolboxComponent';
@@ -47,10 +49,19 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
   // Initialize hidden groups state - start with only top 25% (excellent group) visible for performance
   const [hiddenGroups, setHiddenGroups] = useState<number[]>([]); // Show all groups by default
-  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
+  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity' | 'orchestrator'>('visualizer');
   const [parameterChanged, setParameterChanged] = useState<boolean>(false);
   // Track if reference model was manually hidden
   const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
+
+  // Auto-manage toolbox visibility based on tab
+  useEffect(() => {
+    if (visualizationTab === 'visualizer') {
+      setSidebarCollapsed(false); // Open toolbox for playground
+    } else {
+      setSidebarCollapsed(true); // Close toolbox for other tabs
+    }
+  }, [visualizationTab]);
   
   // Visualization settings - these are now passed to child components but setters not used
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -850,168 +861,308 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Modify the main content area to show the correct tab content
   return (
-    <div className="h-screen bg-background text-text-primary flex flex-col overflow-hidden">
-      {/* Header - Minimal */}
-      <header className="bg-surface border-b border-neutral-700 px-6 py-3 flex items-center justify-between z-30 flex-shrink-0">
-        <div className="flex items-center gap-4">
-          {/* Left nav toggle button */}
-          <button
-            onClick={() => setLeftNavCollapsed(!leftNavCollapsed)}
-            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
-            title={leftNavCollapsed ? "Show Navigation" : "Hide Navigation"}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <h1 className="text-xl font-bold text-text-primary">SpideyPlot</h1>
-        </div>
-        
-        {/* Grid point counter, predicted count, frequency info, and refresh button */}
-        <div className="flex items-center gap-3">
-          <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-            <span className="text-text-secondary">Grid Points: </span>
-            <span className="text-text-primary font-medium">{gridResults.length}</span>
-            {gridResults.length !== Math.pow(gridSize, 5) && (
-              <>
-                <span className="text-text-secondary ml-1.5">/</span>
-                <span className="text-amber-300 font-semibold ml-1">{Math.pow(gridSize, 5).toLocaleString()}</span>
-                <span className="text-amber-500 text-[10px] ml-1 px-1 py-0.5 bg-amber-500/10 rounded">predicted</span>
-              </>
+    <div className="h-screen bg-black text-white flex overflow-hidden">
+      {/* Left Navigation Sidebar - Full Height like ChatGPT */}
+      <div 
+        className={`${leftNavCollapsed ? 'w-16' : 'w-64'} bg-neutral-900 flex flex-col transition-all duration-300 ease-in-out overflow-hidden relative group`}
+      >
+        {/* Header with logo and collapse functionality */}
+        <div className="p-4 flex-shrink-0 relative">
+          <div className={`flex items-center transition-all duration-300 ${leftNavCollapsed ? 'justify-center' : 'justify-between'}`}>
+            {/* Logo section - refresh when expanded, centered when collapsed */}
+            <button
+              onClick={() => {
+                if (!leftNavCollapsed) {
+                  window.location.reload();
+                }
+              }}
+              className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-neutral-700 transition-all duration-200"
+              title={leftNavCollapsed ? "SpideyPlot" : "Refresh page"}
+            >
+              <Image 
+                src="/spiderweb.png" 
+                alt="SpideyPlot" 
+                width={24}
+                height={24}
+                className="flex-shrink-0"
+              />
+            </button>
+            
+            {/* Collapse button - only visible when expanded */}
+            {!leftNavCollapsed && (
+              <button
+                onClick={() => setLeftNavCollapsed(true)}
+                className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-neutral-700 transition-all duration-200"
+                title="Collapse sidebar"
+              >
+                <svg 
+                  className="w-4 h-4"
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                </svg>
+              </button>
             )}
-            <span className="text-text-secondary ml-1.5">|</span>
-            <span className="text-text-secondary ml-1.5">Freq: </span>
-            <span className="text-text-primary font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
           </div>
           
-          {/* Toolbox toggle button */}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors"
-            title={sidebarCollapsed ? "Show Toolbox" : "Hide Toolbox"}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-            </svg>
-          </button>
-          
-          {/* Refresh button */}
-          <button
-            onClick={() => window.location.reload()}
-            className="p-2 rounded-md bg-neutral-700 hover:bg-neutral-600 transition-colors text-neutral-300 hover:text-white"
-            title="Refresh Page"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </button>
-        </div>
-      </header>
-      
-      {/* Main layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Navigation Tabs - Collapsible with improved animation */}
-        <div className={`${leftNavCollapsed ? 'w-0' : 'w-48'} bg-surface border-r border-neutral-700 flex flex-col transition-all duration-300 ease-in-out overflow-hidden`}>
-          {!leftNavCollapsed && (
-            <div className="flex flex-col p-2 gap-1 animate-fadeIn">
-              <button 
-                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
-                  visualizationTab === 'visualizer' 
-                    ? 'bg-accent text-white shadow-sm' 
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
-                onClick={() => setVisualizationTab('visualizer')}
+          {/* Expand button - positioned to appear over the logo when hovered */}
+          {leftNavCollapsed && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setLeftNavCollapsed(false);
+              }}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-md bg-neutral-700 hover:bg-neutral-600 transition-all duration-200 opacity-0 group-hover:opacity-100 z-10"
+              title="Expand sidebar"
+            >
+              <svg 
+                className="w-4 h-4"
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
               >
-                <div className="flex items-center gap-3">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                  <span>Visualizer</span>
-                </div>
-              </button>
-              <button 
-                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
-                  visualizationTab === 'math' 
-                    ? 'bg-accent text-white shadow-sm' 
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
-                onClick={() => setVisualizationTab('math')}
-              >
-                <div className="flex items-center gap-3">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
-                  <span>Math Details</span>
-                </div>
-              </button>
-              <button 
-                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
-                  visualizationTab === 'data' 
-                    ? 'bg-accent text-white shadow-sm' 
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
-                onClick={() => setVisualizationTab('data')}
-              >
-                <div className="flex items-center gap-3">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                  <span>Data Table</span>
-                </div>
-              </button>
-              <button 
-                className={`w-full text-left px-4 py-3 rounded-md text-sm font-medium transition-colors ${
-                  visualizationTab === 'activity' 
-                    ? 'bg-accent text-white shadow-sm' 
-                    : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
-                }`}
-                onClick={() => setVisualizationTab('activity')}
-              >
-                <div className="flex items-center gap-3">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span>Activity Log</span>
-                </div>
-              </button>
-            </div>
-          )}
-          
-          {/* Tab indicator area */}
-          {!leftNavCollapsed && (
-            <div className="flex-1 border-t border-neutral-700 mt-2 pt-2 px-2 animate-fadeIn">
-              <div className="text-xs text-text-muted px-4 py-2">
-                {visualizationTab === 'visualizer' && 'Spider plot visualization'}
-                {visualizationTab === 'math' && 'Mathematical equations'}
-                {visualizationTab === 'data' && 'Raw data analysis'}
-                {visualizationTab === 'activity' && 'Computation log'}
-              </div>
-            </div>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              </svg>
+            </button>
           )}
         </div>
 
-        {/* Main Content Area */}
-        <div className="flex-1 bg-background overflow-hidden relative flex flex-col">
-          {/* Status message bar - sticky at top */}
-          {statusMessage && (
-            <div className="flex-shrink-0 bg-blue-600 text-white px-4 py-2 text-sm border-b border-neutral-700 z-20">
-              <div className="flex items-center">
-                <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {/* Navigation content - show when expanded */}
+        <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+          {/* Navigation Tabs - Extended */}
+          <div className="p-3 space-y-1">
+            <button 
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'visualizer' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('visualizer')}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                </svg>
+                <span>Playground</span>
+              </div>
+            </button>
+            <button 
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'math' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('math')}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                <span>Model</span>
+              </div>
+            </button>
+            <button 
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'data' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('data')}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <span>Data Table</span>
+              </div>
+            </button>
+            <button 
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'activity' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('activity')}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span>Activity Log</span>
+              </div>
+            </button>
+            <button 
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'orchestrator' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('orchestrator')}
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span>Orchestrator</span>
+              </div>
+            </button>
+          </div>
+        </div>
+        
+        {/* Collapsed state icons overlay - only show when collapsed */}
+        <div className={`absolute inset-0 flex flex-col transition-all duration-300 ${leftNavCollapsed ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+          {/* Skip header area - updated for wider collapsed bar */}
+          <div className="h-20 flex-shrink-0"></div>
+          
+          {/* Vertical tab icons */}
+          <div className="flex-1 flex flex-col items-center py-2 space-y-1">
+                        <button 
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'visualizer' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('visualizer')}
+              title="Playground"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+              </svg>
+            </button>
+            <button 
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'math' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('math')}
+              title="Model"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </button>
+            <button 
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'data' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('data')}
+              title="Data Table"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </button>
+            <button 
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'activity' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('activity')}
+              title="Activity Log"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </button>
+            <button 
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'orchestrator' 
+                  ? 'bg-neutral-800 text-white' 
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => setVisualizationTab('orchestrator')}
+              title="Orchestrator"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Clean Header with integrated status */}
+        <header className="px-6 py-3 flex items-center justify-between z-30 flex-shrink-0 bg-neutral-950">
+          {/* Left side: compact status indicator */}
+          <div className="flex items-center gap-3">
+            {statusMessage && (
+              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs max-w-xs truncate flex items-center">
+                <svg className="w-3 h-3 mr-1.5 flex-shrink-0 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                {statusMessage}
+                <span className="truncate text-neutral-300">{statusMessage}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Right side: Grid point counter, frequency info, and toolbox button - Only show on visualizer tab */}
+          {visualizationTab === 'visualizer' && (
+            <div className="flex items-center gap-3">
+              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
+                <span className="text-neutral-400">Grid Points: </span>
+                <span className="text-white font-medium">{gridResults.length}</span>
+                {gridResults.length !== Math.pow(gridSize, 5) && (
+                  <>
+                    <span className="text-neutral-400 ml-1.5">/</span>
+                    <span className="text-amber-300 font-semibold ml-1">{Math.pow(gridSize, 5).toLocaleString()}</span>
+                  </>
+                )}
+                <span className="text-neutral-400 ml-1.5">|</span>
+                <span className="text-neutral-400 ml-1.5">Freq: </span>
+                <span className="text-white font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
+              </div>
+              
+              {/* Chrome-style Tab Integration */}
+              <div className="relative">
+                <button
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className={`relative px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                    !sidebarCollapsed 
+                      ? 'text-neutral-200 bg-neutral-700 border border-neutral-600 shadow-sm z-10' 
+                      : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white border border-neutral-600 shadow-sm'
+                  }`}
+                  title="Toolbox"
+                  style={{
+                    borderRadius: !sidebarCollapsed 
+                      ? '8px 8px 0px 0px' 
+                      : '8px',
+                    borderBottomColor: !sidebarCollapsed ? 'transparent' : undefined,
+                    zIndex: 10
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 512 512">
+                      <path d="M176 88l0 40 160 0 0-40c0-4.4-3.6-8-8-8L184 80c-4.4 0-8 3.6-8 8zm-48 40l0-40c0-30.9 25.1-56 56-56l144 0c30.9 0 56 25.1 56 56l0 40 28.1 0c12.7 0 24.9 5.1 33.9 14.1l51.9 51.9c9 9 14.1 21.2 14.1 33.9l0 92.1-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32L0 320l0-92.1c0-12.7 5.1-24.9 14.1-33.9l51.9-51.9c9-9 21.2-14.1 33.9-14.1l28.1 0zM0 416l0-64 128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0 0 64c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64z"/>
+                    </svg>
+                    Toolbox
+                  </div>
+                  {/* Chrome tab bottom connector when open - smoother */}
+                  {!sidebarCollapsed && (
+                    <div className="absolute -bottom-px left-0 right-0 h-px bg-neutral-800 z-20"></div>
+                  )}
+                </button>
               </div>
             </div>
           )}
-                  
-          {/* Main visualization area */}
-          <div className="flex-1 p-4 bg-background overflow-hidden">
+        </header>
+        
+        {/* Main visualization area */}
+        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 p-4 bg-neutral-950 overflow-hidden">
             {isComputingGrid ? (
-              <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md">
+              <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md">
                 <div className="flex items-center mb-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary mr-3"></div>
+                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-neutral-400 mr-3"></div>
                   <div>
-                    <p className="text-sm text-primary font-medium">
+                    <p className="text-sm text-neutral-300 font-medium">
                       {computationProgress?.type === 'GENERATION_PROGRESS' 
                         ? 'Generating grid points...' 
                         : 'Computing in parallel...'}
@@ -1029,7 +1180,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   <div className="w-full max-w-md">
                     <div className="w-full bg-neutral-700 rounded-full h-2">
                       <div 
-                        className="bg-primary h-2 rounded-full transition-all duration-300" 
+                        className="bg-neutral-400 h-2 rounded-full transition-all duration-300" 
                         style={{ width: `${computationProgress.overallProgress}%` }}
                       ></div>
                     </div>
@@ -1082,7 +1233,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   />
                 </div>
               ) : (
-                <div className="flex items-center justify-center h-32 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-4">
+                <div className="flex items-center justify-center h-32 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md p-4">
                   <div className="text-center">
                     <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -1096,20 +1247,20 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
-                <div className="flex-1 overflow-y-auto space-y-1">
+                <div className="flex-1 overflow-y-auto space-y-1 pr-4">
                   {logMessages.length === 0 ? (
                     <div className="text-neutral-400 text-sm italic px-2">No activity yet...</div>
                   ) : (
                     logMessages.map((message, index) => (
-                      <div key={index} className="text-sm font-mono text-neutral-300 px-3 py-2 hover:bg-neutral-800/50 border-l-2 border-transparent hover:border-blue-500/50 transition-colors">
+                      <div key={index} className="text-sm font-mono text-neutral-300 px-3 py-1.5 hover:bg-neutral-800/50 border-l-2 border-transparent hover:border-slate-500/50 transition-colors">
                         <span className="text-neutral-500 text-xs">[{message.time}]</span>{' '}
-                        <span className="text-neutral-200">{message.message}</span>
+                        <span className="text-neutral-200 break-words">{message.message.length > 80 ? message.message.substring(0, 80) + '...' : message.message}</span>
                       </div>
                     ))
                   )}
                 </div>
               </div>
-            ) :             visualizationTab === 'visualizer' ? (
+            ) : visualizationTab === 'visualizer' ? (
               <div className="h-full">
                 <VisualizerTab 
                   resnormGroups={resnormGroups}
@@ -1120,8 +1271,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   onGridValuesGenerated={handleGridValuesGenerated}
                 />
               </div>
+            ) : visualizationTab === 'orchestrator' ? (
+              <div className="h-full">
+                <OrchestratorTab 
+                  resnormGroups={resnormGroups}
+                />
+              </div>
             ) : (
-              <div className="flex items-center justify-center h-32 bg-neutral-100/5 border border-neutral-700 rounded-lg shadow-md p-4">
+              <div className="flex items-center justify-center h-32 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md p-4">
                 <div className="text-center">
                   <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1133,35 +1290,44 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               </div>
             )}
           </div>
-        </div>
 
-        {/* Right Toolbox Sidebar */}
-        <div className={`${sidebarCollapsed ? 'w-0' : 'w-80'} bg-surface border-l border-neutral-700 flex flex-col transition-all duration-300 ease-in-out overflow-hidden`}>
+          {/* Chrome-style Connected Toolbox Panel */}
           {!sidebarCollapsed && (
-            <div className="h-full animate-fadeIn">
-              <ToolboxComponent
-                gridSize={gridSize}
-                setGridSize={setGridSize}
-                minFreq={minFreq}
-                setMinFreq={setMinFreq}
-                maxFreq={maxFreq}
-                setMaxFreq={setMaxFreq}
-                numPoints={numPoints}
-                setNumPoints={setNumPoints}
-                updateFrequencies={updateFrequencies}
-                updateStatusMessage={updateStatusMessage}
-                parameterChanged={parameterChanged}
-                setParameterChanged={setParameterChanged}
-                handleComputeRegressionMesh={handleComputeRegressionMesh}
-                isComputingGrid={isComputingGrid}
-                gridResults={gridResults}
-                
-                groundTruthParams={groundTruthParams}
-                setGroundTruthParams={setGroundTruthParams}
-                referenceModelId={referenceModelId}
-                createReferenceModel={createReferenceModel}
-                setReferenceModel={setReferenceModel}
-              />
+            <div className="absolute top-12 right-4 z-50">
+              {/* Main toolbox panel - seamlessly connected with proper rounding */}
+              <div 
+                className="w-80 bg-neutral-700 border border-neutral-600 border-t-0 shadow-2xl overflow-hidden"
+                style={{
+                  borderRadius: '8px 8px 8px 8px'
+                }}
+              >
+                {/* Content - with improved scrolling */}
+                <div className="max-h-[calc(100vh-120px)] overflow-y-auto custom-scrollbar bg-neutral-700">
+                  <ToolboxComponent
+                    gridSize={gridSize}
+                    setGridSize={setGridSize}
+                    minFreq={minFreq}
+                    setMinFreq={setMinFreq}
+                    maxFreq={maxFreq}
+                    setMaxFreq={setMaxFreq}
+                    numPoints={numPoints}
+                    setNumPoints={setNumPoints}
+                    updateFrequencies={updateFrequencies}
+                    updateStatusMessage={updateStatusMessage}
+                    parameterChanged={parameterChanged}
+                    setParameterChanged={setParameterChanged}
+                    handleComputeRegressionMesh={handleComputeRegressionMesh}
+                    isComputingGrid={isComputingGrid}
+                    gridResults={gridResults}
+                    
+                    groundTruthParams={groundTruthParams}
+                    setGroundTruthParams={setGroundTruthParams}
+                    referenceModelId={referenceModelId}
+                    createReferenceModel={createReferenceModel}
+                    setReferenceModel={setReferenceModel}
+                  />
+                </div>
+              </div>
             </div>
           )}
         </div>

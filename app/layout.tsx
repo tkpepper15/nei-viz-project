@@ -14,8 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NEI Visualization Tool",
+  title: "SpideyPlot - NEI Visualization Tool",
   description: "Advanced visualization tool for bioimpedance circuit analysis and parameter exploration",
+  icons: {
+    icon: '/spiderweb.png',
+    shortcut: '/spiderweb.png',
+    apple: '/spiderweb.png',
+  },
 };
 
 export default function RootLayout({
