@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { CircuitParameters } from '../../circuit-simulator/types/parameters';
 import { ParamSlider } from '../ParamSlider';
-import { BackendMeshPoint, ModelSnapshot } from '../../circuit-simulator/utils/types';
+import { ModelSnapshot } from '../../circuit-simulator/utils/types';
 import { generateLogSpace } from '../../circuit-simulator/utils/parameter-space';
 
-import { SystemMonitor } from './SystemMonitor';
+import { SaveProfileModal } from './SaveProfileModal';
+import { PerformanceControls, PerformanceSettings } from './PerformanceControls';
 
 // Props interface for the ToolboxComponent
 interface ToolboxComponentProps {
@@ -23,7 +24,8 @@ interface ToolboxComponentProps {
   setParameterChanged: (changed: boolean) => void;
   handleComputeRegressionMesh: () => void;
   isComputingGrid: boolean;
-  gridResults: BackendMeshPoint[];
+  onClearResults: () => void;
+  hasGridResults: boolean;
   
   // Circuit parameters
   groundTruthParams: CircuitParameters;
@@ -32,7 +34,12 @@ interface ToolboxComponentProps {
   createReferenceModel: () => ModelSnapshot;
   setReferenceModel: (model: ModelSnapshot | null) => void;
   
-
+  // Save profile functionality
+  onSaveProfile: (name: string, description?: string) => void;
+  
+  // Performance settings
+  performanceSettings: PerformanceSettings;
+  setPerformanceSettings: (settings: PerformanceSettings) => void;
 }
 
 // CollapsibleSection component definition
@@ -94,7 +101,8 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   setParameterChanged,
   handleComputeRegressionMesh,
   isComputingGrid,
-  gridResults,
+  onClearResults,
+  hasGridResults,
   
   // Circuit parameters props
   groundTruthParams,
@@ -102,11 +110,18 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   referenceModelId,
   createReferenceModel,
   setReferenceModel,
-
+  
+  // Save profile props
+  onSaveProfile,
+  
+  // Performance settings props
+  performanceSettings,
+  setPerformanceSettings,
 }) => {
   // Local state for collapsible sections and tab management
   const [gridSettingsOpen, setGridSettingsOpen] = useState(true);
   const [circuitParamsOpen, setCircuitParamsOpen] = useState(false);
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
 
   return (
     <div className="w-full">
@@ -298,38 +313,83 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
               </div>
             </div>
 
-            <button
-              onClick={handleComputeRegressionMesh}
-              disabled={isComputingGrid}
-              className={`w-full mt-3 py-2.5 rounded-lg font-medium text-white transition-colors ${
-                isComputingGrid
-                  ? 'bg-neutral-600 cursor-not-allowed'
-                  : parameterChanged 
-                    ? 'bg-blue-600 hover:bg-blue-700' 
-                    : 'bg-blue-600 hover:bg-blue-700'
-              }`}
-            >
-              {isComputingGrid ? (
+            {/* Save/Compute Button Group */}
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => setSaveModalOpen(true)}
+                disabled={isComputingGrid}
+                className={`flex-1 py-2.5 rounded-lg font-medium text-white transition-colors ${
+                  isComputingGrid
+                    ? 'bg-neutral-600 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700'
+                }`}
+                title="Save current parameters and settings as a profile"
+              >
                 <span className="flex items-center justify-center">
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  Computing...
+                  Save Profile
                 </span>
-              ) : (parameterChanged ? 'Recompute Grid' : 'Compute Grid')}
-            </button>
+              </button>
+              
+              <button
+                onClick={handleComputeRegressionMesh}
+                disabled={isComputingGrid}
+                className={`flex-1 py-2.5 rounded-lg font-medium text-white transition-colors ${
+                  isComputingGrid
+                    ? 'bg-neutral-600 cursor-not-allowed'
+                    : parameterChanged 
+                      ? 'bg-blue-600 hover:bg-blue-700' 
+                      : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+                title="Compute grid and display results in playground"
+              >
+                {isComputingGrid ? (
+                  <span className="flex items-center justify-center">
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Computing...
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center">
+                    <svg className="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    {parameterChanged ? 'Recompute' : 'Compute'}
+                  </span>
+                )}
+              </button>
+            </div>
+            
+            {/* Clear Memory Button */}
+            {hasGridResults && (
+              <div className="mt-2">
+                <button
+                  onClick={onClearResults}
+                  disabled={isComputingGrid}
+                  className="w-full py-2 px-3 rounded-md text-red-300 border border-red-600/50 hover:bg-red-600/10 hover:border-red-500 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-all duration-200 text-xs"
+                  title="Clear grid results from memory to free up space"
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Clear Results from Memory
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         </CollapsibleSection>
 
-        {/* Enhanced Performance & System Monitor */}
-        <SystemMonitor
+        {/* Performance Controls Section */}
+        <PerformanceControls
+          settings={performanceSettings}
+          onChange={setPerformanceSettings}
           gridSize={gridSize}
-          totalGridPoints={Math.pow(gridSize, 5)}
-          computedGridPoints={gridResults.length}
-          onGridFilterChanged={(settings) => {
-            updateStatusMessage(`Grid filtering updated: ${settings.enableSmartFiltering ? `${settings.visibilityPercentage}% visible` : 'Disabled'}`);
-          }}
         />
 
         {/* Circuit Parameters Section */}
@@ -573,6 +633,17 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
           </div>
         </CollapsibleSection>
       </div>
+      
+      {/* Save Profile Modal */}
+      <SaveProfileModal
+        isOpen={saveModalOpen}
+        onClose={() => setSaveModalOpen(false)}
+        onSave={(name, description) => {
+          onSaveProfile(name, description);
+          updateStatusMessage(`Profile "${name}" saved successfully`);
+        }}
+        defaultName={`Grid ${gridSize}x${gridSize}x${gridSize}x${gridSize}x${gridSize}`}
+      />
     </div>
   );
 }; 

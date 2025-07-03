@@ -88,7 +88,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // LOWER values = MORE CONTRAST (only the very best resnorms get any opacity)
   // HIGHER values = LESS CONTRAST (more models remain visible)
   const getContextualRange = (): { min: number; max: number; dynamic: boolean } => {
-    if (selectedOpacityGroups.length === 0 || resnormGroups.length === 0) {
+    if (selectedOpacityGroups.length === 0 || !resnormGroups || resnormGroups.length === 0) {
       return { min: 1e-30, max: 10, dynamic: false };
     }
     
@@ -169,17 +169,17 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
   // Recalculate slider position when selected groups change for dynamic scaling
   useEffect(() => {
-    if (selectedOpacityGroups.length > 0 && resnormGroups.length > 0) {
+    if (selectedOpacityGroups.length > 0 && resnormGroups && resnormGroups.length > 0) {
       // Reset to high contrast when groups change to provide consistent starting point
       const highContrastSliderPos = opacityIntensityToSlider(1e-20);
       setSliderValue(highContrastSliderPos);
       setOpacityIntensity(sliderToOpacityIntensity(highContrastSliderPos));
     }
-  }, [selectedOpacityGroups, resnormGroups.length]);
+  }, [selectedOpacityGroups, resnormGroups?.length]);
 
   // Reset selected groups if they don't exist or set default (fixed infinite loop)
   useEffect(() => {
-    if (resnormGroups.length === 0) {
+    if (!resnormGroups || resnormGroups.length === 0) {
       setSelectedOpacityGroups([]);
     } else if (resnormGroups.length > 0 && selectedOpacityGroups.length === 0) {
       // Default to "Excellent" group (index 0) when groups are available but none selected
@@ -192,7 +192,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         setSelectedOpacityGroups(validGroups.length > 0 ? validGroups : [0]);
       }
     }
-  }, [resnormGroups.length]); // Only depend on resnormGroups.length to avoid infinite loop
+  }, [resnormGroups?.length]); // Only depend on resnormGroups.length to avoid infinite loop
 
   // Zoom control functions - use external handlers if provided
   const handleZoomIn = () => {
@@ -232,7 +232,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   };
 
   // Get all models from non-hidden groups for data preservation
-  const allAvailableModels: ModelSnapshot[] = resnormGroups
+  const allAvailableModels: ModelSnapshot[] = (resnormGroups || [])
     .filter((_, index) => !hiddenGroups.includes(index))
     .flatMap(group => group.items);
 
@@ -244,14 +244,14 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
     
     // Only show models from selected opacity groups (and not hidden)
-    return resnormGroups
+    return (resnormGroups || [])
       .filter((_, index) => selectedOpacityGroups.includes(index) && !hiddenGroups.includes(index))
       .flatMap(group => group.items);
   })();
 
   // Calculate resnorm statistics for distribution using iterative approach
   // Use only the selected groups' statistics if specific groups are selected
-  const relevantModels = selectedOpacityGroups.length > 0 && resnormGroups.length > 0
+  const relevantModels = selectedOpacityGroups.length > 0 && resnormGroups && resnormGroups.length > 0
     ? selectedOpacityGroups.flatMap(groupIndex => resnormGroups[groupIndex]?.items || [])
     : visibleModels;
     
@@ -276,7 +276,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   })() : null;
 
   // Check if we have actual computed results to show
-  const hasComputedResults = resnormGroups.length > 0 && allAvailableModels.length > 0;
+  const hasComputedResults = resnormGroups && resnormGroups.length > 0 && allAvailableModels.length > 0;
 
   // Split visualization content
   const spiderPlotContent = (
@@ -446,26 +446,26 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             <label className="text-xs font-medium text-neutral-300">Apply contrast to:</label>
             
             {/* Horizontal toggle buttons */}
-            {resnormGroups.length > 0 ? (
+            {resnormGroups && resnormGroups.length > 0 ? (
               <div className="flex gap-1.5 flex-wrap">
                 {/* All Groups button */}
                 <button
                   onClick={() => {
                     // Toggle all groups - if all selected, deselect all; otherwise select all
-                    if (selectedOpacityGroups.length === resnormGroups.length) {
+                    if (resnormGroups && selectedOpacityGroups.length === resnormGroups.length) {
                       setSelectedOpacityGroups([]);
-                    } else {
+                    } else if (resnormGroups) {
                       setSelectedOpacityGroups(resnormGroups.map((_, index) => index));
                     }
                   }}
                   className={`px-2.5 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
-                    selectedOpacityGroups.length === resnormGroups.length
+                    resnormGroups && selectedOpacityGroups.length === resnormGroups.length
                       ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
                       : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
                   }`}
                 >
                   <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-400 to-red-500 opacity-70" />
-                  All{selectedOpacityGroups.length === resnormGroups.length ? ' ✓' : ''}
+                  All{resnormGroups && selectedOpacityGroups.length === resnormGroups.length ? ' ✓' : ''}
                 </button>
                 
                 {/* Individual group buttons */}
@@ -560,7 +560,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             <div className="mt-6 space-y-4 p-4 bg-neutral-900 rounded-lg border border-neutral-600">
               <h4 className="text-sm font-medium text-neutral-200">
                 Distribution Analysis
-                {selectedOpacityGroups.length > 0 && selectedOpacityGroups.length < resnormGroups.length && (
+                {selectedOpacityGroups.length > 0 && resnormGroups && selectedOpacityGroups.length < resnormGroups.length && (
                                     <span className="text-xs font-normal text-neutral-400 ml-2">
                   ({selectedOpacityGroups.map(i => resnormGroups[i]?.label.split(' ')[0]).join(', ')})
                 </span>
