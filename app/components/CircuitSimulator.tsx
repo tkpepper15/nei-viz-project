@@ -21,6 +21,8 @@ import { OrchestratorTab } from './circuit-simulator/OrchestratorTab';
 import { ToolboxComponent } from './circuit-simulator/controls/ToolboxComponent';
 import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
 import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
+import { SavedProfiles } from './circuit-simulator/controls/SavedProfiles';
+import { SavedProfile, SavedProfilesState } from './circuit-simulator/types/savedProfiles';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;
@@ -109,7 +111,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [computationSummary, setComputationSummary] = useState<ComputationSummary | null>(null);
   
   // Performance settings state
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [performanceSettings, setPerformanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
   
   // Current memory usage for performance monitoring
@@ -541,6 +542,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         minFreq,
         maxFreq,
         numPoints,
+        performanceSettings,
         handleProgress,
         handleError
       );
@@ -697,6 +699,18 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         updateStatusMessage('Reference model updated');
       }
 
+      // Mark the currently selected profile as computed
+      if (savedProfilesState.selectedProfile) {
+        setSavedProfilesState(prev => ({
+          ...prev,
+          profiles: prev.profiles.map(p => 
+            p.id === savedProfilesState.selectedProfile 
+              ? { ...p, isComputed: true, lastModified: Date.now() }
+              : p
+          )
+        }));
+      }
+
       setIsComputingGrid(false);
       setComputationProgress(null);
 
@@ -708,6 +722,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setGridError(`Parallel grid computation failed: ${errorMessage}`);
       updateStatusMessage(`[ERROR] Computation failed after ${errorTime}s: ${errorMessage}`);
       updateStatusMessage(`[TIMING] Error occurred during computation phase`);
+      
+      // Clear any pending computation on error
+      setPendingComputeProfile(null);
       
       // Show error notification
       const errorSummary: ComputationSummary = {
@@ -853,11 +870,216 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     });
   }, []);
 
+  // Handler for clearing grid results from memory
+  const clearGridResults = useCallback(() => {
+    setGridResults([]);
+    setGridResultsWithIds([]);
+    setResnormGroups([]);
+    setGridParameterArrays(null);
+    setComputationSummary(null);
+    setParameterChanged(false);
+    updateStatusMessage('Grid results cleared from memory');
+  }, [updateStatusMessage]);
+
+  // Wrapper for cancel computation that also clears pending profile
+  const handleCancelComputation = useCallback(() => {
+    cancelComputation();
+    setPendingComputeProfile(null);
+    updateStatusMessage('Computation cancelled');
+  }, [cancelComputation, updateStatusMessage]);
+
+  // Handler for saving a profile
+  const handleSaveProfile = useCallback((name: string, description?: string) => {
+    // Generate timestamp and ID only when actually saving (client-side)
+    const now = Date.now();
+    const randomId = Math.random().toString(36).substr(2, 9);
+    
+    const newProfile: SavedProfile = {
+      id: `profile_${now}_${randomId}`,
+      name,
+      description,
+      created: now,
+      lastModified: now,
+      
+      // Grid computation settings
+      gridSize,
+      minFreq,
+      maxFreq,
+      numPoints,
+      
+      // Circuit parameters
+      groundTruthParams: { ...groundTruthParams },
+      
+      // Computation status
+      isComputed: false,
+    };
+
+    setSavedProfilesState(prev => ({
+      ...prev,
+      profiles: [...prev.profiles, newProfile],
+      selectedProfile: newProfile.id
+    }));
+
+    updateStatusMessage(`Profile "${name}" saved with current settings`);
+  }, [gridSize, minFreq, maxFreq, numPoints, groundTruthParams, updateStatusMessage]);
+
+
+
   // Note: Grid generation and spectrum calculation now handled by Web Workers
 
   // State for collapsible sidebar
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [leftNavCollapsed, setLeftNavCollapsed] = useState(false);
+  
+  // Saved profiles state - start with empty state to avoid hydration mismatch
+  const [savedProfilesState, setSavedProfilesState] = useState<SavedProfilesState>({
+    profiles: [],
+    selectedProfile: null
+  });
+
+  // Track if we've loaded from localStorage to avoid hydration issues
+  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+  
+  // Track profile loading for computation
+  const [pendingComputeProfile, setPendingComputeProfile] = useState<string | null>(null);
+
+  // Handler for copying profile parameters
+  const handleCopyParams = useCallback((profileId: string) => {
+    const profile = savedProfilesState.profiles.find(p => p.id === profileId);
+    if (profile) {
+      const paramsData = {
+        profileName: profile.name,
+        gridSettings: {
+          gridSize: profile.gridSize,
+          minFreq: profile.minFreq,
+          maxFreq: profile.maxFreq,
+          numPoints: profile.numPoints
+        },
+        circuitParameters: {
+          Rs: profile.groundTruthParams.Rs,
+          Ra: profile.groundTruthParams.Ra,
+          Ca: profile.groundTruthParams.Ca,
+          Rb: profile.groundTruthParams.Rb,
+          Cb: profile.groundTruthParams.Cb,
+          frequency_range: profile.groundTruthParams.frequency_range
+        }
+      };
+
+      // Copy to clipboard as formatted JSON
+      const jsonString = JSON.stringify(paramsData, null, 2);
+      
+      if (navigator.clipboard && window.isSecureContext) {
+        // Use the Clipboard API when available (HTTPS/localhost)
+        navigator.clipboard.writeText(jsonString).then(() => {
+          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
+        }).catch(() => {
+          updateStatusMessage(`Failed to copy parameters to clipboard`);
+        });
+      } else {
+        // Fallback for non-secure contexts
+        try {
+          const textArea = document.createElement('textarea');
+          textArea.value = jsonString;
+          textArea.style.position = 'fixed';
+          textArea.style.opacity = '0';
+          document.body.appendChild(textArea);
+          textArea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textArea);
+          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
+        } catch {
+          updateStatusMessage(`Failed to copy parameters to clipboard`);
+        }
+      }
+    }
+  }, [savedProfilesState.profiles, updateStatusMessage]);
+
+  // Load from localStorage after hydration
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !hasLoadedFromStorage) {
+      try {
+        const saved = localStorage.getItem('nei-viz-saved-profiles');
+        if (saved) {
+          const parsedState = JSON.parse(saved);
+          setSavedProfilesState(parsedState);
+        }
+      } catch (error) {
+        console.warn('Failed to load saved profiles from localStorage:', error);
+      }
+      setHasLoadedFromStorage(true);
+    }
+  }, [hasLoadedFromStorage]);
+
+  // Persist profiles to localStorage whenever they change (but only after initial load)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && hasLoadedFromStorage) {
+      try {
+        localStorage.setItem('nei-viz-saved-profiles', JSON.stringify(savedProfilesState));
+      } catch (error) {
+        console.warn('Failed to save profiles to localStorage:', error);
+      }
+    }
+  }, [savedProfilesState, hasLoadedFromStorage]);
+
+  // Add a sample profile on first load (only after localStorage has been loaded)
+  useEffect(() => {
+    if (hasLoadedFromStorage && savedProfilesState.profiles.length === 0 && groundTruthParams.Rs > 0) {
+      const now = Date.now();
+      const sampleProfile: SavedProfile = {
+        id: 'sample_profile_default',
+        name: 'Sample Configuration',
+        description: 'Example profile showing a typical bioimpedance measurement setup',
+        created: now,
+        lastModified: now,
+        gridSize: 5,
+        minFreq: 1,
+        maxFreq: 1000,
+        numPoints: 20,
+        groundTruthParams: {
+          Rs: 50,
+          Ra: 1000,
+          Ca: 1.0e-6,
+          Rb: 800,
+          Cb: 0.8e-6,
+          frequency_range: [1, 1000]
+        },
+        isComputed: false,
+      };
+
+      setSavedProfilesState(prev => ({
+        ...prev,
+        profiles: [sampleProfile]
+      }));
+      
+      updateStatusMessage('Welcome! A sample profile has been created to get you started.');
+    }
+  }, [hasLoadedFromStorage, groundTruthParams.Rs, savedProfilesState.profiles.length, updateStatusMessage]);
+
+  // Handle pending profile computation after parameters are loaded
+  useEffect(() => {
+    if (pendingComputeProfile && !isComputingGrid) {
+      const profile = savedProfilesState.profiles.find(p => p.id === pendingComputeProfile);
+      if (profile) {
+        // Check if parameters match the profile (indicating they've been loaded)
+        const paramsMatch = 
+          gridSize === profile.gridSize &&
+          minFreq === profile.minFreq &&
+          maxFreq === profile.maxFreq &&
+          numPoints === profile.numPoints &&
+          Math.abs(groundTruthParams.Rs - profile.groundTruthParams.Rs) < 0.1 &&
+          Math.abs(groundTruthParams.Ra - profile.groundTruthParams.Ra) < 0.1;
+        
+        if (paramsMatch) {
+          updateStatusMessage(`Starting computation for profile "${profile.name}"...`);
+          setPendingComputeProfile(null);
+          handleComputeRegressionMesh();
+        }
+      } else {
+        // Profile not found, clear pending
+        setPendingComputeProfile(null);
+      }
+    }
+  }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, groundTruthParams.Rs, groundTruthParams.Ra, handleComputeRegressionMesh, updateStatusMessage]);
 
   // Modify the main content area to show the correct tab content
   return (
@@ -930,9 +1152,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         </div>
 
         {/* Navigation content - show when expanded */}
-        <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'} flex flex-col`}>
           {/* Navigation Tabs - Extended */}
-          <div className="p-3 space-y-1">
+          <div className="p-3 space-y-1 flex-shrink-0">
             <button 
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
                 visualizationTab === 'visualizer' 
@@ -1009,6 +1231,100 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               </div>
             </button>
           </div>
+          
+          {/* Saved Profiles Section - ChatGPT style */}
+          {hasLoadedFromStorage && (
+            <SavedProfiles
+              profiles={savedProfilesState.profiles}
+              selectedProfile={savedProfilesState.selectedProfile}
+              onCopyParams={handleCopyParams}
+            onSelectProfile={(profileId) => {
+              // Clear any pending computation
+              setPendingComputeProfile(null);
+              
+              // Clear existing grid results when switching profiles
+              clearGridResults();
+              
+              // Mark all profiles as not computed since we cleared the results
+              setSavedProfilesState(prev => ({
+                ...prev,
+                selectedProfile: profileId,
+                profiles: prev.profiles.map(p => ({ ...p, isComputed: false }))
+              }));
+              
+              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
+              if (profile) {
+                // Load profile settings into current state
+                setGridSize(profile.gridSize);
+                setMinFreq(profile.minFreq);
+                setMaxFreq(profile.maxFreq);
+                setNumPoints(profile.numPoints);
+                setGroundTruthParams(profile.groundTruthParams);
+                
+                // Update frequencies based on loaded settings
+                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                
+                // Mark parameters as changed to enable recompute
+                setParameterChanged(true);
+                
+                updateStatusMessage(`Loaded profile: ${profile.name} - Previous grid data cleared, ready to compute`);
+              }
+            }}
+            onDeleteProfile={(profileId) => {
+              // Clear grid results if we're deleting the currently selected profile
+              const wasSelected = savedProfilesState.selectedProfile === profileId;
+              if (wasSelected) {
+                clearGridResults();
+              }
+              
+              setSavedProfilesState(prev => ({
+                ...prev,
+                profiles: prev.profiles.filter(p => p.id !== profileId),
+                selectedProfile: prev.selectedProfile === profileId ? null : prev.selectedProfile
+              }));
+              
+              updateStatusMessage(wasSelected ? 'Profile deleted and grid data cleared' : 'Profile deleted');
+            }}
+            onEditProfile={(profileId, name, description) => {
+              const now = Date.now();
+              setSavedProfilesState(prev => ({
+                ...prev,
+                profiles: prev.profiles.map(p => 
+                  p.id === profileId 
+                    ? { ...p, name, description, lastModified: now }
+                    : p
+                )
+              }));
+              updateStatusMessage(`Profile "${name}" updated`);
+            }}
+            onComputeProfile={(profileId) => {
+              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
+              if (profile) {
+                // Clear existing grid results first
+                clearGridResults();
+                
+                // Load profile settings
+                setGridSize(profile.gridSize);
+                setMinFreq(profile.minFreq);
+                setMaxFreq(profile.maxFreq);
+                setNumPoints(profile.numPoints);
+                setGroundTruthParams(profile.groundTruthParams);
+                
+                // Update frequencies
+                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                
+                // Select this profile
+                setSavedProfilesState(prev => ({ ...prev, selectedProfile: profileId }));
+                
+                // Set pending computation - useEffect will handle when parameters are loaded
+                setPendingComputeProfile(profileId);
+                
+                updateStatusMessage(`Loading profile "${profile.name}" parameters...`);
+              }
+            }}
+            isCollapsed={leftNavCollapsed}
+          />
+          )}
         </div>
         
         {/* Collapsed state icons overlay - only show when collapsed */}
@@ -1189,7 +1505,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 
                 {/* Cancel button */}
                 <button
-                  onClick={cancelComputation}
+                  onClick={handleCancelComputation}
                   className="mt-4 px-4 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
                 >
                   Cancel Computation
@@ -1275,6 +1591,50 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               <div className="h-full">
                 <OrchestratorTab 
                   resnormGroups={resnormGroups}
+                  savedProfiles={savedProfilesState.profiles}
+                  onComputeProfiles={async (profileIds: string[]) => {
+                    // Note: For batch computation, we process one at a time sequentially
+                    // The OrchestratorTab handles the async iteration and progress tracking
+                    for (const profileId of profileIds) {
+                      const profile = savedProfilesState.profiles.find(p => p.id === profileId);
+                      if (profile) {
+                        // Clear existing grid results
+                        clearGridResults();
+                        
+                        // Load profile settings
+                        setGridSize(profile.gridSize);
+                        setMinFreq(profile.minFreq);
+                        setMaxFreq(profile.maxFreq);
+                        setNumPoints(profile.numPoints);
+                        setGroundTruthParams(profile.groundTruthParams);
+                        
+                        // Update frequencies
+                        updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                        
+                        // Select this profile
+                        setSavedProfilesState(prev => ({ ...prev, selectedProfile: profileId }));
+                        
+                        updateStatusMessage(`Computing profile "${profile.name}"...`);
+                        
+                        // Wait for parameters to be applied, then compute
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                        await handleComputeRegressionMesh();
+                        
+                        // Mark profile as computed
+                        const now = Date.now();
+                        setSavedProfilesState(prev => ({
+                          ...prev,
+                          profiles: prev.profiles.map(p => 
+                            p.id === profileId 
+                              ? { ...p, isComputed: true, lastModified: now }
+                              : p
+                          )
+                        }));
+                        
+                        updateStatusMessage(`Profile "${profile.name}" computed successfully`);
+                      }
+                    }
+                  }}
                 />
               </div>
             ) : (
@@ -1318,13 +1678,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     setParameterChanged={setParameterChanged}
                     handleComputeRegressionMesh={handleComputeRegressionMesh}
                     isComputingGrid={isComputingGrid}
-                    gridResults={gridResults}
+                    onClearResults={clearGridResults}
+                    hasGridResults={gridResults.length > 0}
                     
                     groundTruthParams={groundTruthParams}
                     setGroundTruthParams={setGroundTruthParams}
                     referenceModelId={referenceModelId}
                     createReferenceModel={createReferenceModel}
                     setReferenceModel={setReferenceModel}
+                    onSaveProfile={handleSaveProfile}
+                    performanceSettings={performanceSettings}
+                    setPerformanceSettings={setPerformanceSettings}
                   />
                 </div>
               </div>

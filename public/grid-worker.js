@@ -223,7 +223,7 @@ self.onmessage = function(e) {
       }
       
       case 'GENERATE_GRID_POINTS': {
-        const { gridSize } = data;
+        const { gridSize, useSymmetricGrid } = data;
         
         // Safety check for grid size to prevent memory issues
         if (gridSize > 25) {
@@ -244,6 +244,13 @@ self.onmessage = function(e) {
         
         // Generate all combinations using iterative approach to avoid stack overflow
         const gridPoints = [];
+        let generatedCount = 0;
+        let estimatedTotal = totalPoints;
+        
+        // If using symmetric grid, estimate roughly half the points
+        if (useSymmetricGrid) {
+          estimatedTotal = Math.floor(totalPoints / 2);
+        }
         
         // Use iterative approach instead of nested loops
         for (let pointIndex = 0; pointIndex < totalPoints; pointIndex++) {
@@ -258,22 +265,50 @@ self.onmessage = function(e) {
           const raIndex = temp % gridSize;
           const rsIndex = Math.floor(temp / gridSize);
           
+          const Rs = rsValues[rsIndex];
+          const Ra = raValues[raIndex];
+          const Ca = caValues[caIndex];
+          const Rb = rbValues[rbIndex];
+          const Cb = cbValues[cbIndex];
+          
+          // Symmetric grid optimization: skip duplicates where Ra/Ca > Rb/Cb
+          if (useSymmetricGrid) {
+            // Calculate time constants tau = RC for comparison
+            const tauA = Ra * Ca;
+            const tauB = Rb * Cb;
+            
+            // Skip this combination if tauA > tauB (we'll get the equivalent from the swapped version)
+            // This enforces tauA <= tauB to avoid duplicates
+            if (tauA > tauB) {
+              continue;
+            }
+            
+            // If time constants are equal, enforce Ra <= Rb to break ties
+            if (Math.abs(tauA - tauB) < 1e-15 && Ra > Rb) {
+              continue;
+            }
+          }
+          
           // Generate point from indices
           gridPoints.push({
-            Rs: rsValues[rsIndex],
-            Ra: raValues[raIndex],
-            Ca: caValues[caIndex],
-            Rb: rbValues[rbIndex],
-            Cb: cbValues[cbIndex]
+            Rs,
+            Ra,
+            Ca,
+            Rb,
+            Cb
           });
           
+          generatedCount++;
+          
           // Report progress for large grids
-          if ((pointIndex + 1) % 10000 === 0 || pointIndex === totalPoints - 1) {
+          if (generatedCount % 10000 === 0 || pointIndex === totalPoints - 1) {
             self.postMessage({
               type: 'GENERATION_PROGRESS',
               data: {
-                generated: pointIndex + 1,
-                total: totalPoints
+                generated: generatedCount,
+                total: estimatedTotal,
+                processed: pointIndex + 1,
+                skipped: pointIndex + 1 - generatedCount
               }
             });
           }

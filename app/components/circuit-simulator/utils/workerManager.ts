@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import { BackendMeshPoint } from '../types';
 import { CircuitParameters } from '../types/parameters';
+import { PerformanceSettings } from '../controls/PerformanceControls';
 
 export interface WorkerProgress {
   type: 'CHUNK_PROGRESS' | 'GENERATION_PROGRESS';
@@ -33,6 +34,7 @@ export interface UseWorkerManagerReturn {
     minFreq: number,
     maxFreq: number,
     numPoints: number,
+    performanceSettings: PerformanceSettings,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void
   ) => Promise<BackendMeshPoint[]>;
@@ -133,6 +135,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     minFreq: number,
     maxFreq: number,
     numPoints: number,
+    performanceSettings: PerformanceSettings,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void
   ): Promise<BackendMeshPoint[]> => {
@@ -216,7 +219,10 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
         gridWorker.postMessage({
           type: 'GENERATE_GRID_POINTS',
-          data: { gridSize }
+          data: { 
+            gridSize,
+            useSymmetricGrid: performanceSettings.useSymmetricGrid 
+          }
         });
       });
 
