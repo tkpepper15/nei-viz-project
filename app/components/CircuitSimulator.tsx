@@ -942,6 +942,60 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // Track profile loading for computation
   const [pendingComputeProfile, setPendingComputeProfile] = useState<string | null>(null);
+  
+  // Helper function to generate mesh data for a profile without computing full grid
+  const generateProfileMeshData = useCallback((profile: SavedProfile, sampleSize: number = 1000): ModelSnapshot[] => {
+    const meshData: ModelSnapshot[] = [];
+    
+    // Generate sample points around the profile's ground truth parameters
+    for (let i = 0; i < sampleSize; i++) {
+      // Add some variation around the ground truth parameters
+      const variation = 0.1; // 10% variation
+      
+      const generateVariation = (value: number, isLog: boolean) => {
+        if (isLog) {
+          const logValue = Math.log10(value);
+          const logVariation = variation * (Math.random() - 0.5);
+          return Math.pow(10, logValue + logVariation);
+        } else {
+          return value * (1 + variation * (Math.random() - 0.5));
+        }
+      };
+      
+      const parameters = {
+        Rs: generateVariation(profile.groundTruthParams.Rs, true),
+        Ra: generateVariation(profile.groundTruthParams.Ra, true),
+        Rb: generateVariation(profile.groundTruthParams.Rb, true),
+        Ca: generateVariation(profile.groundTruthParams.Ca, true),
+        Cb: generateVariation(profile.groundTruthParams.Cb, true),
+        frequency_range: profile.groundTruthParams.frequency_range
+      };
+      
+      // Calculate a simple resnorm based on distance from ground truth
+      const resnorm = Math.sqrt(
+        Math.pow(Math.log10(parameters.Rs / profile.groundTruthParams.Rs), 2) +
+        Math.pow(Math.log10(parameters.Ra / profile.groundTruthParams.Ra), 2) +
+        Math.pow(Math.log10(parameters.Rb / profile.groundTruthParams.Rb), 2) +
+        Math.pow(Math.log10(parameters.Ca / profile.groundTruthParams.Ca), 2) +
+        Math.pow(Math.log10(parameters.Cb / profile.groundTruthParams.Cb), 2)
+      );
+      
+      meshData.push({
+        id: `profile_${profile.id}_sample_${i}`,
+        name: `${profile.name} Sample ${i}`,
+        parameters,
+        data: [], // Empty data for image generation
+        color: resnorm < 0.1 ? '#059669' : resnorm < 0.2 ? '#10B981' : resnorm < 0.3 ? '#F59E0B' : '#DC2626',
+        isVisible: true,
+        opacity: 0.7,
+        resnorm,
+        timestamp: Date.now(),
+        ter: parameters.Ra + parameters.Rb
+      });
+    }
+    
+    return meshData;
+  }, []);
 
   // Handler for copying profile parameters
   const handleCopyParams = useCallback((profileId: string) => {
@@ -1592,49 +1646,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <OrchestratorTab 
                   resnormGroups={resnormGroups}
                   savedProfiles={savedProfilesState.profiles}
-                  onComputeProfiles={async (profileIds: string[]) => {
-                    // Note: For batch computation, we process one at a time sequentially
-                    // The OrchestratorTab handles the async iteration and progress tracking
-                    for (const profileId of profileIds) {
-                      const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-                      if (profile) {
-                        // Clear existing grid results
-                        clearGridResults();
-                        
-                        // Load profile settings
-                        setGridSize(profile.gridSize);
-                        setMinFreq(profile.minFreq);
-                        setMaxFreq(profile.maxFreq);
-                        setNumPoints(profile.numPoints);
-                        setGroundTruthParams(profile.groundTruthParams);
-                        
-                        // Update frequencies
-                        updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
-                        
-                        // Select this profile
-                        setSavedProfilesState(prev => ({ ...prev, selectedProfile: profileId }));
-                        
-                        updateStatusMessage(`Computing profile "${profile.name}"...`);
-                        
-                        // Wait for parameters to be applied, then compute
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                        await handleComputeRegressionMesh();
-                        
-                        // Mark profile as computed
-                        const now = Date.now();
-                        setSavedProfilesState(prev => ({
-                          ...prev,
-                          profiles: prev.profiles.map(p => 
-                            p.id === profileId 
-                              ? { ...p, isComputed: true, lastModified: now }
-                              : p
-                          )
-                        }));
-                        
-                        updateStatusMessage(`Profile "${profile.name}" computed successfully`);
-                      }
-                    }
-                  }}
+                  generateProfileMeshData={generateProfileMeshData}
                 />
               </div>
             ) : (

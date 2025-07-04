@@ -15,6 +15,21 @@ export interface PerformanceSettings {
   autoQualityAdjustment: boolean;
   enableDetailedLogging: boolean;
   enableProgressiveRendering: boolean; // Render results as they come in
+  
+  // Memory and performance limits
+  maxMemoryMB: number;
+  chunkSize: number;
+  maxPolygons: number;
+  maxRenderTimeMs: number;
+  preRenderMemoryCheck: boolean;
+  canvasWidth: number;
+  canvasHeight: number;
+  gcFrequency: number;
+  memoryWarningThreshold: number;
+  memoryEmergencyThreshold: number;
+  midChunkMemoryChecks: boolean;
+  memoryCheckFrequency: number;
+  yieldTimeMs: number;
 }
 
 const createOptimizedDefaults = (): PerformanceSettings => {
@@ -28,6 +43,21 @@ const createOptimizedDefaults = (): PerformanceSettings => {
     autoQualityAdjustment: true,
     enableDetailedLogging: false,
     enableProgressiveRendering: true, // Show results as they compute
+    
+    // Memory and performance limits - default values
+    maxMemoryMB: 512,
+    chunkSize: 1000,
+    maxPolygons: 10000,
+    maxRenderTimeMs: 5000,
+    preRenderMemoryCheck: true,
+    canvasWidth: 800,
+    canvasHeight: 600,
+    gcFrequency: 100,
+    memoryWarningThreshold: 400,
+    memoryEmergencyThreshold: 480,
+    midChunkMemoryChecks: true,
+    memoryCheckFrequency: 50,
+    yieldTimeMs: 16,
   };
 };
 
