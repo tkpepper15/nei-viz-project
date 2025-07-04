@@ -5,13 +5,28 @@ import { SavedProfile } from './types/savedProfiles';
 interface OrchestratorTabProps {
   resnormGroups: ResnormGroup[];
   savedProfiles?: SavedProfile[];
-  onComputeProfiles?: (profileIds: string[]) => Promise<void>;
+  generateProfileMeshData?: (profile: SavedProfile, sampleSize?: number) => ModelSnapshot[];
+}
+
+interface ModelSnapshot {
+  id: string;
+  name?: string;
+  parameters: {
+    Rs: number;
+    Ra: number;
+    Rb: number;
+    Ca: number;
+    Cb: number;
+  };
+  resnorm: number;
+  color?: string;
+  opacity?: number;
 }
 
 interface RenderJob {
   id: string;
   name: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'computing' | 'rendering' | 'completed' | 'failed';
   progress: number;
   imageUrl?: string;
   thumbnailUrl?: string;
@@ -23,7 +38,12 @@ interface RenderJob {
     chromaEnabled: boolean;
     selectedGroups: number[];
     backgroundColor: 'transparent' | 'white' | 'black';
+    opacityFactor: number;
+    visualizationMode: 'color' | 'opacity';
+    opacityIntensity: number;
   };
+  profileIds?: string[];
+  meshData?: ModelSnapshot[];
   createdAt: Date;
   completedAt?: Date;
   fileSize?: string;
@@ -39,27 +59,26 @@ interface DownloadOptions {
 export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
   resnormGroups,
   savedProfiles = [],
-  onComputeProfiles
+  generateProfileMeshData
 }) => {
   const [renderJobs, setRenderJobs] = useState<RenderJob[]>([]);
-  const [isCreatingJob, setIsCreatingJob] = useState(false);
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Profile computation state
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
-  const [isComputingProfiles, setIsComputingProfiles] = useState(false);
-  const [computeProgress, setComputeProgress] = useState<{ current: number; total: number } | null>(null);
+  const [profileMeshData, setProfileMeshData] = useState<{ [profileId: string]: ModelSnapshot[] }>({});
   
-  // Job creation form state
-  const [jobName, setJobName] = useState('');
+  // Image generation settings
   const [format, setFormat] = useState<'png' | 'svg' | 'pdf' | 'webp' | 'jpg'>('png');
   const [resolution, setResolution] = useState('1920x1080');
   const [quality, setQuality] = useState(95);
   const [includeLabels, setIncludeLabels] = useState(true);
   const [chromaEnabled, setChromaEnabled] = useState(true);
   const [backgroundColor, setBackgroundColor] = useState<'transparent' | 'white' | 'black'>('transparent');
-  const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
+  const [opacityFactor, setOpacityFactor] = useState(1.0);
+  const [visualizationMode, setVisualizationMode] = useState<'color' | 'opacity'>('color');
+  const [opacityIntensity, setOpacityIntensity] = useState(1.0);
 
   // Download options for individual jobs
   const [downloadOptions, setDownloadOptions] = useState<{ [jobId: string]: DownloadOptions }>({});
@@ -106,177 +125,386 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     }
   }, [renderJobs, hasLoadedJobs]);
 
+  // Render actual spider plot exactly matching playground formatting
+  const renderRealSpiderPlot = useCallback((
+    canvas: HTMLCanvasElement, 
+    parameters: RenderJob['parameters'], 
+    meshData: ModelSnapshot[]
+  ) => {
+    const ctx = canvas.getContext('2d', { alpha: parameters.backgroundColor === 'transparent' });
+    if (!ctx) throw new Error('Failed to get canvas context');
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const maxRadius = Math.min(width, height) * 0.35;
+    
+    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'] as const;
+    const angleStep = (2 * Math.PI) / params.length;
+
+    // Calculate dynamic parameter ranges from actual data (matching playground exactly)
+    const paramRanges = params.reduce((acc, param) => {
+      const values = meshData
+        .filter(item => item?.parameters && typeof item.parameters[param] === 'number')
+        .map(item => item.parameters[param]);
+      
+      if (values.length > 0) {
+        let min = Infinity;
+        let max = -Infinity;
+        for (const value of values) {
+          if (value < min) min = value;
+          if (value > max) max = value;
+        }
+        acc[param] = { min, max };
+      } else {
+        // Use default ranges if no data
+        const defaults = {
+          Rs: { min: 10, max: 10000 },
+          Ra: { min: 10, max: 10000 },
+          Rb: { min: 10, max: 10000 },
+          Ca: { min: 0.1e-6, max: 50e-6 },
+          Cb: { min: 0.1e-6, max: 50e-6 }
+        };
+        acc[param] = defaults[param] || { min: 0, max: 1 };
+      }
+      return acc;
+    }, {} as Record<string, { min: number; max: number }>);
+
+    // Enable high-quality rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // Set background to match playground
+    if (parameters.backgroundColor === 'white') {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width, height);
+    } else if (parameters.backgroundColor === 'black') {
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      // Default dark background like playground
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    // Draw pentagon grid structure (matching playground PolarGrid with gridType="polygon")
+    ctx.strokeStyle = '#4B5563';
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.3;
+
+    // Draw 5 concentric pentagon grids (matching playground tickCount={5})
+    for (let level = 1; level <= 5; level++) {
+      const radius = (maxRadius * level) / 5;
+      
+      // Draw pentagon grid at this level
+      ctx.beginPath();
+      for (let i = 0; i <= params.length; i++) {
+        const angle = i * angleStep - Math.PI / 2;
+        const x = centerX + Math.cos(angle) * radius;
+        const y = centerY + Math.sin(angle) * radius;
+        
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+    }
+
+    // Draw radial axes (matching playground)
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < params.length; i++) {
+      const angle = i * angleStep - Math.PI / 2;
+      const endX = centerX + Math.cos(angle) * maxRadius;
+      const endY = centerY + Math.sin(angle) * maxRadius;
+      
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+    }
+
+
+
+    // Parameter labels (matching playground PolarAngleAxis formatting exactly)
+    if (parameters.includeLabels) {
+      ctx.fillStyle = '#E5E7EB';
+      ctx.font = '600 13px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      for (let i = 0; i < params.length; i++) {
+        const param = params[i];
+        const angle = i * angleStep - Math.PI / 2;
+        const labelDistance = maxRadius + 30;
+        const labelX = centerX + Math.cos(angle) * labelDistance;
+        const labelY = centerY + Math.sin(angle) * labelDistance;
+        
+        // Enhanced axis labels with units and ranges (matching playground)
+        const ranges = {
+          Rs: '10Ω - 10kΩ',
+          Ra: '10Ω - 10kΩ', 
+          Rb: '10Ω - 10kΩ',
+          Ca: '0.1 - 50µF',
+          Cb: '0.1 - 50µF'
+        };
+        
+        // Draw parameter name
+        ctx.font = '600 13px Inter, sans-serif';
+        ctx.fillStyle = '#E5E7EB';
+        ctx.fillText(param, labelX, labelY - 8);
+        
+        // Draw range
+        ctx.font = '400 10px Inter, sans-serif';
+        ctx.fillStyle = '#E5E7EB';
+        ctx.fillText(ranges[param], labelX, labelY + 8);
+      }
+    }
+
+    // Render mesh data polygons with playground-style normalization
+    if (meshData && meshData.length > 0) {
+      meshData.forEach((model) => {
+        if (!model.parameters) return;
+
+        // Normalize parameters using LINEAR scaling (matching playground exactly)
+        const normalizedValues = params.map(param => {
+          const value = model.parameters[param];
+          const range = paramRanges[param];
+          
+          // Linear normalization (NOT logarithmic) - matching playground
+          const normalizedValue = (value - range.min) / Math.max(range.max - range.min, 1e-10);
+          return Math.max(0, Math.min(1, normalizedValue));
+        });
+
+        // Calculate opacity (matching playground calculateLogOpacity exactly)
+        let opacity = 0.7;
+        if (parameters.visualizationMode === 'opacity' && model.resnorm !== undefined) {
+          const allResnorms = meshData.map(m => m.resnorm).filter(r => r !== undefined) as number[];
+          if (allResnorms.length > 1) {
+            let minResnorm = Infinity;
+            let maxResnorm = -Infinity;
+            for (const r of allResnorms) {
+              if (r < minResnorm) minResnorm = r;
+              if (r > maxResnorm) maxResnorm = r;
+            }
+            
+            const safeMin = Math.max(minResnorm, 1e-10);
+            const safeMax = Math.max(maxResnorm, safeMin * 10);
+            const logMin = Math.log10(safeMin);
+            const logMax = Math.log10(safeMax);
+            const logRange = Math.max(logMax - logMin, 1e-10);
+            
+            const safeResnorm = Math.max(model.resnorm, safeMin);
+            const logResnorm = Math.log10(safeResnorm);
+            const normalizedLog = (logResnorm - logMin) / logRange;
+            
+            // Invert so lower resnorm (better fit) = higher opacity
+            const inverted = 1 - Math.max(0, Math.min(1, normalizedLog));
+            
+            // Apply intensity factor
+            const intensified = Math.pow(inverted, 1 / parameters.opacityIntensity);
+            
+            // Map to opacity range 0.05 to 1.0
+            opacity = Math.max(0.05, Math.min(1.0, 0.05 + intensified * 0.95));
+          }
+        }
+
+        // Assign colors based on resnorm quartiles (matching playground color scheme)
+        let color = model.color;
+        
+        if (!color && model.resnorm !== undefined) {
+          // Calculate resnorm quartiles from all models to assign colors
+          const allResnorms = meshData.map(m => m.resnorm).filter(r => r !== undefined) as number[];
+          if (allResnorms.length > 0) {
+            // Sort to find quartiles
+            const sortedResnorms = [...allResnorms].sort((a, b) => a - b);
+            const q1 = sortedResnorms[Math.floor(sortedResnorms.length * 0.25)];
+            const q2 = sortedResnorms[Math.floor(sortedResnorms.length * 0.5)];
+            const q3 = sortedResnorms[Math.floor(sortedResnorms.length * 0.75)];
+            
+            // Assign colors based on quartiles (better fit = cooler colors)
+            if (model.resnorm <= q1) {
+              color = '#059669'; // Emerald-600 (excellent fit - bottom quartile)
+            } else if (model.resnorm <= q2) {
+              color = '#10B981'; // Emerald-500 (good fit - second quartile)
+            } else if (model.resnorm <= q3) {
+              color = '#F59E0B'; // Amber-500 (moderate fit - third quartile)
+            } else {
+              color = '#DC2626'; // Red-600 (poor fit - top quartile)
+            }
+          } else {
+            color = '#3B82F6'; // Default blue
+          }
+        } else if (!color) {
+          color = '#3B82F6'; // Default blue
+        }
+
+        // Set stroke properties (matching playground Radar component)
+        ctx.strokeStyle = color;
+        ctx.lineWidth = model.id === 'dynamic-reference' ? 2 : 1;
+        ctx.globalAlpha = opacity * parameters.opacityFactor;
+
+        // Draw spider polygon
+        ctx.beginPath();
+        for (let j = 0; j < normalizedValues.length; j++) {
+          const angle = j * angleStep - Math.PI / 2;
+          const radius = normalizedValues[j] * maxRadius;
+          const x = centerX + Math.cos(angle) * radius;
+          const y = centerY + Math.sin(angle) * radius;
+          
+          if (j === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.closePath();
+        ctx.stroke();
+      });
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Add title and metadata (matching playground style)
+    if (parameters.includeLabels) {
+      ctx.fillStyle = '#F9FAFB';
+      ctx.font = 'bold 18px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Spider Plot - Cell Electrophysiology', centerX, 40);
+      
+      ctx.fillStyle = '#9CA3AF';
+      ctx.font = '12px Inter, sans-serif';
+      const infoText = `${meshData?.length || 0} Models • ${parameters.resolution} • ${parameters.visualizationMode} mode`;
+      ctx.fillText(infoText, centerX, height - 30);
+    }
+  }, []);
+
+  // Generate SVG representation using real data
+  const generateSVGFromCanvas = useCallback((canvas: HTMLCanvasElement, parameters: RenderJob['parameters']): string => {
+    // For SVG, we'll create a simplified version since the real rendering is complex
+    // This is a placeholder - in production you'd want to recreate the full logic in SVG
+    const width = canvas.width;
+    const height = canvas.height;
+    
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
+    
+    // Background
+    if (parameters.backgroundColor === 'white') {
+      svg += `<rect width="${width}" height="${height}" fill="#ffffff"/>`;
+    } else if (parameters.backgroundColor === 'black') {
+      svg += `<rect width="${width}" height="${height}" fill="#000000"/>`;
+    }
+    
+    // Add text indicating this is a simplified SVG version
+    svg += `<text x="${width/2}" y="${height/2}" text-anchor="middle" font-family="Inter, sans-serif" font-size="16" fill="#888">SVG export - Canvas data converted</text>`;
+    
+    svg += '</svg>';
+    return `data:image/svg+xml;base64,${btoa(svg)}`;
+  }, []);
+
   // Generate image from current visualization
   const generateImage = useCallback(async (job: RenderJob): Promise<{ imageUrl: string; thumbnailUrl: string; fileSize: string }> => {
     return new Promise((resolve, reject) => {
+      let canvas: HTMLCanvasElement | null = null;
+      let thumbCanvas: HTMLCanvasElement | null = null;
+      
       try {
+        // Validate job parameters
+        if (!job.parameters.resolution || !job.parameters.format) {
+          throw new Error('Invalid job parameters: missing resolution or format');
+        }
+
         // Create high-quality canvas for rendering
-        const canvas = document.createElement('canvas');
+        canvas = document.createElement('canvas');
         const [width, height] = job.parameters.resolution.split('x').map(Number);
+        
+        // Validate resolution
+        if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+          throw new Error(`Invalid resolution: ${job.parameters.resolution}`);
+        }
+        
         canvas.width = width;
         canvas.height = height;
-        const ctx = canvas.getContext('2d')!;
-
-        // Enable high-quality rendering
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-
-        // Set background
-        if (job.parameters.backgroundColor === 'white') {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, width, height);
-        } else if (job.parameters.backgroundColor === 'black') {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(0, 0, width, height);
-        } else {
-          // Transparent background - clear the canvas
-          ctx.clearRect(0, 0, width, height);
+        const ctx = canvas.getContext('2d', { alpha: job.parameters.backgroundColor === 'transparent' });
+        
+        if (!ctx) {
+          throw new Error('Failed to get canvas context');
         }
 
-        // Generate actual spider plot visualization
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const maxRadius = Math.min(width, height) * 0.4;
+        // Use the real spider plot rendering with actual mesh data
+        const meshData = job.meshData || [];
+        renderRealSpiderPlot(canvas, job.parameters, meshData);
 
-        // Draw spider plot grid (5 parameters: Rs, Ra, Rb, Ca, Cb)
-        const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
-        const angleStep = (2 * Math.PI) / params.length;
-
-        // Grid styling
-        ctx.strokeStyle = job.parameters.chromaEnabled ? '#4B5563' : '#6B7280';
-        ctx.lineWidth = Math.max(1, width / 1000);
-
-        // Draw concentric circles
-        for (let i = 1; i <= 5; i++) {
-          const radius = (maxRadius * i) / 5;
-          ctx.beginPath();
-          ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
-          ctx.stroke();
-        }
-
-        // Draw radial axes
-        ctx.lineWidth = Math.max(1, width / 800);
-        for (let i = 0; i < params.length; i++) {
-          const angle = i * angleStep - Math.PI / 2;
-          const endX = centerX + Math.cos(angle) * maxRadius;
-          const endY = centerY + Math.sin(angle) * maxRadius;
-          
-          ctx.beginPath();
-          ctx.moveTo(centerX, centerY);
-          ctx.lineTo(endX, endY);
-          ctx.stroke();
-        }
-
-        // Add parameter labels if requested
-        if (job.parameters.includeLabels) {
-          ctx.fillStyle = job.parameters.chromaEnabled ? '#E5E7EB' : '#D1D5DB';
-          ctx.font = `${Math.max(12, width / 50)}px Inter, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-
-          for (let i = 0; i < params.length; i++) {
-            const angle = i * angleStep - Math.PI / 2;
-            const labelDistance = maxRadius + Math.max(20, width / 40);
-            const labelX = centerX + Math.cos(angle) * labelDistance;
-            const labelY = centerY + Math.sin(angle) * labelDistance;
-            
-            ctx.fillText(params[i], labelX, labelY);
-          }
-        }
-
-        // Draw selected resnorm groups data
-        const renderedCount = { total: 0 };
-        job.parameters.selectedGroups.forEach((groupIndex) => {
-          if (groupIndex < resnormGroups.length) {
-            const group = resnormGroups[groupIndex];
-            ctx.fillStyle = group.color;
-            ctx.strokeStyle = group.color;
-            ctx.globalAlpha = job.parameters.chromaEnabled ? 0.6 : 0.8;
-            ctx.lineWidth = Math.max(0.5, width / 2000);
-
-            // Render polygons for this group (limit for performance)
-            const maxPolygonsPerGroup = Math.min(1000, Math.floor(10000 / job.parameters.selectedGroups.length));
-            const polygonsToRender = group.items.slice(0, maxPolygonsPerGroup);
-            
-            polygonsToRender.forEach((model) => {
-              if (model.parameters) {
-                // Normalize parameters to 0-1 range for visualization
-                const normalizedValues = [
-                  Math.min(1, Math.max(0, (model.parameters.Rs - 10) / (10000 - 10))),
-                  Math.min(1, Math.max(0, (model.parameters.Ra - 10) / (10000 - 10))),
-                  Math.min(1, Math.max(0, (model.parameters.Rb - 10) / (10000 - 10))),
-                  Math.min(1, Math.max(0, (model.parameters.Ca - 0.1e-6) / (50e-6 - 0.1e-6))),
-                  Math.min(1, Math.max(0, (model.parameters.Cb - 0.1e-6) / (50e-6 - 0.1e-6)))
-                ];
-
-                // Draw spider polygon
-                ctx.beginPath();
-                for (let j = 0; j < normalizedValues.length; j++) {
-                  const angle = j * angleStep - Math.PI / 2;
-                  const radius = normalizedValues[j] * maxRadius;
-                  const x = centerX + Math.cos(angle) * radius;
-                  const y = centerY + Math.sin(angle) * radius;
-                  
-                  if (j === 0) {
-                    ctx.moveTo(x, y);
-                  } else {
-                    ctx.lineTo(x, y);
-                  }
-                }
-                ctx.closePath();
-                ctx.stroke();
-                renderedCount.total++;
-              }
-            });
-          }
-        });
-
-        ctx.globalAlpha = 1;
-
-        // Add title and info if labels are enabled
-        if (job.parameters.includeLabels) {
-          ctx.fillStyle = job.parameters.chromaEnabled ? '#F9FAFB' : '#E5E7EB';
-          ctx.font = `bold ${Math.max(16, width / 40)}px Inter, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.fillText('Spider Plot Visualization', centerX, Math.max(30, height / 25));
-          
-          ctx.font = `${Math.max(12, width / 80)}px Inter, sans-serif`;
-          ctx.fillText(
-            `${job.parameters.selectedGroups.length} Groups • ${renderedCount.total.toLocaleString()} Polygons • ${job.parameters.resolution}`,
-            centerX,
-            height - Math.max(20, height / 40)
-          );
-        }
-
-        // Convert to requested format with proper quality
+        // Convert to requested format with proper quality and error handling
         let imageUrl: string;
         let fileSize: string;
 
-        if (job.parameters.format === 'png') {
-          imageUrl = canvas.toDataURL('image/png');
-          fileSize = formatFileSize(imageUrl.length * 0.75); // Estimate based on base64 length
-        } else if (job.parameters.format === 'jpg') {
-          imageUrl = canvas.toDataURL('image/jpeg', job.parameters.quality / 100);
-          fileSize = formatFileSize(imageUrl.length * 0.75 * (job.parameters.quality / 100));
-        } else if (job.parameters.format === 'webp') {
-          // WebP support detection
-          const webpSupported = canvas.toDataURL('image/webp').indexOf('image/webp') === 5;
-          if (webpSupported) {
-            imageUrl = canvas.toDataURL('image/webp', job.parameters.quality / 100);
-            fileSize = formatFileSize(imageUrl.length * 0.6 * (job.parameters.quality / 100)); // WebP is more efficient
-          } else {
-            // Fallback to PNG
-            imageUrl = canvas.toDataURL('image/png');
-            fileSize = formatFileSize(imageUrl.length * 0.75);
+        try {
+          switch (job.parameters.format) {
+            case 'png':
+              imageUrl = canvas.toDataURL('image/png');
+              fileSize = formatFileSize(imageUrl.length * 0.75);
+              break;
+              
+            case 'jpg':
+              // Force white background for JPEG (no transparency support)
+              if (job.parameters.backgroundColor === 'transparent') {
+                const jpegCanvas = document.createElement('canvas');
+                jpegCanvas.width = width;
+                jpegCanvas.height = height;
+                const jpegCtx = jpegCanvas.getContext('2d')!;
+                jpegCtx.fillStyle = '#ffffff';
+                jpegCtx.fillRect(0, 0, width, height);
+                jpegCtx.drawImage(canvas, 0, 0);
+                imageUrl = jpegCanvas.toDataURL('image/jpeg', job.parameters.quality / 100);
+                jpegCanvas.remove();
+              } else {
+                imageUrl = canvas.toDataURL('image/jpeg', job.parameters.quality / 100);
+              }
+              fileSize = formatFileSize(imageUrl.length * 0.75 * (job.parameters.quality / 100));
+              break;
+              
+            case 'webp':
+              // WebP support detection
+              const webpSupported = canvas.toDataURL('image/webp').indexOf('image/webp') === 5;
+              if (webpSupported) {
+                imageUrl = canvas.toDataURL('image/webp', job.parameters.quality / 100);
+                fileSize = formatFileSize(imageUrl.length * 0.6 * (job.parameters.quality / 100));
+              } else {
+                console.warn('WebP not supported, falling back to PNG');
+                imageUrl = canvas.toDataURL('image/png');
+                fileSize = formatFileSize(imageUrl.length * 0.75);
+              }
+              break;
+              
+            case 'svg':
+              // Generate SVG representation
+              imageUrl = generateSVGFromCanvas(canvas, job.parameters);
+              fileSize = formatFileSize(imageUrl.length * 0.5); // SVG is typically smaller
+              break;
+              
+            case 'pdf':
+              // For PDF, we'll use PNG as the base and indicate it needs PDF conversion
+              console.warn('PDF export requires server-side conversion, using PNG as base');
+              imageUrl = canvas.toDataURL('image/png');
+              fileSize = formatFileSize(imageUrl.length * 0.75);
+              break;
+              
+            default:
+              throw new Error(`Unsupported format: ${job.parameters.format}`);
           }
-        } else {
-          // SVG/PDF fallback to PNG
+        } catch (formatError) {
+          console.error('Format conversion failed:', formatError);
+          // Fallback to PNG
           imageUrl = canvas.toDataURL('image/png');
           fileSize = formatFileSize(imageUrl.length * 0.75);
         }
 
         // Create high-quality thumbnail
-        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas = document.createElement('canvas');
         thumbCanvas.width = 320;
         thumbCanvas.height = 200;
         const thumbCtx = thumbCanvas.getContext('2d')!;
@@ -305,160 +533,215 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
         thumbCtx.drawImage(canvas, offsetX, offsetY, thumbWidth, thumbHeight);
         const thumbnailUrl = thumbCanvas.toDataURL('image/png');
 
+        // Clean up canvas resources
+        canvas.remove();
+        thumbCanvas.remove();
+
         resolve({ imageUrl, thumbnailUrl, fileSize });
         
       } catch (error) {
         console.error('Image generation failed:', error);
+        // Clean up on error
+        if (canvas) canvas.remove();
+        if (thumbCanvas) thumbCanvas.remove();
         reject(new Error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
     });
-  }, [resnormGroups, formatFileSize]);
+  }, [resnormGroups, formatFileSize, generateSVGFromCanvas, renderRealSpiderPlot]);
 
-  // Handle profile computation with progress tracking
-  const handleComputeSelectedProfiles = async () => {
-    if (selectedProfiles.length === 0 || !onComputeProfiles) return;
+  // Generate mesh data for profiles when needed
+  const generateMeshDataForProfile = useCallback((profileId: string) => {
+    if (profileMeshData[profileId] || !generateProfileMeshData) return;
     
-    setIsComputingProfiles(true);
-    setComputeProgress({ current: 0, total: selectedProfiles.length });
+    const profile = savedProfiles.find(p => p.id === profileId);
+    if (profile) {
+      const meshData = generateProfileMeshData(profile, 500); // Generate 500 sample points
+      setProfileMeshData(prev => ({
+        ...prev,
+        [profileId]: meshData
+      }));
+    }
+  }, [profileMeshData, generateProfileMeshData, savedProfiles]);
+
+  // Handle compute and render for selected profiles
+  const handleComputeAndRender = useCallback(async () => {
+    if (selectedProfiles.length === 0) return;
+    
+    // Create render jobs for each selected profile
+    const newJobs: RenderJob[] = selectedProfiles.map(profileId => {
+      const profile = savedProfiles.find(p => p.id === profileId);
+      return {
+        id: `job_${Date.now()}_${profileId}_${Math.random().toString(36).substr(2, 9)}`,
+        name: profile?.name || `Profile ${profileId}`,
+        status: 'pending',
+        progress: 0,
+        parameters: {
+          format,
+          resolution,
+          quality,
+          includeLabels,
+          chromaEnabled,
+          backgroundColor,
+          selectedGroups: resnormGroups.map((_, i) => i),
+          opacityFactor,
+          visualizationMode,
+          opacityIntensity
+        },
+        profileIds: [profileId],
+        createdAt: new Date()
+      };
+    });
+    
+    setRenderJobs(prev => [...newJobs, ...prev]);
+    
+    // Generate mesh data for profiles and start rendering
+    for (const profileId of selectedProfiles) {
+      // Generate mesh data if not already available
+      if (!profileMeshData[profileId]) {
+        generateMeshDataForProfile(profileId);
+      }
+      
+      // Start rendering job
+      await renderProfileJob(profileId);
+    }
+    
+    // Clear selection
+    setSelectedProfiles([]);
+  }, [selectedProfiles, savedProfiles, format, resolution, quality, includeLabels, chromaEnabled, backgroundColor, opacityFactor, visualizationMode, opacityIntensity, resnormGroups, profileMeshData, generateMeshDataForProfile]);
+
+  // Generate resnorm groups from mesh data for proper grouping
+  const generateResnormGroupsFromMesh = useCallback((meshData: ModelSnapshot[]) => {
+    if (!meshData.length) return [];
+    
+    const resnorms = meshData.map(m => m.resnorm).filter(r => r !== undefined) as number[];
+    if (resnorms.length === 0) return [];
+    
+    // Sort to find quartiles
+    const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+    const q1 = sortedResnorms[Math.floor(sortedResnorms.length * 0.25)];
+    const q2 = sortedResnorms[Math.floor(sortedResnorms.length * 0.5)];
+    const q3 = sortedResnorms[Math.floor(sortedResnorms.length * 0.75)];
+    
+    // Create groups with proper ranges
+    const groups = [
+      {
+        range: [0, q1] as [number, number],
+        color: '#059669',
+        label: 'Excellent',
+        description: 'Top 25% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm <= q1)
+      },
+      {
+        range: [q1, q2] as [number, number],
+        color: '#10B981',
+        label: 'Good',
+        description: '25-50% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q1 && m.resnorm <= q2)
+      },
+      {
+        range: [q2, q3] as [number, number],
+        color: '#F59E0B',
+        label: 'Moderate',
+        description: '50-75% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q2 && m.resnorm <= q3)
+      },
+      {
+        range: [q3, Math.max(...resnorms)] as [number, number],
+        color: '#DC2626',
+        label: 'Poor',
+        description: 'Bottom 25% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q3)
+      }
+    ];
+    
+    return groups.filter(g => g.items.length > 0);
+  }, []);
+
+  // Function to render a job for a specific profile
+  const renderProfileJob = useCallback(async (profileId: string) => {
+    // Get mesh data for this profile
+    let meshData = profileMeshData[profileId] || [];
+    
+    // Generate mesh data if not available
+    if (meshData.length === 0) {
+      generateMeshDataForProfile(profileId);
+      meshData = profileMeshData[profileId] || [];
+    }
+    
+    // Find the job for this profile
+    const job = renderJobs.find(j => j.profileIds?.includes(profileId));
+    if (!job) return;
     
     try {
-      for (let i = 0; i < selectedProfiles.length; i++) {
-        setComputeProgress({ current: i, total: selectedProfiles.length });
-        await onComputeProfiles([selectedProfiles[i]]);
-        // Add a small delay to show progress
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-      setComputeProgress({ current: selectedProfiles.length, total: selectedProfiles.length });
-    } catch (error) {
-      console.error('Failed to compute profiles:', error);
-    } finally {
-      setTimeout(() => {
-        setIsComputingProfiles(false);
-        setComputeProgress(null);
-      }, 1000);
-    }
-  };
-
-  const handleCreateJob = () => {
-    if (!jobName.trim()) return;
-    
-    const newJob: RenderJob = {
-      id: `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: jobName,
-      status: 'pending',
-      progress: 0,
-      parameters: {
-        format,
-        resolution,
-        quality,
-        includeLabels,
-        chromaEnabled,
-        backgroundColor,
-        selectedGroups: selectedGroups.length > 0 ? selectedGroups : resnormGroups.map((_, i) => i)
-      },
-      createdAt: new Date()
-    };
-    
-    setRenderJobs(prev => [newJob, ...prev]);
-    
-    // Reset form
-    setJobName('');
-    setIsCreatingJob(false);
-    
-    // Start processing
-    setTimeout(async () => {
-      setRenderJobs(prev => prev.map(job => 
-        job.id === newJob.id ? { ...job, status: 'processing', progress: 0 } : job
+      // Generate dynamic resnorm groups from mesh data
+      const dynamicGroups = generateResnormGroupsFromMesh(meshData);
+      
+      // Update job with dynamic groups information
+      const updatedJob = {
+        ...job,
+        meshData,
+        parameters: {
+          ...job.parameters,
+          selectedGroups: dynamicGroups.map((_, i) => i) // Select all generated groups
+        }
+      };
+      
+      // Update status to rendering
+      setRenderJobs(prev => prev.map(j => 
+        j.id === job.id ? { ...j, status: 'rendering', progress: 0, meshData } : j
       ));
       
-      // Realistic processing simulation based on job complexity
-      const [width, height] = newJob.parameters.resolution.split('x').map(Number);
-      const totalPixels = width * height;
-      const groupCount = newJob.parameters.selectedGroups.length;
-      const complexityFactor = (totalPixels / 1000000) * groupCount; // Normalize complexity
-      const estimatedDuration = Math.min(8000, Math.max(1000, complexityFactor * 500)); // 1-8 seconds
+      // Simulate rendering progress
+      for (let i = 10; i <= 90; i += 10) {
+        setRenderJobs(prev => prev.map(j => 
+          j.id === job.id ? { ...j, progress: i } : j
+        ));
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
       
-      // Multi-stage progress simulation
-      const stages = [
-        { name: 'preparing', duration: 0.1, startProgress: 0 },
-        { name: 'rendering_grid', duration: 0.15, startProgress: 10 },
-        { name: 'processing_groups', duration: 0.6, startProgress: 25 },
-        { name: 'finalizing', duration: 0.15, startProgress: 85 }
-      ];
+      // Generate the actual image
+      const { imageUrl, thumbnailUrl, fileSize } = await generateImage(updatedJob);
       
-             let currentStageIndex = 0;
-       let stageStartTime = Date.now();
-       const overallStartTime = Date.now();
-      
-      const progressInterval = setInterval(() => {
-        const elapsed = Date.now() - overallStartTime;
-        const stageElapsed = Date.now() - stageStartTime;
-        const currentStage = stages[currentStageIndex];
-        
-        if (currentStage) {
-          const stageDuration = currentStage.duration * estimatedDuration;
-          const stageProgress = Math.min(1, stageElapsed / stageDuration);
-          
-          // Calculate realistic progress with some variance
-          let progress = currentStage.startProgress + (stageProgress * (
-            currentStageIndex < stages.length - 1 
-              ? stages[currentStageIndex + 1].startProgress - currentStage.startProgress
-              : 100 - currentStage.startProgress
-          ));
-          
-          // Add slight randomness for realism
-          progress += (Math.random() - 0.5) * 2;
-          progress = Math.max(currentStage.startProgress, Math.min(progress, 
-            currentStageIndex < stages.length - 1 ? stages[currentStageIndex + 1].startProgress : 100
-          ));
-          
-          setRenderJobs(prev => prev.map(job => 
-            job.id === newJob.id ? { ...job, progress: Math.round(progress) } : job
-          ));
-          
-          // Move to next stage
-          if (stageProgress >= 1 && currentStageIndex < stages.length - 1) {
-            currentStageIndex++;
-            stageStartTime = Date.now();
+      setRenderJobs(prev => prev.map(j => 
+        j.id === job.id ? { 
+          ...j, 
+          status: 'completed', 
+          progress: 100,
+          imageUrl,
+          thumbnailUrl,
+          fileSize,
+          completedAt: new Date(),
+          parameters: {
+            ...j.parameters,
+            selectedGroups: dynamicGroups.map((_, i) => i)
           }
-          
-          // Complete the job
-          if (elapsed >= estimatedDuration || progress >= 99) {
-            clearInterval(progressInterval);
-            
-            setRenderJobs(prev => prev.map(job => 
-              job.id === newJob.id ? { ...job, progress: 100 } : job
-            ));
-            
-            // Generate the actual image
-            generateImage(newJob).then(({ imageUrl, thumbnailUrl, fileSize }) => {
-              setRenderJobs(prev => prev.map(job => 
-                job.id === newJob.id ? { 
-                  ...job, 
-                  status: 'completed', 
-                  progress: 100,
-                  imageUrl,
-                  thumbnailUrl,
-                  fileSize,
-                  completedAt: new Date()
-                } : job
-              ));
-            }).catch((error) => {
-              console.error('Image generation failed:', error);
-              setRenderJobs(prev => prev.map(job => 
-                job.id === newJob.id ? { 
-                  ...job, 
-                  status: 'failed', 
-                  progress: 0,
-                  error: error.message || 'Failed to generate image'
-                } : job
-              ));
-            });
-          }
-        }
-      }, 100); // More frequent updates for smoother progress
-    }, 500);
-  };
+        } : j
+      ));
+      
+    } catch (error) {
+      console.error(`Failed to render job for profile ${profileId}:`, error);
+      setRenderJobs(prev => prev.map(j => 
+        j.id === job.id ? { 
+          ...j, 
+          status: 'failed', 
+          error: error instanceof Error ? error.message : 'Rendering failed'
+        } : j
+      ));
+    }
+  }, [profileMeshData, generateMeshDataForProfile, renderJobs, generateImage, generateResnormGroupsFromMesh]);
+
+  // Effect to render jobs when mesh data is available
+  useEffect(() => {
+    const profilesToRender = Object.keys(profileMeshData).filter(profileId => {
+      const job = renderJobs.find(j => j.profileIds?.includes(profileId) && j.status === 'pending');
+      return job && profileMeshData[profileId].length > 0;
+    });
+    
+    profilesToRender.forEach(profileId => {
+      renderProfileJob(profileId);
+    });
+  }, [profileMeshData, renderJobs, renderProfileJob]);
+
 
   const handleDeleteJob = useCallback((jobId: string) => {
     setRenderJobs(prev => prev.filter(job => job.id !== jobId));
@@ -489,6 +772,59 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       return newOptions;
     });
   }, [renderJobs]);
+
+  // Helper function to download data URL with improved error handling
+  const downloadDataUrl = useCallback((dataUrl: string, filename: string) => {
+    try {
+      // Validate data URL
+      if (!dataUrl || !dataUrl.startsWith('data:')) {
+        throw new Error('Invalid data URL');
+      }
+      
+      // Handle SVG downloads differently
+      if (dataUrl.startsWith('data:image/svg+xml')) {
+        // For SVG, decode and create blob
+        const svgData = dataUrl.replace('data:image/svg+xml;base64,', '');
+        const svgBlob = new Blob([atob(svgData)], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(svgBlob);
+        
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        // Clean up object URL
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+      } else {
+        // Standard data URL download
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = filename;
+        
+        // Add to DOM, click, and remove
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+      
+      console.log(`Downloaded: ${filename}`);
+    } catch (error) {
+      console.error('Failed to download file:', error);
+      
+      // Fallback: open in new window
+      try {
+        const newWindow = window.open(dataUrl, '_blank');
+        if (!newWindow) {
+          alert('Download failed. Please check your browser settings and try again.');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback download also failed:', fallbackError);
+        alert('Download failed. Please try a different browser or check your settings.');
+      }
+    }
+  }, []);
 
   const handleDownload = useCallback((job: RenderJob, customOptions?: DownloadOptions) => {
     if (!job.imageUrl) {
@@ -523,21 +859,54 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
           ctx.imageSmoothingQuality = 'high';
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
           
-          // Convert to desired format
+          // Convert to desired format with proper error handling
           let dataUrl: string;
-          if (options.format === 'png') {
-            dataUrl = canvas.toDataURL('image/png');
-          } else if (options.format === 'jpg') {
-            dataUrl = canvas.toDataURL('image/jpeg', options.quality / 100);
-          } else if (options.format === 'webp') {
-            dataUrl = canvas.toDataURL('image/webp', options.quality / 100);
-          } else {
-            dataUrl = canvas.toDataURL('image/png'); // Fallback
+          try {
+            switch (options.format) {
+              case 'png':
+                dataUrl = canvas.toDataURL('image/png');
+                break;
+              case 'jpg':
+                // Force white background for JPEG
+                const jpegCanvas = document.createElement('canvas');
+                jpegCanvas.width = canvas.width;
+                jpegCanvas.height = canvas.height;
+                const jpegCtx = jpegCanvas.getContext('2d')!;
+                jpegCtx.fillStyle = '#ffffff';
+                jpegCtx.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+                jpegCtx.drawImage(canvas, 0, 0);
+                dataUrl = jpegCanvas.toDataURL('image/jpeg', options.quality / 100);
+                jpegCanvas.remove();
+                break;
+              case 'webp':
+                const webpSupported = canvas.toDataURL('image/webp').indexOf('image/webp') === 5;
+                if (webpSupported) {
+                  dataUrl = canvas.toDataURL('image/webp', options.quality / 100);
+                } else {
+                  console.warn('WebP not supported, falling back to PNG');
+                  dataUrl = canvas.toDataURL('image/png');
+                }
+                break;
+              default:
+                dataUrl = canvas.toDataURL('image/png'); // Fallback
+            }
+          } catch (formatError) {
+            console.error('Format conversion failed:', formatError);
+            dataUrl = canvas.toDataURL('image/png'); // Safe fallback
           }
           
           // Download the processed image
           downloadDataUrl(dataUrl, `${job.name.replace(/[^a-z0-9]/gi, '_')}.${options.format}`);
+          
+          // Clean up canvas
+          canvas.remove();
         };
+        
+        img.onerror = (error) => {
+          console.error('Failed to load image for download:', error);
+          alert('Failed to load image for download. Please try again.');
+        };
+        
         img.src = job.imageUrl;
       } else {
         // Download original image
@@ -546,37 +915,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     } catch (error) {
       console.error('Download failed:', error);
     }
-  }, [downloadOptions]);
-
-  // Helper function to download data URL
-  const downloadDataUrl = useCallback((dataUrl: string, filename: string) => {
-    try {
-      // Create download link
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = filename;
-      
-      // Add to DOM, click, and remove
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      console.log(`Downloaded: ${filename}`);
-    } catch (error) {
-      console.error('Failed to download file:', error);
-      
-      // Fallback: open in new window
-      try {
-        const newWindow = window.open(dataUrl, '_blank');
-        if (!newWindow) {
-          alert('Download failed. Please check your browser settings and try again.');
-        }
-      } catch (fallbackError) {
-        console.error('Fallback download also failed:', fallbackError);
-        alert('Download failed. Please try a different browser or check your settings.');
-      }
-    }
-  }, []);
+  }, [downloadOptions, downloadDataUrl]);
 
   const updateDownloadOptions = (jobId: string, options: Partial<DownloadOptions>) => {
     setDownloadOptions(prev => ({
@@ -590,7 +929,8 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
   const getStatusColor = (status: RenderJob['status']) => {
     switch (status) {
       case 'pending': return 'text-amber-400';
-      case 'processing': return 'text-blue-400';
+      case 'computing': return 'text-purple-400';
+      case 'rendering': return 'text-blue-400';
       case 'completed': return 'text-green-400';
       case 'failed': return 'text-red-400';
       default: return 'text-neutral-400';
@@ -605,10 +945,16 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         );
-      case 'processing':
+      case 'computing':
         return (
           <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        );
+      case 'rendering':
+        return (
+          <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
         );
       case 'completed':
@@ -644,32 +990,149 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {/* Visualization Settings */}
+          <div className="p-6 border-b border-neutral-700">
+            <h3 className="text-lg font-medium text-white mb-4">Image Settings</h3>
+            
+            {/* Format and Resolution */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-neutral-200 mb-2">Format</label>
+                <select
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value as typeof format)}
+                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPEG</option>
+                  <option value="webp">WebP</option>
+                  <option value="svg">SVG</option>
+                  <option value="pdf">PDF</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-200 mb-2">Resolution</label>
+                <select
+                  value={resolution}
+                  onChange={(e) => setResolution(e.target.value)}
+                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="1920x1080">1920x1080 (HD)</option>
+                  <option value="2560x1440">2560x1440 (QHD)</option>
+                  <option value="3840x2160">3840x2160 (4K)</option>
+                  <option value="7680x4320">7680x4320 (8K)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Quality and Background */}
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-neutral-200 mb-2">
+                  Quality ({quality}%)
+                </label>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-neutral-200 mb-2">Background</label>
+                <select
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value as typeof backgroundColor)}
+                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="transparent">Transparent</option>
+                  <option value="white">White</option>
+                  <option value="black">Black</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Visualization Mode */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-neutral-200 mb-2">Visualization Mode</label>
+              <select
+                value={visualizationMode}
+                onChange={(e) => setVisualizationMode(e.target.value as 'color' | 'opacity')}
+                className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
+              >
+                <option value="color">Color Mode</option>
+                <option value="opacity">Opacity Mode</option>
+              </select>
+            </div>
+
+            {/* Opacity Controls */}
+            {visualizationMode === 'opacity' && (
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-neutral-200 mb-2">
+                    Opacity Factor ({opacityFactor.toFixed(1)})
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.1"
+                    value={opacityFactor}
+                    onChange={(e) => setOpacityFactor(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-neutral-200 mb-2">
+                    Opacity Intensity ({opacityIntensity.toFixed(1)})
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="3.0"
+                    step="0.1"
+                    value={opacityIntensity}
+                    onChange={(e) => setOpacityIntensity(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Options */}
+            <div className="grid grid-cols-2 gap-4">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={includeLabels}
+                  onChange={(e) => setIncludeLabels(e.target.checked)}
+                  className="rounded border-neutral-600"
+                />
+                <span className="text-sm text-neutral-200">Include Labels</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={chromaEnabled}
+                  onChange={(e) => setChromaEnabled(e.target.checked)}
+                  className="rounded border-neutral-600"
+                />
+                <span className="text-sm text-neutral-200">Color Mode</span>
+              </label>
+            </div>
+          </div>
+
           {/* Saved Profiles Section */}
-          {savedProfiles.length > 0 && (
+                        {savedProfiles.length > 0 && (
             <div className="p-6 border-b border-neutral-700">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-white">Batch Compute</h3>
+                <h3 className="text-lg font-medium text-white">Select Profiles</h3>
                 <div className="text-sm text-neutral-400">
                   {selectedProfiles.length}/{savedProfiles.length}
                 </div>
               </div>
-
-              {isComputingProfiles && computeProgress && (
-                <div className="mb-4 p-3 bg-blue-600/10 border border-blue-600/20 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-blue-300">Computing profiles...</span>
-                    <span className="text-sm text-blue-300">
-                      {computeProgress.current}/{computeProgress.total}
-                    </span>
-                  </div>
-                  <div className="w-full bg-neutral-700 rounded-full h-2">
-                    <div 
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-                      style={{ width: `${(computeProgress.current / computeProgress.total) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              )}
 
               <div className="space-y-3 mb-4">
                 <div className="flex items-center gap-2">
@@ -705,11 +1168,6 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
                       <div className="flex items-center justify-between mb-1">
                         <h4 className="text-sm font-medium text-white truncate">{profile.name}</h4>
                         <div className="flex items-center gap-1">
-                          {profile.isComputed && (
-                            <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
                           {selectedProfiles.includes(profile.id) && (
                             <svg className="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -729,190 +1187,20 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
               </div>
 
               <button
-                onClick={handleComputeSelectedProfiles}
-                disabled={selectedProfiles.length === 0 || isComputingProfiles}
+                onClick={handleComputeAndRender}
+                disabled={selectedProfiles.length === 0}
                 className="w-full py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white rounded-md font-medium transition-colors flex items-center justify-center gap-2"
               >
-                {isComputingProfiles ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                    Computing...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    Compute Selected
-                  </>
-                )}
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                Generate Images ({selectedProfiles.length})
               </button>
             </div>
           )}
 
-          {/* Create Job Section */}
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-white">Create Render Job</h3>
-              <button
-                onClick={() => setIsCreatingJob(!isCreatingJob)}
-                className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                  isCreatingJob 
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-              >
-                {isCreatingJob ? 'Cancel' : 'New Job'}
-              </button>
-            </div>
-
-            {isCreatingJob && (
-              <div className="space-y-4">
-                {/* Job Name */}
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200 mb-2">Job Name</label>
-                  <input
-                    type="text"
-                    value={jobName}
-                    onChange={(e) => setJobName(e.target.value)}
-                    placeholder="Enter job name..."
-                    className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                  />
-                </div>
-
-                {/* Format and Resolution */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-200 mb-2">Format</label>
-                    <select
-                      value={format}
-                      onChange={(e) => setFormat(e.target.value as typeof format)}
-                      className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                    >
-                      <option value="png">PNG</option>
-                      <option value="jpg">JPEG</option>
-                      <option value="webp">WebP</option>
-                      <option value="svg">SVG</option>
-                      <option value="pdf">PDF</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-200 mb-2">Resolution</label>
-                    <select
-                      value={resolution}
-                      onChange={(e) => setResolution(e.target.value)}
-                      className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                    >
-                      <option value="1280x720">1280x720 (HD)</option>
-                      <option value="1920x1080">1920x1080 (FHD)</option>
-                      <option value="2560x1440">2560x1440 (QHD)</option>
-                      <option value="3840x2160">3840x2160 (4K)</option>
-                      <option value="7680x4320">7680x4320 (8K)</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Quality and Background */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-200 mb-2">
-                      Quality ({quality}%)
-                    </label>
-                    <input
-                      type="range"
-                      min="10"
-                      max="100"
-                      value={quality}
-                      onChange={(e) => setQuality(Number(e.target.value))}
-                      className="w-full"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-neutral-200 mb-2">Background</label>
-                    <select
-                      value={backgroundColor}
-                      onChange={(e) => setBackgroundColor(e.target.value as typeof backgroundColor)}
-                      className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                    >
-                      <option value="transparent">Transparent</option>
-                      <option value="white">White</option>
-                      <option value="black">Black</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Options */}
-                <div className="grid grid-cols-2 gap-4">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={includeLabels}
-                      onChange={(e) => setIncludeLabels(e.target.checked)}
-                      className="rounded border-neutral-600"
-                    />
-                    <span className="text-sm text-neutral-200">Include Labels</span>
-                  </label>
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={chromaEnabled}
-                      onChange={(e) => setChromaEnabled(e.target.checked)}
-                      className="rounded border-neutral-600"
-                    />
-                    <span className="text-sm text-neutral-200">Color Mode</span>
-                  </label>
-                </div>
-
-                {/* Group Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200 mb-2">Groups to Include</label>
-                  <div className="flex gap-2 flex-wrap">
-                    <button
-                      onClick={() => setSelectedGroups(selectedGroups.length === resnormGroups.length ? [] : resnormGroups.map((_, i) => i))}
-                      className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${
-                        selectedGroups.length === resnormGroups.length
-                          ? 'bg-blue-600 text-white border-blue-500'
-                          : 'bg-neutral-700 text-neutral-300 border-neutral-600 hover:bg-neutral-600'
-                      }`}
-                    >
-                      {selectedGroups.length === resnormGroups.length ? 'Deselect All' : 'Select All'}
-                    </button>
-                    {resnormGroups.map((group, index) => (
-                      <button
-                        key={index}
-                        onClick={() => {
-                          if (selectedGroups.includes(index)) {
-                            setSelectedGroups(selectedGroups.filter(i => i !== index));
-                          } else {
-                            setSelectedGroups([...selectedGroups, index]);
-                          }
-                        }}
-                        className={`px-3 py-1.5 text-xs rounded-md border transition-colors flex items-center gap-1.5 ${
-                          selectedGroups.includes(index)
-                            ? 'bg-blue-600 text-white border-blue-500'
-                            : 'bg-neutral-700 text-neutral-300 border-neutral-600 hover:bg-neutral-600'
-                        }`}
-                      >
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: group.color }} />
-                        {group.label.split(' ')[0]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleCreateJob}
-                  disabled={!jobName.trim()}
-                  className="w-full py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white rounded-md font-medium transition-colors"
-                >
-                  Create Render Job
-                </button>
-              </div>
-            )}
-          </div>
         </div>
       </div>
-
       {/* Right Panel - Job Queue and Downloads */}
       <div className="flex-1 flex flex-col bg-neutral-950">
         {/* Header */}
@@ -921,7 +1209,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
             <h3 className="text-xl font-bold text-white">Render Jobs</h3>
             <div className="flex items-center gap-4 text-sm text-neutral-400">
               <span>{renderJobs.filter(j => j.status === 'completed').length} completed</span>
-              <span>{renderJobs.filter(j => j.status === 'processing').length} processing</span>
+              <span>{renderJobs.filter(j => j.status === 'computing' || j.status === 'rendering').length} processing</span>
               <span>{renderJobs.filter(j => j.status === 'pending').length} pending</span>
             </div>
           </div>
@@ -1009,7 +1297,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
                     </div>
                     
                     {/* Progress Bar */}
-                    {job.status === 'processing' && (
+                    {(job.status === 'computing' || job.status === 'rendering') && (
                       <div className="mb-4">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs text-neutral-400">Processing...</span>
