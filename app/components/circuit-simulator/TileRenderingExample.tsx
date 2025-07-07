@@ -1,13 +1,11 @@
 "use client";
 
 import React, { useState } from 'react';
-import { TiledSpiderPlot } from './visualizations/TiledSpiderPlot';
 import { SpiderPlot } from './visualizations/SpiderPlot';
-import { ModelSnapshot } from './utils/types';
+import { ModelSnapshot } from './types';
 
 interface TileRenderingExampleProps {
   meshItems: ModelSnapshot[];
-  referenceId?: string;
   opacityFactor: number;
   maxPolygons: number;
   visualizationMode?: 'color' | 'opacity';
@@ -16,7 +14,6 @@ interface TileRenderingExampleProps {
 
 export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
   meshItems,
-  referenceId,
   opacityFactor,
   maxPolygons,
   visualizationMode = 'color',
@@ -24,18 +21,6 @@ export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
 }) => {
   const [useTileRendering, setUseTileRendering] = useState(false);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
-
-  const handleImageExport = (canvas: HTMLCanvasElement) => {
-    // Convert canvas to data URL for display/download
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    setExportedImage(dataUrl);
-    
-    // Auto-download the image
-    const link = document.createElement('a');
-    link.download = `spider-plot-${Date.now()}.png`;
-    link.href = dataUrl;
-    link.click();
-  };
 
   return (
     <div className="w-full h-full space-y-4">
@@ -117,26 +102,26 @@ export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
       {/* Main Visualization */}
       <div className="relative bg-slate-900 rounded-lg" style={{ height: '600px' }}>
         {useTileRendering ? (
-          <TiledSpiderPlot
+          <SpiderPlot
             meshItems={meshItems}
-            referenceId={referenceId}
             opacityFactor={opacityFactor}
             maxPolygons={maxPolygons}
-            onExportImage={handleImageExport}
             visualizationMode={visualizationMode}
             opacityIntensity={opacityIntensity}
-            renderQuality="preview"
+            gridSize={5}
+            includeLabels={true}
+            backgroundColor="transparent"
           />
         ) : (
           <SpiderPlot
             meshItems={meshItems}
-            referenceId={referenceId}
             opacityFactor={opacityFactor}
             maxPolygons={Math.min(maxPolygons, 10000)} // Limit for interactive mode
-            onGridValuesGenerated={() => {}} // No-op for this example
-            mode="interactive"
             visualizationMode={visualizationMode}
             opacityIntensity={opacityIntensity}
+            gridSize={5}
+            includeLabels={true}
+            backgroundColor="transparent"
           />
         )}
         

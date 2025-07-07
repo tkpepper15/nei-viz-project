@@ -1,5 +1,5 @@
 import React from 'react';
-import { ResnormGroup } from '../utils/types';
+import { ResnormGroup } from '../types';
 
 interface LayersControlProps {
   resnormGroups: ResnormGroup[];

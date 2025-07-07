@@ -41,7 +41,7 @@ export const generateParameterMesh = (
     resolution: number
 ): CircuitParameters[] => {
     // Generate parameter values
-    const RsValues = generateLinearSpace(space.Rs.min, space.Rs.max, resolution);
+    const RsValues = generateLogSpace(space.Rs.min, space.Rs.max, resolution);
     const RaValues = generateLogSpace(space.Ra.min, space.Ra.max, resolution);
     const CaValues = generateLogSpace(space.Ca.min, space.Ca.max, resolution);
     const RbValues = generateLogSpace(space.Rb.min, space.Rb.max, resolution);

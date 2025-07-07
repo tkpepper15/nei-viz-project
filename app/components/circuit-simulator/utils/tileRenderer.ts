@@ -1,4 +1,4 @@
-import { ModelSnapshot } from './types';
+import { ModelSnapshot } from '../types';
 
 export interface SpiderConfig {
   viewBoxSize: number;

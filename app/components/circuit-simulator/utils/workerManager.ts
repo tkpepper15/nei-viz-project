@@ -177,6 +177,23 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         overallProgress: 0
       });
 
+      // For large grids (>100k points), use streaming approach
+      if (totalPoints > 100000) {
+        return await computeGridStreaming(
+          gridSize,
+          frequencies,
+          referenceSpectrum,
+          minFreq,
+          maxFreq,
+          workerCount,
+          chunkSize,
+          performanceSettings,
+          onProgress,
+          onError
+        );
+      }
+
+      // For smaller grids, use the original approach
       // Generate grid points using a single worker first
       createWorkers(1);
       const gridWorker = workersRef.current[0];
@@ -323,16 +340,14 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         allOtherResults.push(...result.otherResults);
       }
 
-      // Sort all results by resnorm and limit to reasonable size
+      // Return ALL results to ensure full parameter coverage
+      // Sort by resnorm for consistent ordering but don't limit
       allTopResults.sort((a, b) => a.resnorm - b.resnorm);
       allOtherResults.sort((a, b) => a.resnorm - b.resnorm);
 
-      // Keep top 5000 results with spectra, rest without spectra
-      const topResults = allTopResults.slice(0, 5000);
-      const otherResults = [
-        ...allTopResults.slice(5000).map(r => ({ parameters: r.parameters, resnorm: r.resnorm })),
-        ...allOtherResults.slice(0, 45000) // Total cap at 50k results
-      ];
+      // Keep all results - top results with spectra, others without spectra for memory efficiency
+      const topResults = allTopResults; // Keep all top results with spectra
+      const otherResults = allOtherResults;
 
       // Convert to BackendMeshPoint format
       const finalResults: BackendMeshPoint[] = [
@@ -384,6 +399,209 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     chunkArray,
     createWorkers
   ]);
+
+  // New streaming computation function for large grids
+  const computeGridStreaming = useCallback(async (
+    gridSize: number,
+    frequencies: number[],
+    referenceSpectrum: { freq: number; real: number; imag: number; mag: number; phase: number; }[],
+    minFreq: number,
+    maxFreq: number,
+    workerCount: number,
+    chunkSize: number,
+    performanceSettings: PerformanceSettings,
+    onProgress: (progress: WorkerProgress) => void,
+    onError: (error: string) => void
+  ): Promise<BackendMeshPoint[]> => {
+    
+    const totalPoints = Math.pow(gridSize, 5);
+    
+    // Create workers for streaming computation
+    createWorkers(workerCount);
+    
+    // Use a single worker for grid generation with streaming
+    const gridWorker = workersRef.current[0];
+    const computationWorkers = workersRef.current.slice(1);
+    
+    const allResults: BackendMeshPoint[] = [];
+    let totalProcessed = 0;
+    
+    // Start grid generation streaming
+    const gridGenerationPromise = new Promise<void>((resolve, reject) => {
+      const pendingChunks: CircuitParameters[][] = [];
+      let isGenerationComplete = false;
+      
+      gridWorker.onmessage = (e) => {
+        const { type, data } = e.data;
+        
+        if (cancelTokenRef.current.cancelled) {
+          reject(new Error('Computation cancelled'));
+          return;
+        }
+        
+                 switch (type) {
+           case 'GENERATION_PROGRESS':
+             onProgress({
+               type: 'GENERATION_PROGRESS',
+               total: data.total,
+               generated: data.generated,
+               overallProgress: (data.generated / data.total) * 10
+             });
+             break;
+             
+           case 'GRID_CHUNK_READY':
+             pendingChunks.push(data.chunk);
+             
+             if (data.progress.isComplete) {
+               isGenerationComplete = true;
+             }
+             break;
+            
+          case 'ERROR':
+            reject(new Error(data.message));
+            break;
+        }
+      };
+      
+      gridWorker.onerror = (error) => {
+        reject(new Error(`Grid worker error: ${error.message}`));
+      };
+      
+      // Start streaming grid generation
+      gridWorker.postMessage({
+        type: 'GENERATE_GRID_STREAM',
+        data: {
+          gridSize,
+          useSymmetricGrid: performanceSettings.useSymmetricGrid,
+          chunkSize: Math.min(chunkSize, 5000) // Smaller chunks for streaming
+        }
+      });
+      
+      // Process chunks as they arrive
+      const processChunks = async () => {
+        while (!isGenerationComplete || pendingChunks.length > 0) {
+          if (pendingChunks.length > 0) {
+            const chunk = pendingChunks.shift()!;
+            
+            // Process this chunk with available workers
+            const workerIndex = totalProcessed % computationWorkers.length;
+            const worker = computationWorkers[workerIndex];
+            
+            try {
+              const result = await new Promise<WorkerResult>((resolve, reject) => {
+                const handleMessage = (e: MessageEvent) => {
+                  const { type, data } = e.data;
+                  
+                  if (cancelTokenRef.current.cancelled) {
+                    worker.removeEventListener('message', handleMessage);
+                    reject(new Error('Computation cancelled'));
+                    return;
+                  }
+                  
+                  switch (type) {
+                    case 'CHUNK_COMPLETE':
+                      worker.removeEventListener('message', handleMessage);
+                      resolve(data);
+                      break;
+                      
+                    case 'ERROR':
+                      worker.removeEventListener('message', handleMessage);
+                      reject(new Error(data.message));
+                      break;
+                  }
+                };
+                
+                worker.addEventListener('message', handleMessage);
+                
+                worker.onerror = (error) => {
+                  worker.removeEventListener('message', handleMessage);
+                  reject(new Error(`Worker error: ${error.message}`));
+                };
+                
+                worker.postMessage({
+                  type: 'COMPUTE_GRID_CHUNK',
+                  data: {
+                    chunkParams: chunk,
+                    frequencyArray: frequencies,
+                    chunkIndex: totalProcessed,
+                    totalChunks: -1, // Unknown for streaming
+                    referenceSpectrum
+                  }
+                });
+              });
+              
+              // Convert results to BackendMeshPoint format
+              const chunkResults: BackendMeshPoint[] = [
+                ...result.topResults.map(r => ({
+                  parameters: {
+                    Rs: r.parameters.Rs,
+                    Ra: r.parameters.Ra,
+                    Ca: r.parameters.Ca,
+                    Rb: r.parameters.Rb,
+                    Cb: r.parameters.Cb,
+                    frequency_range: [minFreq, maxFreq] as [number, number]
+                  },
+                  spectrum: r.spectrum,
+                  resnorm: r.resnorm
+                })),
+                ...result.otherResults.map(r => ({
+                  parameters: {
+                    Rs: r.parameters.Rs,
+                    Ra: r.parameters.Ra,
+                    Ca: r.parameters.Ca,
+                    Rb: r.parameters.Rb,
+                    Cb: r.parameters.Cb,
+                    frequency_range: [minFreq, maxFreq] as [number, number]
+                  },
+                  spectrum: [], // Empty spectrum for memory efficiency
+                  resnorm: r.resnorm
+                }))
+              ];
+              
+              allResults.push(...chunkResults);
+              totalProcessed += result.totalProcessed;
+              
+              // Report progress
+              const progressPercent = 10 + (totalProcessed / totalPoints) * 90;
+              onProgress({
+                type: 'CHUNK_PROGRESS',
+                total: totalPoints,
+                processed: totalProcessed,
+                overallProgress: progressPercent
+              });
+              
+                         } catch (error) {
+               onError(error instanceof Error ? error.message : String(error));
+               reject(error);
+               return;
+             }
+          } else {
+            // Wait a bit before checking again
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        }
+        
+        resolve();
+      };
+      
+      processChunks();
+    });
+    
+    await gridGenerationPromise;
+    
+    if (cancelTokenRef.current.cancelled) {
+      throw new Error('Computation cancelled');
+    }
+    
+    onProgress({
+      type: 'CHUNK_PROGRESS',
+      total: totalPoints,
+      processed: totalPoints,
+      overallProgress: 100
+    });
+    
+    return allResults;
+  }, [createWorkers]);
 
   // Cancel computation
   const cancelComputation = useCallback(() => {

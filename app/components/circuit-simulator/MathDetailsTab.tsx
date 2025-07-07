@@ -1,7 +1,7 @@
 import React from 'react';
 import { BlockMath, InlineMath } from 'react-katex';
 import { CircuitParameters } from './types/parameters';
-import { ModelSnapshot } from './utils/types';
+import { ModelSnapshot } from './types';
 
 interface MathDetailsTabProps {
   parameters: CircuitParameters;

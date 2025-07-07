@@ -1,4 +1,4 @@
-import { Complex } from './types';
+import { Complex } from '../types';
 import { CircuitParameters } from '../types/parameters';
 
 export interface ImpedancePoint {

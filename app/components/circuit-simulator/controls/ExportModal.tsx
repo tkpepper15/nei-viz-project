@@ -1,17 +1,14 @@
 "use client";
 
 import React, { useState, useCallback } from 'react';
-import { BaseSpiderPlot } from '../BaseSpiderPlot';
-import { ModelSnapshot } from '../utils/types';
-import { GridParameterArrays } from '../types';
+import { SpiderPlot } from '../visualizations/SpiderPlot';
+import { ModelSnapshot } from '../types';
 
 interface ExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   visibleModels: ModelSnapshot[];
-  referenceModelId: string | null;
   opacityLevel: number;
-  onGridValuesGenerated: (values: GridParameterArrays) => void;
   chromaEnabled?: boolean;
   opacityIntensity?: number;
   gridSize: number;
@@ -30,9 +27,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
   onClose,
   visibleModels,
-  referenceModelId,
   opacityLevel,
-  onGridValuesGenerated,
   chromaEnabled = true,
   opacityIntensity = 1.0,
   gridSize
@@ -45,15 +40,38 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     setIsExporting(true);
     
     try {
-      // Get the SVG element from the preview
-      const svgElement = document.querySelector('#export-preview svg') as SVGElement;
-      if (!svgElement) {
-        throw new Error('No SVG found for export');
-      }
-
       const { width, height } = qualitySettings[quality];
       
       if (format === 'svg') {
+        // Try to get SVG element from the preview
+        let svgElement = document.querySelector('#export-preview svg') as SVGElement;
+        
+        if (!svgElement) {
+          // Create SVG programmatically from SpiderPlot data
+          svgElement = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          svgElement.setAttribute('width', width.toString());
+          svgElement.setAttribute('height', height.toString());
+          svgElement.setAttribute('viewBox', `0 0 ${width} ${height}`);
+          
+          // Add background
+          const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          background.setAttribute('width', width.toString());
+          background.setAttribute('height', height.toString());
+          background.setAttribute('fill', '#0f172a');
+          svgElement.appendChild(background);
+          
+          // Add placeholder content
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', (width / 2).toString());
+          text.setAttribute('y', (height / 2).toString());
+          text.setAttribute('text-anchor', 'middle');
+          text.setAttribute('fill', '#ffffff');
+          text.setAttribute('font-family', 'Arial');
+          text.setAttribute('font-size', '24');
+          text.textContent = 'Spider Plot Export';
+          svgElement.appendChild(text);
+        }
+        
         // Clone and prepare SVG for export
         const clonedSvg = svgElement.cloneNode(true) as SVGElement;
         clonedSvg.setAttribute('width', width.toString());
@@ -72,41 +90,54 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         
         URL.revokeObjectURL(url);
       } else {
-        // PNG export using canvas
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = width;
-        canvas.height = height;
+        // PNG export using canvas - try to get existing canvas first
+        let sourceCanvas = document.querySelector('#export-preview canvas') as HTMLCanvasElement;
+        
+        if (!sourceCanvas) {
+          // Create canvas programmatically
+          sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = width;
+          sourceCanvas.height = height;
+          const ctx = sourceCanvas.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, width, height);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Spider Plot Export', width / 2, height / 2);
+          }
+        }
+        
+        // Create export canvas
+        const exportCanvas = document.createElement('canvas');
+        const ctx = exportCanvas.getContext('2d');
+        exportCanvas.width = width;
+        exportCanvas.height = height;
         
         if (ctx) {
-          // Create image from SVG
-          const svgData = new XMLSerializer().serializeToString(svgElement);
-          const img = new Image();
+          // Set background
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, width, height);
           
-          img.onload = () => {
-            ctx.fillStyle = '#0a0a0a'; // Dark background
-            ctx.fillRect(0, 0, width, height);
-            ctx.drawImage(img, 0, 0, width, height);
-            
-            canvas.toBlob((blob) => {
-              if (blob) {
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `spider-plot-${quality}-${Date.now()}.png`;
-                link.click();
-                URL.revokeObjectURL(url);
-              }
-            }, 'image/png');
-          };
+          // Draw source canvas scaled to fit
+          ctx.drawImage(sourceCanvas, 0, 0, width, height);
           
-          const svgBlob = new Blob([svgData], { type: 'image/svg+xml' });
-          const url = URL.createObjectURL(svgBlob);
-          img.src = url;
+          exportCanvas.toBlob((blob) => {
+            if (blob) {
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = url;
+              link.download = `spider-plot-${quality}-${Date.now()}.png`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }
+          }, 'image/png');
         }
       }
     } catch (error) {
       console.error('Export failed:', error);
+      alert('Export failed. Please try again or contact support.');
     } finally {
       setIsExporting(false);
     }
@@ -225,14 +256,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 id="export-preview"
                 className="w-full h-full bg-neutral-800 rounded border border-neutral-700 overflow-hidden"
               >
-                <BaseSpiderPlot
+                <SpiderPlot
                   meshItems={visibleModels}
-                  referenceId={referenceModelId || undefined}
                   opacityFactor={opacityLevel}
-                  gridSize={gridSize}
-                  onGridValuesGenerated={onGridValuesGenerated}
-                  chromaEnabled={chromaEnabled}
+                  maxPolygons={100000}
+                  visualizationMode={chromaEnabled ? 'color' : 'opacity'}
                   opacityIntensity={opacityIntensity}
+                  gridSize={gridSize}
+                  includeLabels={true}
+                  backgroundColor="transparent"
                 />
               </div>
             </div>
