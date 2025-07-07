@@ -5,8 +5,37 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/CLAUDE_inspiration.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/BaseSpiderPlot.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/DataTableTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/DataTableTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/MathDetailsTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/MathDetailsTab.tsx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/OrchestratorTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/OrchestratorTab.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/PerformanceControls.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/PerformanceControls.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/TileRenderingExample.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/TileRenderingExample.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ExportModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ExportModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/LayersControl.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/LayersControl.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SavedProfiles.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SavedProfiles.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ToolboxComponent.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ToolboxComponent.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/types.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/types/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/types/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/impedance.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/impedance.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/meshComputation.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/meshComputation.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/parameter-space.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/parameter-space.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/smartGridFiltering.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/smartGridFiltering.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/spider-utils.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/spider-utils.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/spider.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/tileRenderer.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/tileRenderer.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/types.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/CrashSafeSpiderPlot.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/TiledSpiderPlot.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/utils.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/public/grid-worker.js" beforeDir="false" afterPath="$PROJECT_DIR$/public/grid-worker.js" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -16,23 +45,28 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 0
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 0
+}</component>
   <component name="ProjectId" id="2zQ7kWHdFnLsXKPZWysyk42rZlg" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "main",
-    "last_opened_file_path": "/Users/tejjaskaul/nei-viz-project"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/tejjaskaul/nei-viz-project&quot;
   }
-}]]></component>
+}</component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>

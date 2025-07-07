@@ -122,6 +122,69 @@ function generateLogSpace(min, max, num) {
   return result;
 }
 
+// Stream grid points in chunks to prevent memory overflow
+function* streamGridPoints(gridSize, useSymmetricGrid) {
+  const totalPoints = Math.pow(gridSize, 5);
+  
+  // Generate parameter ranges
+  const rsValues = generateLogSpace(10, 10000, gridSize);
+  const raValues = generateLogSpace(10, 10000, gridSize);
+  const rbValues = generateLogSpace(10, 10000, gridSize);
+  const caValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
+  const cbValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
+  
+  let generatedCount = 0;
+  
+  // Use iterative approach to avoid stack overflow
+  for (let pointIndex = 0; pointIndex < totalPoints; pointIndex++) {
+    // Convert linear index to 5D coordinates
+    let temp = pointIndex;
+    const cbIndex = temp % gridSize;
+    temp = Math.floor(temp / gridSize);
+    const rbIndex = temp % gridSize;
+    temp = Math.floor(temp / gridSize);
+    const caIndex = temp % gridSize;
+    temp = Math.floor(temp / gridSize);
+    const raIndex = temp % gridSize;
+    const rsIndex = Math.floor(temp / gridSize);
+    
+    const Rs = rsValues[rsIndex];
+    const Ra = raValues[raIndex];
+    const Ca = caValues[caIndex];
+    const Rb = rbValues[rbIndex];
+    const Cb = cbValues[cbIndex];
+    
+    // Symmetric grid optimization: skip duplicates where Ra/Ca > Rb/Cb
+    if (useSymmetricGrid) {
+      // Calculate time constants tau = RC for comparison
+      const tauA = Ra * Ca;
+      const tauB = Rb * Cb;
+      
+      // Skip this combination if tauA > tauB (we'll get the equivalent from the swapped version)
+      if (tauA > tauB) {
+        continue;
+      }
+      
+      // If time constants are equal, enforce Ra <= Rb to break ties
+      if (Math.abs(tauA - tauB) < 1e-15 && Ra > Rb) {
+        continue;
+      }
+    }
+    
+    generatedCount++;
+    
+    // Yield the point and progress info
+    yield {
+      point: { Rs, Ra, Ca, Rb, Cb },
+      progress: {
+        generated: generatedCount,
+        processed: pointIndex + 1,
+        total: totalPoints
+      }
+    };
+  }
+}
+
 // Main worker message handler
 self.onmessage = function(e) {
   const { type, data } = e.data;
@@ -226,8 +289,8 @@ self.onmessage = function(e) {
         const { gridSize, useSymmetricGrid } = data;
         
         // Safety check for grid size to prevent memory issues
-        if (gridSize > 25) {
-          throw new Error('Grid size too large: maximum allowed is 25 points per dimension');
+        if (gridSize > 20) {
+          throw new Error('Grid size too large: maximum allowed is 20 points per dimension');
         }
         
         const totalPoints = Math.pow(gridSize, 5);
@@ -235,82 +298,32 @@ self.onmessage = function(e) {
           throw new Error(`Grid too large: ${totalPoints.toLocaleString()} points would exceed memory limits`);
         }
         
-        // Generate parameter ranges - use log space for Rs for consistency
-        const rsValues = generateLogSpace(10, 10000, gridSize);
-        const raValues = generateLogSpace(10, 10000, gridSize);
-        const rbValues = generateLogSpace(10, 10000, gridSize);
-        const caValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
-        const cbValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
-        
-        // Generate all combinations using iterative approach to avoid stack overflow
+        // Use streaming approach to prevent memory overflow
         const gridPoints = [];
-        let generatedCount = 0;
-        let estimatedTotal = totalPoints;
+        const stream = streamGridPoints(gridSize, useSymmetricGrid);
+        let lastProgressReport = 0;
         
-        // If using symmetric grid, estimate roughly half the points
-        if (useSymmetricGrid) {
-          estimatedTotal = Math.floor(totalPoints / 2);
-        }
-        
-        // Use iterative approach instead of nested loops
-        for (let pointIndex = 0; pointIndex < totalPoints; pointIndex++) {
-          // Convert linear index to 5D coordinates
-          let temp = pointIndex;
-          const cbIndex = temp % gridSize;
-          temp = Math.floor(temp / gridSize);
-          const rbIndex = temp % gridSize;
-          temp = Math.floor(temp / gridSize);
-          const caIndex = temp % gridSize;
-          temp = Math.floor(temp / gridSize);
-          const raIndex = temp % gridSize;
-          const rsIndex = Math.floor(temp / gridSize);
+        for (const { point, progress } of stream) {
+          gridPoints.push(point);
           
-          const Rs = rsValues[rsIndex];
-          const Ra = raValues[raIndex];
-          const Ca = caValues[caIndex];
-          const Rb = rbValues[rbIndex];
-          const Cb = cbValues[cbIndex];
-          
-          // Symmetric grid optimization: skip duplicates where Ra/Ca > Rb/Cb
-          if (useSymmetricGrid) {
-            // Calculate time constants tau = RC for comparison
-            const tauA = Ra * Ca;
-            const tauB = Rb * Cb;
-            
-            // Skip this combination if tauA > tauB (we'll get the equivalent from the swapped version)
-            // This enforces tauA <= tauB to avoid duplicates
-            if (tauA > tauB) {
-              continue;
-            }
-            
-            // If time constants are equal, enforce Ra <= Rb to break ties
-            if (Math.abs(tauA - tauB) < 1e-15 && Ra > Rb) {
-              continue;
-            }
-          }
-          
-          // Generate point from indices
-          gridPoints.push({
-            Rs,
-            Ra,
-            Ca,
-            Rb,
-            Cb
-          });
-          
-          generatedCount++;
-          
-          // Report progress for large grids
-          if (generatedCount % 10000 === 0 || pointIndex === totalPoints - 1) {
+          // Report progress periodically to avoid flooding the main thread
+          if (progress.generated - lastProgressReport >= 1000 || progress.processed === progress.total) {
             self.postMessage({
               type: 'GENERATION_PROGRESS',
               data: {
-                generated: generatedCount,
-                total: estimatedTotal,
-                processed: pointIndex + 1,
-                skipped: pointIndex + 1 - generatedCount
+                generated: progress.generated,
+                total: progress.total,
+                processed: progress.processed,
+                skipped: progress.processed - progress.generated
               }
             });
+            lastProgressReport = progress.generated;
+          }
+          
+          // Yield control periodically to prevent blocking
+          if (progress.generated % 10000 === 0) {
+            // Small delay to allow other operations and garbage collection
+            setTimeout(() => {}, 0);
           }
         }
         
@@ -318,6 +331,69 @@ self.onmessage = function(e) {
           type: 'GRID_POINTS_GENERATED',
           data: { gridPoints }
         });
+        
+        break;
+      }
+      
+      case 'GENERATE_GRID_STREAM': {
+        const { gridSize, useSymmetricGrid, chunkSize = 1000 } = data;
+        
+        // Safety check for grid size
+        if (gridSize > 20) {
+          throw new Error('Grid size too large: maximum allowed is 20 points per dimension');
+        }
+        
+        const totalPoints = Math.pow(gridSize, 5);
+        if (totalPoints > 10000000) {
+          throw new Error(`Grid too large: ${totalPoints.toLocaleString()} points would exceed memory limits`);
+        }
+        
+        // Stream grid points in chunks to prevent memory overflow
+        const stream = streamGridPoints(gridSize, useSymmetricGrid);
+        let currentChunk = [];
+        let totalGenerated = 0;
+        
+        for (const { point, progress } of stream) {
+          currentChunk.push(point);
+          totalGenerated = progress.generated;
+          
+          // Send chunk when it reaches the target size
+          if (currentChunk.length >= chunkSize) {
+            self.postMessage({
+              type: 'GRID_CHUNK_READY',
+              data: {
+                chunk: currentChunk,
+                progress: {
+                  generated: totalGenerated,
+                  total: progress.total,
+                  processed: progress.processed
+                }
+              }
+            });
+            
+                         // Clear chunk to free memory
+             currentChunk = [];
+             
+             // Small delay to prevent blocking and allow garbage collection
+             setTimeout(() => {}, 0);
+          }
+        }
+        
+        // Send any remaining points
+        if (currentChunk.length > 0) {
+          self.postMessage({
+            type: 'GRID_CHUNK_READY',
+            data: {
+              chunk: currentChunk,
+              progress: {
+                generated: totalGenerated,
+                total: totalPoints,
+                processed: totalPoints,
+                isComplete: true
+              }
+            }
+          });
+        }
         
         break;
       }

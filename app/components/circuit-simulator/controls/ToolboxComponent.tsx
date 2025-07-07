@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CircuitParameters } from '../../circuit-simulator/types/parameters';
+import { CircuitParameters } from '../types/parameters';
 import { ParamSlider } from '../ParamSlider';
-import { ModelSnapshot } from '../../circuit-simulator/utils/types';
-import { generateLogSpace } from '../../circuit-simulator/utils/parameter-space';
+import { ModelSnapshot } from '../types';
+import { generateLogSpace } from '../utils/parameter-space';
 
 import { SaveProfileModal } from './SaveProfileModal';
 import { PerformanceControls, PerformanceSettings } from './PerformanceControls';

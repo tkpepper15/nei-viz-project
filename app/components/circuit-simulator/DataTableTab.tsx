@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { BackendMeshPoint, ResnormGroup, GridParameterArrays } from './utils/types';
+import { BackendMeshPoint, ResnormGroup, GridParameterArrays } from './types';
 import { CircuitParameters } from './types/parameters';
 
 interface DataTableTabProps {

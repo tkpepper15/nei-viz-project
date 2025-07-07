@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { BaseSpiderPlot, BaseSpiderPlotRef } from './BaseSpiderPlot';
-import { ModelSnapshot, ResnormGroup } from './utils/types';
+import React, { useState, useEffect } from 'react';
+import { SpiderPlot } from './visualizations/SpiderPlot';
+import { ModelSnapshot, ResnormGroup } from './types';
 import { GridParameterArrays } from './types';
 import { ExportModal } from './controls/ExportModal';
 import { ResizableSplitPane } from './controls/ResizableSplitPane';
@@ -25,9 +25,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   resnormGroups,
   hiddenGroups,
   opacityLevel,
-  referenceModelId,
+  referenceModelId: _referenceModelId, // eslint-disable-line @typescript-eslint/no-unused-vars
   gridSize,
-  onGridValuesGenerated,
+  onGridValuesGenerated: _onGridValuesGenerated, // eslint-disable-line @typescript-eslint/no-unused-vars
   // View control props
   onZoomIn,
   onZoomOut,
@@ -46,25 +46,14 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   
   // Add view control state - use props if provided, otherwise internal state
   const [internalZoomLevel, setInternalZoomLevel] = useState(1.0);
-  const [internalShowLabels, setInternalShowLabels] = useState(true);
-  
-  // Create ref to BaseSpiderPlot
-  const spiderPlotRef = useRef<BaseSpiderPlotRef>(null);
   
   // Use external props if provided, otherwise use internal state
   const currentZoomLevel = zoomLevel !== undefined ? zoomLevel : internalZoomLevel;
-  const currentShowLabels = showLabels !== undefined ? showLabels : internalShowLabels;
+  const currentShowLabels = showLabels !== undefined ? showLabels : true;
 
-  // Update zoom level display periodically by polling the ref
+  // Zoom level is not available in optimized SpiderPlot
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (spiderPlotRef.current) {
-        const currentZoom = spiderPlotRef.current.getZoomLevel();
-        setInternalZoomLevel(currentZoom);
-      }
-    }, 100); // Update every 100ms for smooth display
-
-    return () => clearInterval(interval);
+    setInternalZoomLevel(1.0);
   }, []);
   
   // Add state for selected groups for opacity contrast (multi-select)
@@ -175,7 +164,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       setSliderValue(highContrastSliderPos);
       setOpacityIntensity(sliderToOpacityIntensity(highContrastSliderPos));
     }
-  }, [selectedOpacityGroups, resnormGroups?.length]);
+  }, [selectedOpacityGroups, resnormGroups?.length, opacityIntensityToSlider, sliderToOpacityIntensity]);
 
   // Reset selected groups if they don't exist or set default (fixed infinite loop)
   useEffect(() => {
@@ -194,40 +183,28 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [resnormGroups?.length]); // Only depend on resnormGroups.length to avoid infinite loop
 
-  // Zoom control functions - use external handlers if provided
+  // Zoom control functions - not available in optimized SpiderPlot
   const handleZoomIn = () => {
     if (onZoomIn) {
       onZoomIn();
-    } else {
-      spiderPlotRef.current?.zoomIn();
-      setInternalZoomLevel(prev => Math.min(prev * 1.15, 8.0));
     }
   };
 
   const handleZoomOut = () => {
     if (onZoomOut) {
       onZoomOut();
-    } else {
-      spiderPlotRef.current?.zoomOut();
-      setInternalZoomLevel(prev => Math.max(prev / 1.15, 0.2));
     }
   };
 
   const handleResetZoom = () => {
     if (onResetZoom) {
       onResetZoom();
-    } else {
-      spiderPlotRef.current?.resetZoom();
-      setInternalZoomLevel(1.0);
     }
   };
 
   const handleToggleLabels = () => {
     if (onToggleLabels) {
       onToggleLabels();
-    } else {
-      spiderPlotRef.current?.toggleLabels();
-      setInternalShowLabels(prev => !prev);
     }
   };
 
@@ -238,9 +215,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
   // Get visible models based on selectedOpacityGroups for display
   const visibleModels: ModelSnapshot[] = (() => {
-    // If no groups are selected for opacity, show all non-hidden groups
+    // If no groups are selected for opacity, show NOTHING (not all models)
     if (selectedOpacityGroups.length === 0) {
-      return allAvailableModels;
+      return [];
     }
     
     // Only show models from selected opacity groups (and not hidden)
@@ -286,9 +263,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         visibleModels={allAvailableModels}
-        referenceModelId={referenceModelId}
         opacityLevel={opacityLevel}
-        onGridValuesGenerated={onGridValuesGenerated}
         chromaEnabled={chromaEnabled}
         opacityIntensity={opacityIntensity}
         gridSize={gridSize}
@@ -345,26 +320,35 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
           <div className="flex-1 p-2 min-h-0">
             <div className="spider-visualization w-full h-full min-h-0 flex items-center justify-center">
               <div className="w-full h-full max-w-full max-h-full">
-                <BaseSpiderPlot
-                  ref={spiderPlotRef}
+                <SpiderPlot
                   meshItems={visibleModels.filter(model => model.parameters !== undefined)}
-                  referenceId={referenceModelId || undefined}
                   opacityFactor={opacityLevel}
-                  gridSize={gridSize}
-                  onGridValuesGenerated={onGridValuesGenerated}
-                  chromaEnabled={chromaEnabled}
+                  maxPolygons={100000}
+                  visualizationMode={chromaEnabled ? 'color' : 'opacity'}
                   opacityIntensity={opacityIntensity}
-                  selectedOpacityGroups={selectedOpacityGroups}
-                  resnormGroups={resnormGroups}
+                  gridSize={gridSize}
+                  includeLabels={true}
+                  backgroundColor="transparent"
                 />
               </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="bg-neutral-800 rounded border border-neutral-700 text-center h-full flex items-center justify-center">
-          <div className="text-neutral-400 text-sm">
-            No data to visualize. Run a computation to generate results.
+        <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex items-center justify-center">
+          <div className="text-center max-w-md mx-auto p-8">
+            <div className="w-24 h-24 mx-auto mb-6 bg-neutral-700 rounded-full flex items-center justify-center">
+              <svg className="w-12 h-12 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-medium text-neutral-200 mb-2">No Data to Visualize</h3>
+            <p className="text-sm text-neutral-400 mb-4">
+              Run a parameter grid computation to generate spider plot visualization data.
+            </p>
+            <div className="text-xs text-neutral-500">
+              Use the controls on the left to set parameters and start computation.
+            </div>
           </div>
         </div>
       )}
@@ -406,9 +390,18 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
           {/* Right side - Mode-specific info */}
           <div className="flex-1 flex justify-end items-center gap-4">
-            <span className="text-xs text-neutral-400">
-              {visibleModels.length} models visible
-            </span>
+            {selectedOpacityGroups.length === 0 ? (
+              <span className="text-xs text-amber-400 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                No groups selected
+              </span>
+            ) : (
+              <span className="text-xs text-neutral-400">
+                {visibleModels.length} models visible
+              </span>
+            )}
             <span className="text-xs font-mono text-neutral-200 bg-neutral-700 px-2 py-1 rounded border">
               {isClient 
                 ? (opacityIntensity >= 0.01 
@@ -421,54 +414,34 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Content Panel - Always scrollable, proper overflow handling */}
+      {/* Compact Content Panel */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <div className="p-4 space-y-4"
+        <div className="p-3 space-y-3"
              style={{ scrollbarWidth: 'thin', scrollbarColor: '#4B5563 #1F2937' }}>
-        {/* Show Slider Controls */}
-        <div className="space-y-4">
+        {/* Opacity Contrast Controls */}
+        <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-neutral-200">Opacity Contrast</h3>
             <button
               onClick={() => setShowDistribution(!showDistribution)}
-              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
                 showDistribution
                   ? 'bg-amber-500 text-white hover:bg-amber-600'
                   : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
               }`}
             >
-              {showDistribution ? 'Hide' : 'Show'} Distribution
+              {showDistribution ? 'Hide' : 'Show'} Stats
             </button>
           </div>
 
           {/* Group Selection Toggle */}
           <div className="space-y-2">
-            <label className="text-xs font-medium text-neutral-300">Apply contrast to:</label>
+            <label className="text-xs font-medium text-neutral-300">Show groups:</label>
             
             {/* Horizontal toggle buttons */}
             {resnormGroups && resnormGroups.length > 0 ? (
-              <div className="flex gap-1.5 flex-wrap">
-                {/* All Groups button */}
-                <button
-                  onClick={() => {
-                    // Toggle all groups - if all selected, deselect all; otherwise select all
-                    if (resnormGroups && selectedOpacityGroups.length === resnormGroups.length) {
-                      setSelectedOpacityGroups([]);
-                    } else if (resnormGroups) {
-                      setSelectedOpacityGroups(resnormGroups.map((_, index) => index));
-                    }
-                  }}
-                  className={`px-2.5 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
-                    resnormGroups && selectedOpacityGroups.length === resnormGroups.length
-                      ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
-                      : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
-                  }`}
-                >
-                  <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-400 to-red-500 opacity-70" />
-                  All{resnormGroups && selectedOpacityGroups.length === resnormGroups.length ? ' ✓' : ''}
-                </button>
-                
-                {/* Individual group buttons */}
+              <div className="flex gap-1 flex-wrap">
+                {/* Individual group buttons only */}
                 {resnormGroups.map((group, index) => {
                   const isSelected = selectedOpacityGroups.includes(index);
                   return (
@@ -482,107 +455,118 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           setSelectedOpacityGroups([...selectedOpacityGroups, index]);
                         }
                       }}
-                      className={`px-2.5 py-1.5 text-xs font-medium rounded transition-all flex items-center gap-1.5 ${
+                      className={`px-2 py-1 text-xs font-medium rounded transition-all flex items-center gap-1 ${
                         isSelected
                           ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
                           : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
                       }`}
                     >
                       <div 
-                        className="w-2 h-2 rounded-full" 
+                        className="w-1.5 h-1.5 rounded-full" 
                         style={{ backgroundColor: group.color }}
                       />
-                      {group.label.split(' ')[0]}{isSelected ? ' ✓' : ''}
-                      <span className="text-[10px] opacity-60 ml-0.5">({group.items.length})</span>
+                      {group.label.split(' ')[0]}
+                      <span className="text-[10px] opacity-60">({group.items.length})</span>
                     </button>
                   );
                 })}
+                
+                {/* Clear All button */}
+                {selectedOpacityGroups.length > 0 && (
+                  <button
+                    onClick={() => setSelectedOpacityGroups([])}
+                    className="px-2 py-1 text-xs font-medium rounded transition-colors bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-600/30"
+                  >
+                    Clear
+                  </button>
+                )}
               </div>
             ) : (
               <div className="text-xs text-neutral-500 italic">
                 Run computation to enable group selection
               </div>
             )}
-            
-
           </div>
           
-          <div className="space-y-2">
-            {/* Dynamic range indicator */}
-            {(() => {
-              const { min, max, dynamic } = getContextualRange();
-              return dynamic && (
-                <div className="flex items-center justify-between text-xs mb-2">
-                  <span className="text-blue-400 font-medium flex items-center gap-1">
-                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                    Dynamic Range Active
-                  </span>
-                  <span className="text-neutral-400 font-mono">
-                    {min.toExponential(1)} - {max.toExponential(1)}
-                  </span>
-                </div>
-              );
-            })()}
+          {/* Opacity Intensity Slider */}
+          {selectedOpacityGroups.length > 0 && (
+            <div className="space-y-2">
+              {/* Dynamic range indicator */}
+              {(() => {
+                const { min, max, dynamic } = getContextualRange();
+                return dynamic && (
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-blue-400 font-medium flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></div>
+                      Dynamic Range
+                    </span>
+                    <span className="text-neutral-400 font-mono text-[10px]">
+                      {min.toExponential(1)} - {max.toExponential(1)}
+                    </span>
+                  </div>
+                );
+              })()}
 
-            <div className="relative">
-              <div className="absolute top-1/2 left-0 right-0 h-2 bg-neutral-600 rounded-lg transform -translate-y-1/2"></div>
-              <div 
-                className={`absolute top-1/2 left-0 h-2 rounded-lg transform -translate-y-1/2 transition-all duration-200 ${
-                  getContextualRange().dynamic 
-                    ? 'bg-gradient-to-r from-blue-500/60 to-blue-400' 
-                    : 'bg-gradient-to-r from-primary/60 to-primary'
-                }`}
-                style={{ width: `${isClient ? sliderValue : 0}%` }}
-              ></div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={isClient ? sliderValue : 0}
-                onChange={(e) => handleOpacityChange(e.target.value)}
-                className="relative w-full h-4 bg-transparent appearance-none cursor-pointer slider z-10"
-              />
-            </div>
-            <div className="flex justify-between text-xs text-neutral-400">
-              <span>High Contrast</span>
-              <span>Low Contrast</span>
-            </div>
-            {getContextualRange().dynamic && (
-              <div className="text-xs text-blue-300 text-center mt-1">
-                Contrast optimized for selected groups
+              <div className="relative">
+                <div className="absolute top-1/2 left-0 right-0 h-1.5 bg-neutral-600 rounded transform -translate-y-1/2"></div>
+                <div 
+                  className={`absolute top-1/2 left-0 h-1.5 rounded transform -translate-y-1/2 transition-all duration-200 ${
+                    getContextualRange().dynamic 
+                      ? 'bg-gradient-to-r from-blue-500/60 to-blue-400' 
+                      : 'bg-gradient-to-r from-primary/60 to-primary'
+                  }`}
+                  style={{ width: `${isClient ? sliderValue : 0}%` }}
+                ></div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={isClient ? sliderValue : 0}
+                  onChange={(e) => handleOpacityChange(e.target.value)}
+                  className="relative w-full h-3 bg-transparent appearance-none cursor-pointer slider z-10"
+                />
               </div>
-            )}
-          </div>
+              <div className="flex justify-between text-[10px] text-neutral-400">
+                <span>High Contrast</span>
+                <span>Low Contrast</span>
+              </div>
+              {getContextualRange().dynamic && (
+                <div className="text-[10px] text-blue-300 text-center">
+                  Range optimized for selected groups
+                </div>
+              )}
+            </div>
+          )}
 
-          {/* Distribution Panel for Opacity Mode */}
-          {showDistribution && resnormStats && (
-            <div className="mt-6 space-y-4 p-4 bg-neutral-900 rounded-lg border border-neutral-600">
-              <h4 className="text-sm font-medium text-neutral-200">
-                Distribution Analysis
+          {/* Distribution Panel */}
+          {showDistribution && resnormStats && selectedOpacityGroups.length > 0 && (
+            <div className="space-y-2 p-3 bg-neutral-900 rounded border border-neutral-600">
+              <h4 className="text-xs font-medium text-neutral-200">
+                Stats
                 {selectedOpacityGroups.length > 0 && resnormGroups && selectedOpacityGroups.length < resnormGroups.length && (
-                                    <span className="text-xs font-normal text-neutral-400 ml-2">
-                  ({selectedOpacityGroups.map(i => resnormGroups[i]?.label.split(' ')[0]).join(', ')})
-                </span>
+                  <span className="text-[10px] font-normal text-neutral-400 ml-2">
+                    ({selectedOpacityGroups.map(i => resnormGroups[i]?.label.split(' ')[0]).join(', ')})
+                  </span>
                 )}
               </h4>
               
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-2">
                 <div className="bg-neutral-700 p-2 rounded">
-                  <div className="text-xs text-neutral-400">Count</div>
-                  <div className="text-sm font-mono text-neutral-200">{resnormValues.length}</div>
+                  <div className="text-[10px] text-neutral-400">Count</div>
+                  <div className="text-xs font-mono text-neutral-200">{resnormValues.length}</div>
                 </div>
                 <div className="bg-neutral-700 p-2 rounded">
-                  <div className="text-xs text-neutral-400">Min</div>
-                  <div className="text-sm font-mono text-neutral-200">{resnormStats.min.toExponential(2)}</div>
+                  <div className="text-[10px] text-neutral-400">Min</div>
+                  <div className="text-xs font-mono text-neutral-200">{resnormStats.min.toExponential(1)}</div>
                 </div>
                 <div className="bg-neutral-700 p-2 rounded">
-                  <div className="text-xs text-neutral-400">Max</div>
-                  <div className="text-sm font-mono text-neutral-200">{resnormStats.max.toExponential(2)}</div>
+                  <div className="text-[10px] text-neutral-400">Max</div>
+                  <div className="text-xs font-mono text-neutral-200">{resnormStats.max.toExponential(1)}</div>
                 </div>
                 <div className="bg-neutral-700 p-2 rounded">
-                  <div className="text-xs text-neutral-400">Median</div>
-                  <div className="text-sm font-mono text-neutral-200">{resnormStats.median.toExponential(2)}</div>
+                  <div className="text-[10px] text-neutral-400">Median</div>
+                  <div className="text-xs font-mono text-neutral-200">{resnormStats.median.toExponential(1)}</div>
                 </div>
               </div>
             </div>
@@ -593,8 +577,16 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     </div>
   ) : (
     <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex items-center justify-center">
-      <div className="text-neutral-400 text-sm">
-        No controls available. Run a computation to enable controls.
+      <div className="text-center max-w-sm mx-auto p-6">
+        <div className="w-16 h-16 mx-auto mb-4 bg-neutral-700 rounded-full flex items-center justify-center">
+          <svg className="w-8 h-8 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+          </svg>
+        </div>
+        <h4 className="text-sm font-medium text-neutral-300 mb-2">Controls Unavailable</h4>
+        <p className="text-xs text-neutral-500">
+          Run a computation to enable visualization controls.
+        </p>
       </div>
     </div>
   );
@@ -602,9 +594,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   return (
     <div className="h-full">
       <ResizableSplitPane 
-        defaultSplitHeight={35}
-        minTopHeight={280}
-        minBottomHeight={250}
+        defaultSplitHeight={70}
+        minTopHeight={400}
+        minBottomHeight={180}
       >
         <div key="spider-plot">{spiderPlotContent}</div>
         <div key="controls">{controlsContent}</div>

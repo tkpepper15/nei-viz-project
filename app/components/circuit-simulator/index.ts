@@ -13,5 +13,4 @@ export * from './visualizations';
 export { CircuitSimulator } from '../CircuitSimulator';
 
 // Export all components for easier imports
-export { ParamSlider } from './ParamSlider';
-export { BaseSpiderPlot } from './BaseSpiderPlot'; 
+export { ParamSlider } from './ParamSlider'; 

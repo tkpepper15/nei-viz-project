@@ -65,17 +65,17 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Header */}
-      <div className="px-3 py-2 border-b border-neutral-700">
+    <div className="flex-1 flex flex-col min-h-0">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-10 bg-neutral-900 px-3 py-2 border-b border-neutral-700">
         <h3 className="text-sm font-medium text-neutral-200">Saved Profiles</h3>
         <p className="text-xs text-neutral-400">
           {profiles.length} profile{profiles.length !== 1 ? 's' : ''}
         </p>
       </div>
       
-      {/* Profiles List */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Scrollable Profiles List */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-neutral-900 scrollbar-thumb-neutral-700 hover:scrollbar-thumb-neutral-600">
         {profiles.length === 0 ? (
           <div className="p-4 text-center">
             <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

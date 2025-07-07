@@ -213,7 +213,6 @@ export const computeRegressionMesh = async (
       id: `mesh-folder-${Date.now()}`,
       name: `Mesh Fits for ${activeSnapshot.name}`,
       isExpanded: true,
-      timestamp: Date.now(),
       items: meshSnapshots,
       parentId: activeSnapshot.id,  // Link to parent state
       isVisible: true

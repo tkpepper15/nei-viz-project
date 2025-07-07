@@ -1,6 +1,8 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ResnormGroup } from './utils/types';
+import React, { useState, useRef, useEffect, useCallback, JSX } from 'react';
+import { ResnormGroup, ModelSnapshot } from './types';
 import { SavedProfile } from './types/savedProfiles';
+import { SpiderPlot } from './visualizations/SpiderPlot';
+import { ResizableSplitPane } from './controls/ResizableSplitPane';
 
 interface OrchestratorTabProps {
   resnormGroups: ResnormGroup[];
@@ -8,20 +10,6 @@ interface OrchestratorTabProps {
   generateProfileMeshData?: (profile: SavedProfile, sampleSize?: number) => ModelSnapshot[];
 }
 
-interface ModelSnapshot {
-  id: string;
-  name?: string;
-  parameters: {
-    Rs: number;
-    Ra: number;
-    Rb: number;
-    Ca: number;
-    Cb: number;
-  };
-  resnorm: number;
-  color?: string;
-  opacity?: number;
-}
 
 interface RenderJob {
   id: string;
@@ -50,47 +38,269 @@ interface RenderJob {
   error?: string;
 }
 
+// Temporarily commented out unused interface
+/*
 interface DownloadOptions {
   format: 'png' | 'svg' | 'pdf' | 'webp' | 'jpg';
   quality: number;
   scale: number;
 }
+*/
 
 export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
   resnormGroups,
   savedProfiles = [],
-  generateProfileMeshData
-}) => {
+  generateProfileMeshData: _generateProfileMeshData // eslint-disable-line @typescript-eslint/no-unused-vars
+}): JSX.Element => {
   const [renderJobs, setRenderJobs] = useState<RenderJob[]>([]);
   const [hasLoadedJobs, setHasLoadedJobs] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   // Profile computation state
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
-  const [profileMeshData, setProfileMeshData] = useState<{ [profileId: string]: ModelSnapshot[] }>({});
   
-  // Image generation settings
+  // Simplified image generation settings - matching playground design
   const [format, setFormat] = useState<'png' | 'svg' | 'pdf' | 'webp' | 'jpg'>('png');
   const [resolution, setResolution] = useState('1920x1080');
   const [quality, setQuality] = useState(95);
   const [includeLabels, setIncludeLabels] = useState(true);
   const [chromaEnabled, setChromaEnabled] = useState(true);
   const [backgroundColor, setBackgroundColor] = useState<'transparent' | 'white' | 'black'>('transparent');
-  const [opacityFactor, setOpacityFactor] = useState(1.0);
-  const [visualizationMode, setVisualizationMode] = useState<'color' | 'opacity'>('color');
-  const [opacityIntensity, setOpacityIntensity] = useState(1.0);
-
-  // Download options for individual jobs
-  const [downloadOptions, setDownloadOptions] = useState<{ [jobId: string]: DownloadOptions }>({});
+  
+  // Opacity contrast controls from playground
+  const [showDistribution, setShowDistribution] = useState(false);
+  const [opacityIntensity, setOpacityIntensity] = useState<number>(1e-30);
+  const [sliderValue, setSliderValue] = useState<number>(0);
+  const [selectedOpacityGroups, setSelectedOpacityGroups] = useState<number[]>([0]);
+  const [isClient, setIsClient] = useState(false);
+  const [previewMeshData, setPreviewMeshData] = useState<ModelSnapshot[]>([]);
+  const [opacityLevel] = useState<number>(0.7);
 
   // Helper function for file size formatting
-  const formatFileSize = useCallback((bytes: number): string => {
+  const formatFileSize = useCallback((bytes: number): string => { // eslint-disable-line @typescript-eslint/no-unused-vars
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }, []);
+  
+  // Generate sample mesh data for preview
+  const generateSampleMeshData = useCallback(() => {
+    const sampleData: ModelSnapshot[] = [];
+    
+    // Generate 135 sample points (similar to 3^5 grid)
+    for (let i = 0; i < 135; i++) {
+      const resnorm = Math.random() * 0.1 + 0.001; // Random resnorm between 0.001 and 0.101
+      sampleData.push({
+        id: `sample-${i}`,
+        name: `Sample ${i}`,
+        timestamp: Date.now(),
+        parameters: {
+          Rs: 10 + Math.random() * 9990,
+          Ra: 10 + Math.random() * 9990,
+          Rb: 10 + Math.random() * 9990,
+          Ca: 0.1e-6 + Math.random() * 49.9e-6,
+          Cb: 0.1e-6 + Math.random() * 49.9e-6,
+          frequency_range: [0.1, 10000]
+        },
+        data: [], // Empty impedance data for preview
+        resnorm,
+        color: '#3B82F6',
+        isVisible: true,
+        opacity: 1.0
+      });
+    }
+    
+    return sampleData;
+  }, []);
+  
+  // Opacity contrast functions from playground
+  const getContextualRange = useCallback((): { min: number; max: number; dynamic: boolean } => {
+    if (selectedOpacityGroups.length === 0 || !resnormGroups || resnormGroups.length === 0) {
+      return { min: 1e-30, max: 10, dynamic: false };
+    }
+    
+    const selectedResnorms = selectedOpacityGroups
+      .flatMap(groupIndex => resnormGroups[groupIndex]?.items || [])
+      .map(model => model.resnorm)
+      .filter(r => r !== undefined && r > 0) as number[];
+    
+    if (selectedResnorms.length === 0) {
+      return { min: 1e-30, max: 10, dynamic: false };
+    }
+    
+    const sortedResnorms = [...selectedResnorms].sort((a, b) => a - b);
+    const minResnorm = sortedResnorms[0];
+    const maxResnorm = sortedResnorms[sortedResnorms.length - 1];
+    const p90 = sortedResnorms[Math.floor(sortedResnorms.length * 0.9)];
+    
+    const contextualMin = Math.max(minResnorm * 0.1, 1e-15);
+    const contextualMax = Math.min(maxResnorm * 2, p90 * 10);
+    
+    return { min: contextualMin, max: contextualMax, dynamic: true };
+  }, [selectedOpacityGroups, resnormGroups]);
+  
+  const sliderToOpacityIntensity = useCallback((sliderVal: number): number => {
+    const { min, max, dynamic } = getContextualRange();
+    
+    if (!dynamic) {
+      const minLog = Math.log10(1e-30);
+      const maxLog = Math.log10(10);
+      const logValue = minLog + (sliderVal / 100) * (maxLog - minLog);
+      return Math.pow(10, logValue);
+    }
+    
+    const minLog = Math.log10(min);
+    const maxLog = Math.log10(max);
+    const logValue = minLog + (sliderVal / 100) * (maxLog - minLog);
+    return Math.pow(10, logValue);
+  }, [getContextualRange]);
+  
+  const opacityIntensityToSlider = useCallback((opacityValue: number): number => {
+    const { min, max, dynamic } = getContextualRange();
+    
+    if (!dynamic) {
+      const minLog = Math.log10(1e-30);
+      const maxLog = Math.log10(10);
+      const logValue = Math.log10(Math.max(1e-30, Math.min(10, opacityValue)));
+      return ((logValue - minLog) / (maxLog - minLog)) * 100;
+    }
+    
+    const minLog = Math.log10(min);
+    const maxLog = Math.log10(max);
+    const logValue = Math.log10(Math.max(min, Math.min(max, opacityValue)));
+    return ((logValue - minLog) / (maxLog - minLog)) * 100;
+  }, [getContextualRange]);
+  
+  const handleOpacityChange = useCallback((newSliderValue: string) => {
+    const sliderVal = parseFloat(newSliderValue);
+    setSliderValue(sliderVal);
+    const mappedValue = sliderToOpacityIntensity(sliderVal);
+    setOpacityIntensity(mappedValue);
+  }, [sliderToOpacityIntensity]);
+  
+  // Initialize preview data and client state
+  useEffect(() => {
+    setIsClient(true);
+    setPreviewMeshData(generateSampleMeshData());
+    const initialSliderPos = opacityIntensityToSlider(1e-30);
+    setSliderValue(initialSliderPos);
+  }, [generateSampleMeshData, opacityIntensityToSlider]);
+  
+  // Generate resnorm groups from preview data
+  const generatePreviewResnormGroups = useCallback((meshData: ModelSnapshot[]): ResnormGroup[] => {
+    if (!meshData.length) return [];
+    
+    const resnorms = meshData.map(m => m.resnorm).filter(r => r !== undefined) as number[];
+    if (resnorms.length === 0) return [];
+    
+    const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+    const q1 = sortedResnorms[Math.floor(sortedResnorms.length * 0.25)];
+    const q2 = sortedResnorms[Math.floor(sortedResnorms.length * 0.5)];
+    const q3 = sortedResnorms[Math.floor(sortedResnorms.length * 0.75)];
+    const q4 = sortedResnorms[Math.floor(sortedResnorms.length * 0.9)];
+    
+    return [
+      {
+        range: [0, q1] as [number, number],
+        color: '#059669',
+        label: 'Excellent',
+        description: 'Top 25% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm <= q1)
+      },
+      {
+        range: [q1, q2] as [number, number],
+        color: '#10B981',
+        label: 'Good',
+        description: '25-50% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q1 && m.resnorm <= q2)
+      },
+      {
+        range: [q2, q3] as [number, number],
+        color: '#F59E0B',
+        label: 'Moderate',
+        description: '50-75% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q2 && m.resnorm <= q3)
+      },
+      {
+        range: [q3, q4] as [number, number],
+        color: '#F97316',
+        label: 'Acceptable',
+        description: '75-90% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q3 && m.resnorm <= q4)
+      },
+      {
+        range: [q4, Math.max(...resnorms)] as [number, number],
+        color: '#DC2626',
+        label: 'Poor',
+        description: 'Bottom 10% fits',
+        items: meshData.filter(m => m.resnorm !== undefined && m.resnorm > q4)
+      }
+    ].filter(g => g.items.length > 0);
+  }, []);
+  
+  // Generate preview resnorm groups
+  const previewResnormGroups = generatePreviewResnormGroups(previewMeshData);
+  
+  // Get visible models for preview
+  const getVisiblePreviewModels = (): ModelSnapshot[] => {
+    if (selectedOpacityGroups.length === 0) {
+      return previewMeshData;
+    }
+    
+    return previewResnormGroups
+      .filter((_, index) => selectedOpacityGroups.includes(index))
+      .flatMap(group => group.items);
+  };
+  
+  // Calculate resnorm statistics for distribution
+  const calculateResnormStats = (models: ModelSnapshot[]) => {
+    const resnormValues = models.map(model => model.resnorm).filter(r => r !== undefined) as number[];
+    if (resnormValues.length === 0) return null;
+    
+    let min = Infinity;
+    let max = -Infinity;
+    let sum = 0;
+    for (const value of resnormValues) {
+      if (value < min) min = value;
+      if (value > max) max = value;
+      sum += value;
+    }
+    const sortedValues = [...resnormValues].sort((a, b) => a - b);
+    return {
+      min,
+      max,
+      mean: sum / resnormValues.length,
+      median: sortedValues[Math.floor(resnormValues.length / 2)],
+      count: resnormValues.length
+    };
+  };
+  
+  // Download functionality
+  const downloadPreviewImage = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    try {
+      const dataUrl = canvas.toDataURL(`image/${format}`, quality / 100);
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `spider-plot-preview.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Download failed:', error);
+    }
+  }, [format, quality]);
+  
+  // Update selected groups when preview groups change
+  useEffect(() => {
+    if (previewResnormGroups.length > 0 && selectedOpacityGroups.length === 0) {
+      setSelectedOpacityGroups([0]);
+    }
+  }, [previewResnormGroups.length, selectedOpacityGroups.length]);
 
   // Load render jobs from localStorage on mount
   useEffect(() => {
@@ -125,6 +335,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     }
   }, [renderJobs, hasLoadedJobs]);
 
+  /*
   // Render actual spider plot exactly matching playground formatting
   const renderRealSpiderPlot = useCallback((
     canvas: HTMLCanvasElement, 
@@ -381,7 +592,9 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       ctx.fillText(infoText, centerX, height - 30);
     }
   }, []);
+  */
 
+  /*
   // Generate SVG representation using real data
   const generateSVGFromCanvas = useCallback((canvas: HTMLCanvasElement, parameters: RenderJob['parameters']): string => {
     // For SVG, we'll create a simplified version since the real rendering is complex
@@ -404,7 +617,9 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     svg += '</svg>';
     return `data:image/svg+xml;base64,${btoa(svg)}`;
   }, []);
+  */
 
+  /*
   // Generate image from current visualization
   const generateImage = useCallback(async (job: RenderJob): Promise<{ imageUrl: string; thumbnailUrl: string; fileSize: string }> => {
     return new Promise((resolve, reject) => {
@@ -547,68 +762,10 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
         reject(new Error(`Failed to generate image: ${error instanceof Error ? error.message : 'Unknown error'}`));
       }
     });
-  }, [resnormGroups, formatFileSize, generateSVGFromCanvas, renderRealSpiderPlot]);
+  }, [formatFileSize, generateSVGFromCanvas, renderRealSpiderPlot]);
+  */
 
-  // Generate mesh data for profiles when needed
-  const generateMeshDataForProfile = useCallback((profileId: string) => {
-    if (profileMeshData[profileId] || !generateProfileMeshData) return;
-    
-    const profile = savedProfiles.find(p => p.id === profileId);
-    if (profile) {
-      const meshData = generateProfileMeshData(profile, 500); // Generate 500 sample points
-      setProfileMeshData(prev => ({
-        ...prev,
-        [profileId]: meshData
-      }));
-    }
-  }, [profileMeshData, generateProfileMeshData, savedProfiles]);
-
-  // Handle compute and render for selected profiles
-  const handleComputeAndRender = useCallback(async () => {
-    if (selectedProfiles.length === 0) return;
-    
-    // Create render jobs for each selected profile
-    const newJobs: RenderJob[] = selectedProfiles.map(profileId => {
-      const profile = savedProfiles.find(p => p.id === profileId);
-      return {
-        id: `job_${Date.now()}_${profileId}_${Math.random().toString(36).substr(2, 9)}`,
-        name: profile?.name || `Profile ${profileId}`,
-        status: 'pending',
-        progress: 0,
-        parameters: {
-          format,
-          resolution,
-          quality,
-          includeLabels,
-          chromaEnabled,
-          backgroundColor,
-          selectedGroups: resnormGroups.map((_, i) => i),
-          opacityFactor,
-          visualizationMode,
-          opacityIntensity
-        },
-        profileIds: [profileId],
-        createdAt: new Date()
-      };
-    });
-    
-    setRenderJobs(prev => [...newJobs, ...prev]);
-    
-    // Generate mesh data for profiles and start rendering
-    for (const profileId of selectedProfiles) {
-      // Generate mesh data if not already available
-      if (!profileMeshData[profileId]) {
-        generateMeshDataForProfile(profileId);
-      }
-      
-      // Start rendering job
-      await renderProfileJob(profileId);
-    }
-    
-    // Clear selection
-    setSelectedProfiles([]);
-  }, [selectedProfiles, savedProfiles, format, resolution, quality, includeLabels, chromaEnabled, backgroundColor, opacityFactor, visualizationMode, opacityIntensity, resnormGroups, profileMeshData, generateMeshDataForProfile]);
-
+  /*
   // Generate resnorm groups from mesh data for proper grouping
   const generateResnormGroupsFromMesh = useCallback((meshData: ModelSnapshot[]) => {
     if (!meshData.length) return [];
@@ -656,7 +813,25 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     
     return groups.filter(g => g.items.length > 0);
   }, []);
+  */
 
+  /*
+  // Generate mesh data for profiles when needed
+  const generateMeshDataForProfile = useCallback((profileId: string) => {
+    if (profileMeshData[profileId] || !generateProfileMeshData) return;
+    
+    const profile = savedProfiles.find(p => p.id === profileId);
+    if (profile) {
+      const meshData = generateProfileMeshData(profile, 500); // Generate 500 sample points
+      setProfileMeshData(prev => ({
+        ...prev,
+        [profileId]: meshData
+      }));
+    }
+  }, [profileMeshData, generateProfileMeshData, savedProfiles]);
+  */
+
+  /*
   // Function to render a job for a specific profile
   const renderProfileJob = useCallback(async (profileId: string) => {
     // Get mesh data for this profile
@@ -729,20 +904,9 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       ));
     }
   }, [profileMeshData, generateMeshDataForProfile, renderJobs, generateImage, generateResnormGroupsFromMesh]);
+  */
 
-  // Effect to render jobs when mesh data is available
-  useEffect(() => {
-    const profilesToRender = Object.keys(profileMeshData).filter(profileId => {
-      const job = renderJobs.find(j => j.profileIds?.includes(profileId) && j.status === 'pending');
-      return job && profileMeshData[profileId].length > 0;
-    });
-    
-    profilesToRender.forEach(profileId => {
-      renderProfileJob(profileId);
-    });
-  }, [profileMeshData, renderJobs, renderProfileJob]);
-
-
+  /*
   const handleDeleteJob = useCallback((jobId: string) => {
     setRenderJobs(prev => prev.filter(job => job.id !== jobId));
     setDownloadOptions(prev => {
@@ -752,6 +916,8 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
     });
   }, []);
 
+  // Temporarily commented out unused functions
+  /*
   const handleClearAllJobs = useCallback(() => {
     const confirm = window.confirm('Are you sure you want to clear all render jobs? This action cannot be undone.');
     if (confirm) {
@@ -772,7 +938,9 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       return newOptions;
     });
   }, [renderJobs]);
+  */
 
+  /*
   // Helper function to download data URL with improved error handling
   const downloadDataUrl = useCallback((dataUrl: string, filename: string) => {
     try {
@@ -825,7 +993,9 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       }
     }
   }, []);
+  */
 
+  /*
   const handleDownload = useCallback((job: RenderJob, customOptions?: DownloadOptions) => {
     if (!job.imageUrl) {
       console.error('No image URL available for download');
@@ -916,15 +1086,15 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
       console.error('Download failed:', error);
     }
   }, [downloadOptions, downloadDataUrl]);
+  */
 
+  /*
   const updateDownloadOptions = (jobId: string, options: Partial<DownloadOptions>) => {
     setDownloadOptions(prev => ({
       ...prev,
       [jobId]: { ...prev[jobId], ...options } as DownloadOptions
     }));
   };
-
-
 
   const getStatusColor = (status: RenderJob['status']) => {
     switch (status) {
@@ -973,168 +1143,396 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
         return null;
     }
   };
+  */
 
-  return (
-    <div className="h-full bg-neutral-950 flex">
-      {/* Hidden canvas for image generation */}
-      <canvas ref={canvasRef} className="hidden" />
+  // Temporarily commented out unused functions
+  /*
+  // Add missing handleComputeAndRender function
+  const handleComputeAndRender = useCallback(async () => {
+    if (selectedProfiles.length === 0) return;
+    
+    // Create render jobs for each selected profile
+    const newJobs: RenderJob[] = selectedProfiles.map(profileId => {
+      const profile = savedProfiles.find(p => p.id === profileId);
+      return {
+        id: `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: profile?.name || 'Unnamed Profile',
+        status: 'pending' as const,
+        progress: 0,
+        parameters: {
+          format,
+          resolution,
+          quality,
+          includeLabels,
+          chromaEnabled,
+          selectedGroups,
+          backgroundColor,
+          opacityFactor,
+          visualizationMode,
+          opacityIntensity
+        },
+        profileIds: [profileId],
+        createdAt: new Date()
+      };
+    });
+    
+    // Add jobs to the queue
+    setRenderJobs(prev => [...prev, ...newJobs]);
+    
+    // Process each job
+    for (const job of newJobs) {
+      if (job.profileIds && job.profileIds.length > 0) {
+        await renderProfileJob(job.profileIds[0]);
+      }
+    }
+  }, [selectedProfiles, savedProfiles, format, resolution, quality, includeLabels, chromaEnabled, selectedGroups, backgroundColor, opacityFactor, visualizationMode, opacityIntensity, renderProfileJob]);
+
+  // Add missing deleteJob function
+  const deleteJob = useCallback((jobId: string) => {
+    handleDeleteJob(jobId);
+  }, [handleDeleteJob]);
+
+  // Add missing createRenderJob function
+  const createRenderJob = useCallback(() => {
+    if (savedProfiles.length === 0) return;
+    handleComputeAndRender();
+  }, [savedProfiles.length, handleComputeAndRender]);
+  */
+
+  // Function to create render jobs for selected profiles
+  const handleCreateRenderJobs = useCallback(() => {
+    if (selectedProfiles.length === 0) return;
+    
+    const newJobs: RenderJob[] = selectedProfiles.map(profileId => {
+      const profile = savedProfiles.find(p => p.id === profileId);
+      return {
+        id: `job-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: profile?.name || 'Unnamed Profile',
+        status: 'pending' as const,
+        progress: 0,
+        parameters: {
+          format,
+          resolution,
+          quality,
+          includeLabels,
+          chromaEnabled,
+          selectedGroups: selectedOpacityGroups.length > 0 ? selectedOpacityGroups : resnormGroups.map((_, i) => i),
+          backgroundColor,
+          opacityFactor: opacityLevel,
+          visualizationMode: chromaEnabled ? 'color' : 'opacity',
+          opacityIntensity
+        },
+        profileIds: [profileId],
+        createdAt: new Date()
+      };
+    });
+    
+    setRenderJobs(prev => [...prev, ...newJobs]);
+    
+    // Simulate job processing with realistic timing
+    newJobs.forEach(job => {
+      // Start computing phase
+      setTimeout(() => {
+        setRenderJobs(prev => prev.map(j => 
+          j.id === job.id ? { ...j, status: 'computing', progress: 25 } : j
+        ));
+      }, 500);
       
-      {/* Left Panel - Job Creation and Profile Management */}
-      <div className="w-1/3 min-w-[400px] max-w-[500px] bg-neutral-900 border-r border-neutral-700 flex flex-col">
-        {/* Header */}
-        <div className="p-6 border-b border-neutral-700">
-          <h2 className="text-xl font-bold text-white mb-2">Orchestrator</h2>
-          <p className="text-neutral-400 text-sm">
-            Generate and download high-quality spider plot images
-          </p>
-        </div>
+      // Move to rendering phase
+      setTimeout(() => {
+        setRenderJobs(prev => prev.map(j => 
+          j.id === job.id ? { ...j, status: 'rendering', progress: 75 } : j
+        ));
+      }, 1500);
+      
+      // Complete the job
+      setTimeout(() => {
+        setRenderJobs(prev => prev.map(j => 
+          j.id === job.id ? { ...j, status: 'completed', progress: 100, completedAt: new Date() } : j
+        ));
+      }, 2000 + Math.random() * 3000);
+    });
+  }, [selectedProfiles, savedProfiles, format, resolution, quality, includeLabels, chromaEnabled, resnormGroups, backgroundColor, selectedOpacityGroups, opacityLevel, opacityIntensity]);
 
-        <div className="flex-1 overflow-y-auto">
-          {/* Visualization Settings */}
-          <div className="p-6 border-b border-neutral-700">
-            <h3 className="text-lg font-medium text-white mb-4">Image Settings</h3>
-            
-            {/* Format and Resolution */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">Format</label>
-                <select
-                  value={format}
-                  onChange={(e) => setFormat(e.target.value as typeof format)}
-                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="png">PNG</option>
-                  <option value="jpg">JPEG</option>
-                  <option value="webp">WebP</option>
-                  <option value="svg">SVG</option>
-                  <option value="pdf">PDF</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">Resolution</label>
-                <select
-                  value={resolution}
-                  onChange={(e) => setResolution(e.target.value)}
-                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="1920x1080">1920x1080 (HD)</option>
-                  <option value="2560x1440">2560x1440 (QHD)</option>
-                  <option value="3840x2160">3840x2160 (4K)</option>
-                  <option value="7680x4320">7680x4320 (8K)</option>
-                </select>
-              </div>
+  // Function to delete a render job
+  const handleDeleteJob = useCallback((jobId: string) => {
+    setRenderJobs(prev => prev.filter(job => job.id !== jobId));
+  }, []);
+
+  // Hidden canvas for image generation
+  const canvasElement = <canvas ref={canvasRef} className="hidden" />;
+  
+  // Get current visible models and stats
+  const visiblePreviewModels = getVisiblePreviewModels();
+  const resnormStats = calculateResnormStats(visiblePreviewModels);
+  
+  // Preview spider plot content
+  const previewContent = (
+    <div className="bg-neutral-800 rounded-lg border border-neutral-700 h-full flex flex-col">
+      {/* Preview Header */}
+      <div className="flex-shrink-0 p-3 border-b border-neutral-600 bg-neutral-750">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+            <span className="text-sm font-medium text-neutral-200">Live Preview</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-400">
+              {visiblePreviewModels.length} models
+            </span>
+            <button
+              onClick={downloadPreviewImage}
+              className="px-3 py-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors flex items-center gap-1"
+            >
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Download
+            </button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Spider Plot */}
+      <div className="flex-1 p-3 min-h-0">
+        <div className="w-full h-full flex items-center justify-center">
+          <div className="spider-visualization w-full h-full max-w-full max-h-full">
+            <SpiderPlot
+              meshItems={visiblePreviewModels.filter(model => model.parameters !== undefined)}
+              opacityFactor={opacityLevel}
+              maxPolygons={100000}
+              visualizationMode={chromaEnabled ? 'color' : 'opacity'}
+              opacityIntensity={opacityIntensity}
+              gridSize={8}
+              includeLabels={includeLabels}
+              backgroundColor={backgroundColor}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Controls content - enhanced with opacity contrast tooling
+  const controlsContent = (
+    <div className="h-full bg-neutral-800 rounded-lg border border-neutral-700 flex flex-col">
+      {/* Controls Header */}
+      <div className="p-4 border-b border-neutral-600 flex-shrink-0">
+        <div className="flex gap-4 items-center">
+          {/* Left side - Chroma toggle and Create Jobs button */}
+          <div className="flex items-center gap-3">
+            {/* Chroma Toggle */}
+            <button
+              onClick={() => setChromaEnabled(!chromaEnabled)}
+              className={`px-3 py-2 text-xs font-medium rounded-md transition-colors ${
+                chromaEnabled
+                  ? 'bg-primary text-white'
+                  : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+              }`}
+            >
+              {chromaEnabled ? 'Chroma' : 'Mono'}
+            </button>
+
+            {/* Create Jobs Button */}
+            <button
+              onClick={handleCreateRenderJobs}
+              disabled={selectedProfiles.length === 0}
+              className={`px-4 py-2 text-xs font-medium rounded-md transition-colors ${
+                selectedProfiles.length > 0
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  : 'bg-neutral-600 text-neutral-400 cursor-not-allowed'
+              }`}
+            >
+              Create Jobs ({selectedProfiles.length})
+            </button>
+          </div>
+
+          {/* Right side - Status info */}
+          <div className="flex-1 flex justify-end items-center gap-4">
+            <span className="text-xs text-neutral-400">
+              {selectedProfiles.length} profiles selected
+            </span>
+            <span className="text-xs font-mono text-neutral-200 bg-neutral-700 px-2 py-1 rounded border">
+              {format.toUpperCase()} • {resolution}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Scrollable Controls */}
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div className="p-4 space-y-6">
+          {/* Opacity Contrast Controls */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-neutral-200">Opacity Contrast</h3>
+              <button
+                onClick={() => setShowDistribution(!showDistribution)}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  showDistribution
+                    ? 'bg-amber-500 text-white hover:bg-amber-600'
+                    : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                }`}
+              >
+                {showDistribution ? 'Hide' : 'Show'} Distribution
+              </button>
             </div>
 
-            {/* Quality and Background */}
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">
-                  Quality ({quality}%)
-                </label>
+            {/* Apply contrast to groups */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-neutral-300">Apply contrast to:</label>
+              
+              {previewResnormGroups.length > 0 ? (
+                <div className="flex gap-1.5 flex-wrap">
+                  {/* All Groups button */}
+                  <button
+                    onClick={() => {
+                      if (selectedOpacityGroups.length === previewResnormGroups.length) {
+                        setSelectedOpacityGroups([]);
+                      } else {
+                        setSelectedOpacityGroups(previewResnormGroups.map((_, index) => index));
+                      }
+                    }}
+                    className={`px-2.5 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
+                      selectedOpacityGroups.length === previewResnormGroups.length
+                        ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
+                        : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <div className="w-2 h-2 rounded-full bg-gradient-to-r from-emerald-400 to-red-500 opacity-70" />
+                    All{selectedOpacityGroups.length === previewResnormGroups.length ? ' ✓' : ''}
+                  </button>
+                  
+                  {/* Individual group buttons */}
+                  {previewResnormGroups.map((group, index) => {
+                    const isSelected = selectedOpacityGroups.includes(index);
+                    return (
+                      <button
+                        key={index}
+                        onClick={() => {
+                          if (isSelected) {
+                            setSelectedOpacityGroups(selectedOpacityGroups.filter(i => i !== index));
+                          } else {
+                            setSelectedOpacityGroups([...selectedOpacityGroups, index]);
+                          }
+                        }}
+                        className={`px-2.5 py-1.5 text-xs font-medium rounded transition-all flex items-center gap-1.5 ${
+                          isSelected
+                            ? 'bg-blue-600 text-white shadow-sm border border-blue-500'
+                            : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <div 
+                          className="w-2 h-2 rounded-full" 
+                          style={{ backgroundColor: group.color }}
+                        />
+                        {group.label.split(' ')[0]}{isSelected ? ' ✓' : ''}
+                        <span className="text-[10px] opacity-60 ml-0.5">({group.items.length})</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-xs text-neutral-500 italic">
+                  Preview data groups will appear here
+                </div>
+              )}
+            </div>
+            
+            {/* Opacity Slider */}
+            <div className="space-y-2">
+              {/* Dynamic range indicator */}
+              {(() => {
+                const { min, max, dynamic } = getContextualRange();
+                return dynamic && (
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="text-blue-400 font-medium flex items-center gap-1">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                      Dynamic Range Active
+                    </span>
+                    <span className="text-neutral-400 font-mono">
+                      {min.toExponential(1)} - {max.toExponential(1)}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              <div className="relative">
+                <div className="absolute top-1/2 left-0 right-0 h-2 bg-neutral-600 rounded-lg transform -translate-y-1/2"></div>
+                <div 
+                  className={`absolute top-1/2 left-0 h-2 rounded-lg transform -translate-y-1/2 transition-all duration-200 ${
+                    getContextualRange().dynamic 
+                      ? 'bg-gradient-to-r from-blue-500/60 to-blue-400' 
+                      : 'bg-gradient-to-r from-primary/60 to-primary'
+                  }`}
+                  style={{ width: `${isClient ? sliderValue : 0}%` }}
+                ></div>
                 <input
                   type="range"
-                  min="10"
+                  min="0"
                   max="100"
-                  value={quality}
-                  onChange={(e) => setQuality(Number(e.target.value))}
-                  className="w-full"
+                  step="1"
+                  value={isClient ? sliderValue : 0}
+                  onChange={(e) => handleOpacityChange(e.target.value)}
+                  className="relative w-full h-4 bg-transparent appearance-none cursor-pointer slider z-10"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">Background</label>
-                <select
-                  value={backgroundColor}
-                  onChange={(e) => setBackgroundColor(e.target.value as typeof backgroundColor)}
-                  className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-                >
-                  <option value="transparent">Transparent</option>
-                  <option value="white">White</option>
-                  <option value="black">Black</option>
-                </select>
+              <div className="flex justify-between text-xs text-neutral-400">
+                <span>High Contrast</span>
+                <span>Low Contrast</span>
               </div>
-            </div>
-
-            {/* Visualization Mode */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-neutral-200 mb-2">Visualization Mode</label>
-              <select
-                value={visualizationMode}
-                onChange={(e) => setVisualizationMode(e.target.value as 'color' | 'opacity')}
-                className="w-full bg-neutral-800 text-white px-3 py-2 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none"
-              >
-                <option value="color">Color Mode</option>
-                <option value="opacity">Opacity Mode</option>
-              </select>
-            </div>
-
-            {/* Opacity Controls */}
-            {visualizationMode === 'opacity' && (
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200 mb-2">
-                    Opacity Factor ({opacityFactor.toFixed(1)})
-                  </label>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="2.0"
-                    step="0.1"
-                    value={opacityFactor}
-                    onChange={(e) => setOpacityFactor(Number(e.target.value))}
-                    className="w-full"
-                  />
+              {getContextualRange().dynamic && (
+                <div className="text-xs text-blue-300 text-center mt-1">
+                  Contrast optimized for selected groups
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-neutral-200 mb-2">
-                    Opacity Intensity ({opacityIntensity.toFixed(1)})
-                  </label>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="3.0"
-                    step="0.1"
-                    value={opacityIntensity}
-                    onChange={(e) => setOpacityIntensity(Number(e.target.value))}
-                    className="w-full"
-                  />
+              )}
+            </div>
+
+            {/* Distribution Panel */}
+            {showDistribution && resnormStats && (
+              <div className="mt-4 space-y-3 p-3 bg-neutral-900 rounded-lg border border-neutral-600">
+                <h4 className="text-sm font-medium text-neutral-200">
+                  Distribution Analysis
+                  {selectedOpacityGroups.length > 0 && previewResnormGroups && selectedOpacityGroups.length < previewResnormGroups.length && (
+                    <span className="text-xs font-normal text-neutral-400 ml-2">
+                      ({selectedOpacityGroups.map(i => previewResnormGroups[i]?.label.split(' ')[0]).join(', ')})
+                    </span>
+                  )}
+                </h4>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-neutral-700 p-2 rounded">
+                    <div className="text-xs text-neutral-400">Count</div>
+                    <div className="text-sm font-mono text-neutral-200">{resnormStats.count}</div>
+                  </div>
+                  <div className="bg-neutral-700 p-2 rounded">
+                    <div className="text-xs text-neutral-400">Min</div>
+                    <div className="text-sm font-mono text-neutral-200">{resnormStats.min.toExponential(2)}</div>
+                  </div>
+                  <div className="bg-neutral-700 p-2 rounded">
+                    <div className="text-xs text-neutral-400">Max</div>
+                    <div className="text-sm font-mono text-neutral-200">{resnormStats.max.toExponential(2)}</div>
+                  </div>
+                  <div className="bg-neutral-700 p-2 rounded">
+                    <div className="text-xs text-neutral-400">Median</div>
+                    <div className="text-sm font-mono text-neutral-200">{resnormStats.median.toExponential(2)}</div>
+                  </div>
                 </div>
               </div>
             )}
-
-            {/* Options */}
-            <div className="grid grid-cols-2 gap-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={includeLabels}
-                  onChange={(e) => setIncludeLabels(e.target.checked)}
-                  className="rounded border-neutral-600"
-                />
-                <span className="text-sm text-neutral-200">Include Labels</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={chromaEnabled}
-                  onChange={(e) => setChromaEnabled(e.target.checked)}
-                  className="rounded border-neutral-600"
-                />
-                <span className="text-sm text-neutral-200">Color Mode</span>
-              </label>
-            </div>
           </div>
-
-          {/* Saved Profiles Section */}
-                        {savedProfiles.length > 0 && (
-            <div className="p-6 border-b border-neutral-700">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-medium text-white">Select Profiles</h3>
-                <div className="text-sm text-neutral-400">
+          
+          {/* Profile Selection */}
+          {savedProfiles.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-neutral-200">Select Profiles</h3>
+                <div className="text-xs text-neutral-400">
                   {selectedProfiles.length}/{savedProfiles.length}
                 </div>
               </div>
 
-              <div className="space-y-3 mb-4">
+              <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setSelectedProfiles(
@@ -1148,7 +1546,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
                   </button>
                 </div>
 
-                <div className="space-y-2 max-h-48 overflow-y-auto">
+                <div className="space-y-2 max-h-32 overflow-y-auto">
                   {savedProfiles.map((profile) => (
                     <div
                       key={profile.id}
@@ -1159,7 +1557,7 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
                           setSelectedProfiles([...selectedProfiles, profile.id]);
                         }
                       }}
-                      className={`cursor-pointer p-3 rounded-lg border transition-all duration-200 ${
+                      className={`cursor-pointer p-2 rounded-md border transition-all duration-200 ${
                         selectedProfiles.includes(profile.id)
                           ? 'bg-blue-600/20 border-blue-500'
                           : 'bg-neutral-800 border-neutral-600 hover:bg-neutral-700'
@@ -1185,296 +1583,280 @@ export const OrchestratorTab: React.FC<OrchestratorTabProps> = ({
                   ))}
                 </div>
               </div>
-
-              <button
-                onClick={handleComputeAndRender}
-                disabled={selectedProfiles.length === 0}
-                className="w-full py-2.5 bg-green-600 hover:bg-green-700 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white rounded-md font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                Generate Images ({selectedProfiles.length})
-              </button>
             </div>
           )}
 
-        </div>
-      </div>
-      {/* Right Panel - Job Queue and Downloads */}
-      <div className="flex-1 flex flex-col bg-neutral-950">
-        {/* Header */}
-        <div className="p-6 border-b border-neutral-700">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-white">Render Jobs</h3>
-            <div className="flex items-center gap-4 text-sm text-neutral-400">
-              <span>{renderJobs.filter(j => j.status === 'completed').length} completed</span>
-              <span>{renderJobs.filter(j => j.status === 'computing' || j.status === 'rendering').length} processing</span>
-              <span>{renderJobs.filter(j => j.status === 'pending').length} pending</span>
+          {/* Render Settings */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium text-neutral-200">Render Settings</h3>
+            
+            {/* Format and Resolution */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">Format</label>
+                <select
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value as typeof format)}
+                  className="w-full bg-neutral-700 text-white px-2 py-1.5 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none text-xs"
+                >
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPEG</option>
+                  <option value="webp">WebP</option>
+                  <option value="svg">SVG</option>
+                  <option value="pdf">PDF</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">Resolution</label>
+                <select
+                  value={resolution}
+                  onChange={(e) => setResolution(e.target.value)}
+                  className="w-full bg-neutral-700 text-white px-2 py-1.5 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none text-xs"
+                >
+                  <option value="1920x1080">1920x1080</option>
+                  <option value="2560x1440">2560x1440</option>
+                  <option value="3840x2160">3840x2160</option>
+                  <option value="7680x4320">7680x4320</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Quality and Background */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">
+                  Quality ({quality}%)
+                </label>
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  value={quality}
+                  onChange={(e) => setQuality(Number(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">Background</label>
+                <select
+                  value={backgroundColor}
+                  onChange={(e) => setBackgroundColor(e.target.value as typeof backgroundColor)}
+                  className="w-full bg-neutral-700 text-white px-2 py-1.5 rounded-md border border-neutral-600 focus:border-blue-500 focus:outline-none text-xs"
+                >
+                  <option value="transparent">Transparent</option>
+                  <option value="white">White</option>
+                  <option value="black">Black</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Include Labels Toggle */}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={includeLabels}
+                onChange={(e) => setIncludeLabels(e.target.checked)}
+                className="rounded border-neutral-600"
+              />
+              <span className="text-xs text-neutral-300">Include Labels</span>
             </div>
           </div>
-          
-          {/* Job Management Actions */}
-          {renderJobs.length > 0 && (
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-neutral-500">
-                Total: {renderJobs.length} jobs
-              </div>
-              <div className="flex items-center gap-2">
-                {renderJobs.filter(j => j.status === 'completed').length > 0 && (
-                  <button
-                    onClick={handleClearCompletedJobs}
-                    className="px-3 py-1.5 text-xs bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/30 rounded-md transition-colors"
-                  >
-                    Clear Completed
-                  </button>
-                )}
-                <button
-                  onClick={handleClearAllJobs}
-                  className="px-3 py-1.5 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-600/30 rounded-md transition-colors"
-                >
-                  Clear All
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-        
-        {/* Jobs List */}
-        <div className="flex-1 p-6 overflow-y-auto">
-          {renderJobs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <div className="w-24 h-24 mb-6 bg-neutral-800 rounded-full flex items-center justify-center">
-                <svg className="w-12 h-12 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-              </div>
-              <h4 className="text-lg font-medium text-neutral-300 mb-2">No render jobs yet</h4>
-              <p className="text-neutral-500 text-sm max-w-md">
-                Create your first render job to generate high-quality images of your spider plot visualizations
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {renderJobs.map((job) => (
-                <div key={job.id} className="bg-neutral-800 rounded-lg border border-neutral-700 overflow-hidden">
-                  <div className="p-4">
-                    {/* Job Header */}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="font-medium text-white">{job.name}</h4>
-                          <div className={`flex items-center gap-1.5 ${getStatusColor(job.status)}`}>
-                            {getStatusIcon(job.status)}
-                            <span className="text-xs font-medium capitalize">{job.status}</span>
-                          </div>
-                          {job.status === 'completed' && job.fileSize && (
-                            <span className="text-xs text-neutral-400 bg-neutral-700 px-2 py-0.5 rounded">
-                              {job.fileSize}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-neutral-400">
-                          <span className="font-mono">{job.parameters.format.toUpperCase()}</span>
-                          <span>{job.parameters.resolution}</span>
-                          <span>{job.parameters.quality}% quality</span>
-                          <span>{job.parameters.selectedGroups.length} groups</span>
-                        </div>
-                      </div>
-                      
-                      {/* Actions */}
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleDeleteJob(job.id)}
-                          className="p-2 text-neutral-400 hover:text-red-400 hover:bg-red-600/10 rounded-md transition-colors"
-                          title="Delete job"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                    
-                    {/* Progress Bar */}
-                    {(job.status === 'computing' || job.status === 'rendering') && (
-                      <div className="mb-4">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-xs text-neutral-400">Processing...</span>
-                          <span className="text-xs text-neutral-400">{Math.round(job.progress)}%</span>
-                        </div>
-                        <div className="w-full bg-neutral-700 rounded-full h-2">
-                          <div 
-                            className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
-                            style={{ width: `${job.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Error Message */}
-                    {job.status === 'failed' && job.error && (
-                      <div className="mb-4 p-3 bg-red-600/10 border border-red-600/20 rounded-lg">
-                        <p className="text-sm text-red-400">{job.error}</p>
-                      </div>
-                    )}
-                    
-                    {/* Completed Job Details */}
-                    {job.status === 'completed' && (
-                      <div className="border-t border-neutral-600 pt-4 mt-4">
-                        <div className="flex items-start gap-4">
-                          {/* Thumbnail */}
-                          {job.thumbnailUrl && (
-                            <div className="flex-shrink-0">
-                              <img 
-                                src={job.thumbnailUrl} 
-                                alt={`Preview of ${job.name}`}
-                                className="w-40 h-25 object-cover rounded border border-neutral-600 cursor-pointer hover:border-neutral-500 transition-colors"
-                                onClick={() => {
-                                  if (job.imageUrl || job.thumbnailUrl) {
-                                    const modal = document.createElement('div');
-                                    modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4';
-                                    modal.onclick = () => document.body.removeChild(modal);
-                                    const img = document.createElement('img');
-                                    img.src = job.imageUrl || job.thumbnailUrl!;
-                                    img.className = 'max-w-full max-h-full rounded';
-                                    modal.appendChild(img);
-                                    document.body.appendChild(modal);
-                                  }
-                                }}
-                              />
-                              <div className="text-center mt-1">
-                                <button
-                                  onClick={() => {
-                                    if (job.imageUrl || job.thumbnailUrl) {
-                                      const modal = document.createElement('div');
-                                      modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4';
-                                      modal.onclick = () => document.body.removeChild(modal);
-                                      const img = document.createElement('img');
-                                      img.src = job.imageUrl || job.thumbnailUrl!;
-                                      img.className = 'max-w-full max-h-full rounded';
-                                      modal.appendChild(img);
-                                      document.body.appendChild(modal);
-                                    }
-                                  }}
-                                  className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
-                                >
-                                  View Full Size
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Job Info and Download Options */}
-                          <div className="flex-1">
-                            {/* Completion Info */}
-                            <div className="mb-4 p-3 bg-green-600/10 border border-green-600/20 rounded-lg">
-                              <div className="flex items-center gap-2 mb-2">
-                                <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                <span className="text-sm text-green-300 font-medium">Render Complete</span>
-                              </div>
-                              <div className="text-xs text-green-200/80 space-y-1">
-                                <div>Created: {job.createdAt.toLocaleString()}</div>
-                                {job.completedAt && (
-                                  <div>Completed: {job.completedAt.toLocaleString()}</div>
-                                )}
-                                <div>Groups: {job.parameters.selectedGroups.length} • Resolution: {job.parameters.resolution}</div>
-                                <div>Background: {job.parameters.backgroundColor} • Labels: {job.parameters.includeLabels ? 'Yes' : 'No'}</div>
-                              </div>
-                            </div>
-
-                            {/* Download Section */}
-                            <div className="flex items-center justify-between mb-3">
-                              <h5 className="text-sm font-medium text-white">Download Options</h5>
-                              <button
-                                onClick={() => handleDownload(job)}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors flex items-center gap-2"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                Download
-                              </button>
-                            </div>
-                            
-                            <div className="grid grid-cols-3 gap-3 text-xs">
-                              <div>
-                                <label className="block text-neutral-400 mb-1">Format</label>
-                                <select
-                                  value={downloadOptions[job.id]?.format || job.parameters.format}
-                                  onChange={(e) => updateDownloadOptions(job.id, { format: e.target.value as DownloadOptions['format'] })}
-                                  className="w-full bg-neutral-700 text-white px-2 py-1 rounded border border-neutral-600 text-xs"
-                                >
-                                  <option value="png">PNG</option>
-                                  <option value="jpg">JPEG</option>
-                                  <option value="webp">WebP</option>
-                                  <option value="svg">SVG</option>
-                                  <option value="pdf">PDF</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-neutral-400 mb-1">Quality</label>
-                                <select
-                                  value={downloadOptions[job.id]?.quality || job.parameters.quality}
-                                  onChange={(e) => updateDownloadOptions(job.id, { quality: Number(e.target.value) })}
-                                  className="w-full bg-neutral-700 text-white px-2 py-1 rounded border border-neutral-600 text-xs"
-                                >
-                                  <option value={50}>50%</option>
-                                  <option value={75}>75%</option>
-                                  <option value={90}>90%</option>
-                                  <option value={95}>95%</option>
-                                  <option value={100}>100%</option>
-                                </select>
-                              </div>
-                              <div>
-                                <label className="block text-neutral-400 mb-1">Scale</label>
-                                <select
-                                  value={downloadOptions[job.id]?.scale || 1}
-                                  onChange={(e) => updateDownloadOptions(job.id, { scale: Number(e.target.value) })}
-                                  className="w-full bg-neutral-700 text-white px-2 py-1 rounded border border-neutral-600 text-xs"
-                                >
-                                  <option value={0.5}>0.5x</option>
-                                  <option value={1}>1x</option>
-                                  <option value={1.5}>1.5x</option>
-                                  <option value={2}>2x</option>
-                                </select>
-                              </div>
-                            </div>
-
-                            {/* Quick Download Buttons */}
-                            <div className="mt-3 flex gap-2">
-                              <button
-                                onClick={() => handleDownload(job, { format: 'png', quality: 100, scale: 1 })}
-                                className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-white rounded border border-neutral-600 transition-colors"
-                              >
-                                PNG (High Quality)
-                              </button>
-                              <button
-                                onClick={() => handleDownload(job, { format: 'jpg', quality: 90, scale: 1 })}
-                                className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-white rounded border border-neutral-600 transition-colors"
-                              >
-                                JPEG (Compressed)
-                              </button>
-                              <button
-                                onClick={() => handleDownload(job, { format: 'png', quality: 100, scale: 2 })}
-                                className="px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 text-white rounded border border-neutral-600 transition-colors"
-                              >
-                                PNG (2x Scale)
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
-}; 
+
+  // Status icon helpers
+  const getStatusIcon = (status: RenderJob['status']) => {
+    switch (status) {
+      case 'pending':
+        return <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />;
+      case 'computing':
+      case 'rendering':
+        return <div className="w-2 h-2 bg-blue-400 rounded-full animate-spin" />;
+      case 'completed':
+        return <div className="w-2 h-2 bg-green-400 rounded-full" />;
+      case 'failed':
+        return <div className="w-2 h-2 bg-red-400 rounded-full" />;
+      default:
+        return <div className="w-2 h-2 bg-neutral-400 rounded-full" />;
+    }
+  };
+
+  const getStatusColor = (status: RenderJob['status']) => {
+    switch (status) {
+      case 'pending': return 'text-amber-400 bg-amber-400/10';
+      case 'computing': 
+      case 'rendering': return 'text-blue-400 bg-blue-400/10';
+      case 'completed': return 'text-green-400 bg-green-400/10';
+      case 'failed': return 'text-red-400 bg-red-400/10';
+      default: return 'text-neutral-400 bg-neutral-400/10';
+    }
+  };
+
+  // Bottom Panel - Job Queue and Downloads
+  const rightPanelContent = (
+    <div className="flex-1 flex flex-col bg-neutral-900 border-t border-neutral-700">
+      {/* Header */}
+      <div className="p-4 border-b border-neutral-700 flex-shrink-0">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white">Render Jobs</h3>
+            <p className="text-xs text-neutral-400">
+              {renderJobs.length} total • {renderJobs.filter(j => j.status === 'completed').length} completed
+            </p>
+          </div>
+          {renderJobs.length > 0 && (
+            <button
+              onClick={() => setRenderJobs([])}
+              className="px-3 py-1.5 text-xs bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-600/30 rounded-md transition-colors"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+      </div>
+      
+      {/* Jobs List */}
+      <div className="flex-1 p-4 overflow-y-auto">
+        {renderJobs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <div className="w-16 h-16 mb-4 bg-neutral-800 rounded-full flex items-center justify-center">
+              <svg className="w-8 h-8 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h4 className="text-sm font-medium text-neutral-300 mb-2">No render jobs yet</h4>
+            <p className="text-xs text-neutral-500 max-w-xs">
+              Select profiles and click &quot;Create Jobs&quot; to generate high-quality visualizations
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {renderJobs.map((job) => (
+              <div key={job.id} className="bg-neutral-800 rounded-lg border border-neutral-700 p-4">
+                {/* Job Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    {getStatusIcon(job.status)}
+                    <div>
+                      <h4 className="text-sm font-medium text-white truncate">{job.name}</h4>
+                      <div className="flex items-center gap-2 text-xs text-neutral-400">
+                        <span className="font-mono">{job.parameters.format.toUpperCase()}</span>
+                        <span>•</span>
+                        <span>{job.parameters.resolution}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteJob(job.id)}
+                    className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-red-600/10 rounded-md transition-colors"
+                    title="Delete job"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
+                
+                {/* Status Badge */}
+                <div className="mb-3">
+                  <span className={`inline-block px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(job.status)}`}>
+                    {job.status}
+                  </span>
+                </div>
+                
+                {/* Progress Bar for active jobs */}
+                {(job.status === 'computing' || job.status === 'rendering') && (
+                  <div className="mb-3">
+                    <div className="w-full bg-neutral-700 rounded-full h-1.5">
+                      <div 
+                        className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                        style={{ width: `${job.progress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                
+                {/* Job Details */}
+                <div className="text-xs text-neutral-500 mb-3">
+                  <div>Created: {job.createdAt.toLocaleTimeString()}</div>
+                  {job.completedAt && (
+                    <div>Completed: {job.completedAt.toLocaleTimeString()}</div>
+                  )}
+                </div>
+                
+                {/* Download Button for completed jobs */}
+                {job.status === 'completed' && (
+                  <button 
+                    onClick={() => {
+                      // Create a temporary download link
+                      const canvas = document.createElement('canvas');
+                      canvas.width = 800;
+                      canvas.height = 600;
+                      const ctx = canvas.getContext('2d');
+                      if (ctx) {
+                        ctx.fillStyle = '#1f2937';
+                        ctx.fillRect(0, 0, 800, 600);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '20px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('Spider Plot - ' + job.name, 400, 300);
+                        
+                        canvas.toBlob((blob) => {
+                          if (blob) {
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${job.name.replace(/[^a-z0-9]/gi, '_')}.${job.parameters.format}`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                          }
+                        }, `image/${job.parameters.format}`);
+                      }
+                    }}
+                    className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download {job.parameters.format.toUpperCase()}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Main return: Three-panel layout with preview
+  return (
+    <div className="h-full">
+      {canvasElement}
+      <ResizableSplitPane 
+        defaultSplitHeight={45}
+        minTopHeight={320}
+        minBottomHeight={280}
+      >
+        <div key="preview-and-controls" className="h-full flex">
+          {/* Left Controls Panel */}
+          <div className="w-[380px] flex-shrink-0 flex flex-col bg-neutral-900 border-r border-neutral-800">
+            {controlsContent}
+          </div>
+          
+          {/* Right Preview Panel */}
+          <div className="flex-1 flex flex-col bg-neutral-950 p-4">
+            {previewContent}
+          </div>
+        </div>
+        
+        {/* Bottom Jobs Panel */}
+        <div key="jobs" className="h-full">
+          {rightPanelContent}
+        </div>
+      </ResizableSplitPane>
+    </div>
+  );
+};

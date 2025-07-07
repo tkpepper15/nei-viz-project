@@ -1,6 +1,6 @@
-import { ModelSnapshot } from './types';
+import { ModelSnapshot } from '../types';
 import { CircuitParameters } from '../types/parameters';
-import { GridParameterArrays } from './types';
+import { GridParameterArrays } from '../types';
 
 // Update type checking for parameters
 export const isValidParameterKey = (key: string): key is keyof CircuitParameters => {
