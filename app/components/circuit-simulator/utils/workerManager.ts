@@ -11,7 +11,9 @@ export interface WorkerProgress {
   processed?: number;
   total: number;
   generated?: number;
+  skipped?: number;
   overallProgress: number;
+  memoryPressure?: boolean;
 }
 
 export interface WorkerResult {
@@ -158,17 +160,26 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       const totalPoints = Math.pow(gridSize, 5);
       const workerCount = getOptimalWorkerCount();
       
-      // Adaptive chunk sizing based on total points
+      // Ultra-conservative adaptive chunk sizing to prevent crashes
       let chunkSize: number;
-      if (totalPoints <= 10000) {
+      if (totalPoints <= 5000) {
         chunkSize = Math.ceil(totalPoints / workerCount);
+      } else if (totalPoints <= 25000) {
+        chunkSize = 2000; // Smaller chunks for better memory management
       } else if (totalPoints <= 100000) {
-        chunkSize = 5000;
+        chunkSize = 3000; // Conservative for medium grids
+      } else if (totalPoints <= 500000) {
+        chunkSize = 5000; // Small chunks for large grids
       } else if (totalPoints <= 1000000) {
-        chunkSize = 10000;
+        chunkSize = 8000; // Moderate chunks for very large grids
       } else {
-        chunkSize = 25000; // Large chunks for massive grids
+        // Massive grids: use micro-chunks with staggered processing
+        chunkSize = 10000; // Smaller chunks to prevent worker crashes
       }
+      
+      // Additional safety: ensure chunks don't exceed memory limits
+      const maxChunkSize = Math.floor(50000 / workerCount); // Max 50k points per worker
+      chunkSize = Math.min(chunkSize, maxChunkSize);
 
       onProgress({
         type: 'GENERATION_PROGRESS',
@@ -189,7 +200,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           chunkSize,
           performanceSettings,
           onProgress,
-          onError
+          onError,
+          groundTruthParams
         );
       }
 
@@ -216,6 +228,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                 type: 'GENERATION_PROGRESS',
                 total: data.total,
                 generated: data.generated,
+                skipped: data.skipped,
                 overallProgress: generationProgress
               });
               break;
@@ -238,7 +251,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           type: 'GENERATE_GRID_POINTS',
           data: { 
             gridSize,
-            useSymmetricGrid: performanceSettings.useSymmetricGrid 
+            useSymmetricGrid: performanceSettings.useSymmetricGrid,
+            groundTruthParams
           }
         });
       });
@@ -295,6 +309,26 @@ export function useWorkerManager(): UseWorkerManagerReturn {
               case 'CHUNK_COMPLETE':
                 worker.removeEventListener('message', handleMessage);
                 resolve(data);
+                break;
+                
+              case 'MEMORY_PRESSURE':
+                // Log memory pressure warning but continue processing
+                console.warn(`Worker ${workerIndex} memory pressure:`, data.message, data.estimatedMemory);
+                onProgress({
+                  type: 'CHUNK_PROGRESS',
+                  chunkIndex: data.chunkIndex,
+                  totalChunks: chunks.length,
+                  processed: results.reduce((sum, r) => sum + r.totalProcessed, 0),
+                  total: totalPoints,
+                  overallProgress: 10 + (results.reduce((sum, r) => sum + r.totalProcessed, 0) / totalPoints) * 90,
+                  memoryPressure: true
+                });
+                break;
+                
+              case 'PARTIAL_RESULTS':
+                // Handle streaming results from worker to reduce memory pressure
+                console.log(`Worker ${workerIndex} streaming ${data.totalPartialCount} partial results`);
+                // Could store partial results in a temporary buffer if needed
                 break;
                 
               case 'ERROR':
@@ -411,7 +445,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     chunkSize: number,
     performanceSettings: PerformanceSettings,
     onProgress: (progress: WorkerProgress) => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    groundTruthParams: CircuitParameters
   ): Promise<BackendMeshPoint[]> => {
     
     const totalPoints = Math.pow(gridSize, 5);
@@ -473,7 +508,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         data: {
           gridSize,
           useSymmetricGrid: performanceSettings.useSymmetricGrid,
-          chunkSize: Math.min(chunkSize, 5000) // Smaller chunks for streaming
+          chunkSize: Math.min(chunkSize, 5000), // Smaller chunks for streaming
+          groundTruthParams
         }
       });
       

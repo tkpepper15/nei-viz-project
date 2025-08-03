@@ -15,6 +15,20 @@ export const useComputationState = () => {
   // Progress tracking
   const [computationProgress, setComputationProgress] = useState<WorkerProgress | null>(null);
   const [computationSummary, setComputationSummary] = useState<ComputationSummary | null>(null);
+  
+  // Track skipped points from symmetric optimization
+  const [skippedPoints, setSkippedPoints] = useState<number>(0);
+  const [totalGridPoints, setTotalGridPoints] = useState<number>(0);
+  const [actualComputedPoints, setActualComputedPoints] = useState<number>(0);
+  
+  // Track memory management limitations
+  const [memoryLimitedPoints, setMemoryLimitedPoints] = useState<number>(0);
+  const [estimatedMemoryUsage, setEstimatedMemoryUsage] = useState<number>(0);
+  
+  // User-controlled visualization limits
+  const [userVisualizationPercentage, setUserVisualizationPercentage] = useState<number>(100); // Default 100%
+  const [maxVisualizationPoints, setMaxVisualizationPoints] = useState<number>(1000000); // 1M max
+  const [isUserControlledLimits, setIsUserControlledLimits] = useState<boolean>(false);
 
   // Resnorm groups for analysis
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
@@ -24,47 +38,59 @@ export const useComputationState = () => {
   const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>([]);
   const [statusMessage, setStatusMessage] = useState<string>('');
 
-  // Update status message and log
-  const updateStatusMessage = useCallback((message: string) => {
-    setStatusMessage(message);
+  // Helper functions
+  const addLogMessage = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    
-    // Categorize messages for better visibility in log
-    let formattedMessage = message;
-    
-    if (message.includes('Comput') || message.includes('Grid')) {
-      formattedMessage = `[Grid] ${message}`;
-    } else if (message.includes('Parameters') || message.includes('parameter')) {
-      formattedMessage = `[Params] ${message}`;
-    } else if (message.includes('model') || message.includes('Model')) {
-      formattedMessage = `[Visual] ${message}`;
-    } else if (message.includes('Sort')) {
-      formattedMessage = `[Table] ${message}`;
-    }
-    
-    setLogMessages(prev => [...prev.slice(-49), { time: timestamp, message: formattedMessage }]);
+    setLogMessages(prev => [...prev, { time: timestamp, message }]);
   }, []);
 
-  // Clear computation state
-  const clearComputationState = useCallback(() => {
+  const updateStatusMessage = useCallback((message: string) => {
+    setStatusMessage(message);
+    addLogMessage(message);
+  }, [addLogMessage]);
+
+  const clearLogs = useCallback(() => {
+    setLogMessages([]);
+    setStatusMessage('');
+  }, []);
+
+  const resetComputationState = useCallback(() => {
     setGridResults([]);
     setGridResultsWithIds([]);
     setGridError(null);
-    setIsComputingGrid(false);
+    setResnormGroups([]);
+    setHiddenGroups([]);
     setComputationProgress(null);
     setComputationSummary(null);
-    setResnormGroups([]);
-    setGridParameterArrays(null);
+    setSkippedPoints(0);
+    setTotalGridPoints(0);
+    setActualComputedPoints(0);
+    setMemoryLimitedPoints(0);
+    setEstimatedMemoryUsage(0);
   }, []);
 
-  // Reset computation progress
-  const resetComputationProgress = useCallback(() => {
-    setComputationProgress(null);
-    setComputationSummary(null);
-  }, []);
+  // Calculate effective visualization limit based on user preferences
+  const calculateEffectiveVisualizationLimit = useCallback((totalComputed: number) => {
+    if (!isUserControlledLimits) {
+      // Use automatic memory-based limits (original behavior with higher limits)
+      const avgSpectrumSize = 20 * 40; // bytes per spectrum point (rough estimate)
+      const estimatedMemory = totalComputed * (500 + avgSpectrumSize) / 1024 / 1024; // MB
+      
+      // Much more aggressive limits - prioritize user experience over conservative memory management
+      if (estimatedMemory > 2000) return 250000; // 2GB -> 250K points
+      if (estimatedMemory > 1000) return 500000; // 1GB -> 500K points  
+      if (estimatedMemory > 500) return 750000;  // 500MB -> 750K points
+      if (estimatedMemory > 200) return 1000000; // 200MB -> 1M points (our max)
+      return Math.min(1000000, totalComputed); // Default to 1M max
+    }
+    
+    // Use user-controlled limits
+    const userLimit = Math.floor((userVisualizationPercentage / 100) * totalComputed);
+    return Math.min(userLimit, maxVisualizationPoints, totalComputed);
+  }, [isUserControlledLimits, userVisualizationPercentage, maxVisualizationPoints]);
 
   return {
-    // Grid results
+    // Grid computation state
     gridResults,
     setGridResults,
     gridResultsWithIds,
@@ -83,8 +109,31 @@ export const useComputationState = () => {
     setComputationProgress,
     computationSummary,
     setComputationSummary,
+    
+    // Symmetric optimization tracking
+    skippedPoints,
+    setSkippedPoints,
+    totalGridPoints,
+    setTotalGridPoints,
+    actualComputedPoints,
+    setActualComputedPoints,
+    
+    // Memory management tracking
+    memoryLimitedPoints,
+    setMemoryLimitedPoints,
+    estimatedMemoryUsage,
+    setEstimatedMemoryUsage,
+    
+    // User-controlled visualization limits
+    userVisualizationPercentage,
+    setUserVisualizationPercentage,
+    maxVisualizationPoints,
+    setMaxVisualizationPoints,
+    isUserControlledLimits,
+    setIsUserControlledLimits,
+    calculateEffectiveVisualizationLimit,
 
-    // Resnorm analysis
+    // Resnorm groups
     resnormGroups,
     setResnormGroups,
     hiddenGroups,
@@ -92,13 +141,10 @@ export const useComputationState = () => {
 
     // Activity log
     logMessages,
-    setLogMessages,
     statusMessage,
-    setStatusMessage,
+    addLogMessage,
     updateStatusMessage,
-
-    // Utility functions
-    clearComputationState,
-    resetComputationProgress,
+    clearLogs,
+    resetComputationState,
   };
 };

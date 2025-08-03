@@ -156,4 +156,34 @@ export interface GridParameterArrays {
 // Component props interfaces
 export interface CircuitSimulatorProps {
   groundTruthDataset?: ImpedancePoint[];
+}
+
+// Performance tracking interfaces
+export interface PipelinePhase {
+  name: string;
+  startTime: number;
+  endTime?: number;
+  duration?: number;
+  description: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  details?: Record<string, unknown>;
+}
+
+export interface PerformanceLog {
+  totalDuration: number;
+  phases: PipelinePhase[];
+  bottleneck: string;
+  efficiency: {
+    parallelization: number; // 0-1 scale
+    memoryUsage: number; // MB
+    throughput: number; // points/second
+    cpuCores: number;
+  };
+  summary: {
+    gridGeneration: number;
+    impedanceComputation: number;
+    resnormAnalysis: number;
+    dataProcessing: number;
+    rendering: number;
+  };
 } 

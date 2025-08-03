@@ -259,9 +259,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <SpiderPlot
                   meshItems={visibleModels}
                   opacityFactor={opacityLevel}
-                  maxPolygons={100000}
+                  maxPolygons={1000000}
                   visualizationMode={chromaEnabled ? 'color' : 'opacity'}
-                  opacityIntensity={opacityIntensity}
                   gridSize={gridSize}
                   includeLabels={true}
                   backgroundColor="transparent"

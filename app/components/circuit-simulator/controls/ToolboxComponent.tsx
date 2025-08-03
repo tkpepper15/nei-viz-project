@@ -6,6 +6,8 @@ import { generateLogSpace } from '../utils/parameter-space';
 
 import { SaveProfileModal } from './SaveProfileModal';
 import { PerformanceControls, PerformanceSettings } from './PerformanceControls';
+import { VisualizationLimitsControl } from './VisualizationLimitsControl';
+import { StaticRenderControls, StaticRenderSettings, defaultStaticRenderSettings } from './StaticRenderControls';
 
 // Props interface for the ToolboxComponent
 interface ToolboxComponentProps {
@@ -40,6 +42,24 @@ interface ToolboxComponentProps {
   // Performance settings
   performanceSettings: PerformanceSettings;
   setPerformanceSettings: (settings: PerformanceSettings) => void;
+  
+  // Visualization limits
+  userVisualizationPercentage: number;
+  setUserVisualizationPercentage: (value: number) => void;
+  maxVisualizationPoints: number;
+  setMaxVisualizationPoints: (value: number) => void;
+  isUserControlledLimits: boolean;
+  setIsUserControlledLimits: (value: boolean) => void;
+  totalComputedPoints: number;
+  currentlyDisplayed: number;
+  estimatedMemory: number;
+  
+  // Static rendering
+  meshData?: ModelSnapshot[];
+  staticRenderSettings?: StaticRenderSettings;
+  onStaticRenderSettingsChange?: (settings: StaticRenderSettings) => void;
+  onCreateRenderJob?: (settings: StaticRenderSettings, meshData: ModelSnapshot[]) => void;
+  isStaticRendering?: boolean;
 }
 
 // CollapsibleSection component definition
@@ -117,10 +137,30 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
   // Performance settings props
   performanceSettings,
   setPerformanceSettings,
+  
+  // Visualization limits props
+  userVisualizationPercentage,
+  setUserVisualizationPercentage,
+  maxVisualizationPoints,
+  setMaxVisualizationPoints,
+  isUserControlledLimits,
+  setIsUserControlledLimits,
+  totalComputedPoints,
+  currentlyDisplayed,
+  estimatedMemory,
+  
+  // Static rendering props
+  meshData = [],
+  staticRenderSettings = defaultStaticRenderSettings,
+  onStaticRenderSettingsChange,
+  onCreateRenderJob,
+  isStaticRendering = false,
 }) => {
   // Local state for collapsible sections and tab management
   const [gridSettingsOpen, setGridSettingsOpen] = useState(true);
   const [circuitParamsOpen, setCircuitParamsOpen] = useState(false);
+  const [visualizationLimitsOpen, setVisualizationLimitsOpen] = useState(false);
+  const [staticRenderOpen, setStaticRenderOpen] = useState(false);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
 
   return (
@@ -392,6 +432,44 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
           gridSize={gridSize}
         />
 
+        {/* Visualization Limits Section */}
+        <CollapsibleSection 
+          title="Visualization Limits" 
+          isOpen={visualizationLimitsOpen} 
+          toggleOpen={() => setVisualizationLimitsOpen(!visualizationLimitsOpen)}
+        >
+          <VisualizationLimitsControl
+            userVisualizationPercentage={userVisualizationPercentage}
+            setUserVisualizationPercentage={setUserVisualizationPercentage}
+            maxVisualizationPoints={maxVisualizationPoints}
+            setMaxVisualizationPoints={setMaxVisualizationPoints}
+            isUserControlledLimits={isUserControlledLimits}
+            setIsUserControlledLimits={setIsUserControlledLimits}
+            totalComputedPoints={totalComputedPoints}
+            currentlyDisplayed={currentlyDisplayed}
+            estimatedMemory={estimatedMemory}
+          />
+        </CollapsibleSection>
+
+        {/* Static Export Section */}
+        {onCreateRenderJob && (
+          <CollapsibleSection 
+            title="Static Export" 
+            isOpen={staticRenderOpen} 
+            toggleOpen={() => setStaticRenderOpen(!staticRenderOpen)}
+          >
+            <StaticRenderControls
+              settings={staticRenderSettings}
+              onSettingsChange={onStaticRenderSettingsChange || (() => {})}
+              groundTruthParams={groundTruthParams}
+              onGroundTruthChange={setGroundTruthParams}
+              meshData={meshData}
+              onCreateRenderJob={onCreateRenderJob}
+              isRendering={isStaticRendering}
+            />
+          </CollapsibleSection>
+        )}
+
         {/* Circuit Parameters Section */}
         <CollapsibleSection 
           title="Circuit Parameters" 
@@ -403,25 +481,37 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-neutral-200">Rs (Ω)</span>
-                <input
-                  type="number"
-                  value={groundTruthParams.Rs.toFixed(1)}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val >= 10 && val <= 10000) {
-                      setGroundTruthParams(prev => ({ ...prev, Rs: val }));
-                      updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
-                      if (referenceModelId === 'dynamic-reference') {
-                        const updatedModel = createReferenceModel();
-                        setReferenceModel(updatedModel);
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={groundTruthParams.Rs.toFixed(1)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        const clampedVal = Math.max(10, Math.min(10000, val));
+                        setGroundTruthParams(prev => ({ ...prev, Rs: clampedVal }));
+                        if (val < 10 || val > 10000) {
+                          updateStatusMessage(`⚠️ Rs value ${val.toFixed(1)} is out of range (10-10000 Ω), clamped to ${clampedVal.toFixed(1)} Ω`);
+                        } else {
+                          updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
+                        }
+                        if (referenceModelId === 'dynamic-reference') {
+                          const updatedModel = createReferenceModel();
+                          setReferenceModel(updatedModel);
+                        }
                       }
-                    }
-                  }}
-                  className="w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
-                  step="10"
-                  min="10"
-                  max="10000"
-                />
+                    }}
+                    className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
+                      groundTruthParams.Rs < 10 || groundTruthParams.Rs > 10000 
+                        ? 'border-yellow-500 focus:border-yellow-400' 
+                        : 'border-neutral-600 focus:border-blue-500'
+                    }`}
+                    step="10"
+                  />
+                  {(groundTruthParams.Rs < 10 || groundTruthParams.Rs > 10000) && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                  )}
+                </div>
               </div>
               <ParamSlider 
                 label="" 
@@ -449,25 +539,37 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-neutral-200">Ra (Ω)</span>
-                <input
-                  type="number"
-                  value={groundTruthParams.Ra.toFixed(0)}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val >= 10 && val <= 10000) {
-                      setGroundTruthParams(prev => ({ ...prev, Ra: val }));
-                      updateStatusMessage(`Ra set to ${val.toFixed(0)} Ω`);
-                      if (referenceModelId === 'dynamic-reference') {
-                        const updatedModel = createReferenceModel();
-                        setReferenceModel(updatedModel);
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={groundTruthParams.Ra.toFixed(0)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        const clampedVal = Math.max(10, Math.min(10000, val));
+                        setGroundTruthParams(prev => ({ ...prev, Ra: clampedVal }));
+                        if (val < 10 || val > 10000) {
+                          updateStatusMessage(`⚠️ Ra value ${val.toFixed(0)} is out of range (10-10000 Ω), clamped to ${clampedVal.toFixed(0)} Ω`);
+                        } else {
+                          updateStatusMessage(`Ra set to ${val.toFixed(0)} Ω`);
+                        }
+                        if (referenceModelId === 'dynamic-reference') {
+                          const updatedModel = createReferenceModel();
+                          setReferenceModel(updatedModel);
+                        }
                       }
-                    }
-                  }}
-                  className="w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
-                  step="10"
-                  min="10"
-                  max="10000"
-                />
+                    }}
+                    className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
+                      groundTruthParams.Ra < 10 || groundTruthParams.Ra > 10000 
+                        ? 'border-yellow-500 focus:border-yellow-400' 
+                        : 'border-neutral-600 focus:border-blue-500'
+                    }`}
+                    step="10"
+                  />
+                  {(groundTruthParams.Ra < 10 || groundTruthParams.Ra > 10000) && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                  )}
+                </div>
               </div>
               <ParamSlider 
                 label="" 
@@ -495,25 +597,37 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-neutral-200">Ca (μF)</span>
-                <input
-                  type="number"
-                  value={(groundTruthParams.Ca * 1e6).toFixed(2)}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val >= 0.1 && val <= 50) {
-                      setGroundTruthParams(prev => ({ ...prev, Ca: val / 1e6 }));
-                      updateStatusMessage(`Ca set to ${val.toFixed(2)} μF`);
-                      if (referenceModelId === 'dynamic-reference') {
-                        const updatedModel = createReferenceModel();
-                        setReferenceModel(updatedModel);
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={(groundTruthParams.Ca * 1e6).toFixed(2)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        const clampedVal = Math.max(0.1, Math.min(50, val));
+                        setGroundTruthParams(prev => ({ ...prev, Ca: clampedVal / 1e6 }));
+                        if (val < 0.1 || val > 50) {
+                          updateStatusMessage(`⚠️ Ca value ${val.toFixed(2)} is out of range (0.1-50 μF), clamped to ${clampedVal.toFixed(2)} μF`);
+                        } else {
+                          updateStatusMessage(`Ca set to ${val.toFixed(2)} μF`);
+                        }
+                        if (referenceModelId === 'dynamic-reference') {
+                          const updatedModel = createReferenceModel();
+                          setReferenceModel(updatedModel);
+                        }
                       }
-                    }
-                  }}
-                  className="w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
-                  step="0.1"
-                  min="0.1"
-                  max="50"
-                />
+                    }}
+                    className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
+                      (groundTruthParams.Ca * 1e6) < 0.1 || (groundTruthParams.Ca * 1e6) > 50 
+                        ? 'border-yellow-500 focus:border-yellow-400' 
+                        : 'border-neutral-600 focus:border-blue-500'
+                    }`}
+                    step="0.1"
+                  />
+                  {((groundTruthParams.Ca * 1e6) < 0.1 || (groundTruthParams.Ca * 1e6) > 50) && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                  )}
+                </div>
               </div>
               <ParamSlider 
                 label="" 
@@ -542,25 +656,37 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-neutral-200">Rb (Ω)</span>
-                <input
-                  type="number"
-                  value={groundTruthParams.Rb.toFixed(0)}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val >= 10 && val <= 10000) {
-                      setGroundTruthParams(prev => ({ ...prev, Rb: val }));
-                      updateStatusMessage(`Rb set to ${val.toFixed(0)} Ω`);
-                      if (referenceModelId === 'dynamic-reference') {
-                        const updatedModel = createReferenceModel();
-                        setReferenceModel(updatedModel);
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={groundTruthParams.Rb.toFixed(0)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        const clampedVal = Math.max(10, Math.min(10000, val));
+                        setGroundTruthParams(prev => ({ ...prev, Rb: clampedVal }));
+                        if (val < 10 || val > 10000) {
+                          updateStatusMessage(`⚠️ Rb value ${val.toFixed(0)} is out of range (10-10000 Ω), clamped to ${clampedVal.toFixed(0)} Ω`);
+                        } else {
+                          updateStatusMessage(`Rb set to ${val.toFixed(0)} Ω`);
+                        }
+                        if (referenceModelId === 'dynamic-reference') {
+                          const updatedModel = createReferenceModel();
+                          setReferenceModel(updatedModel);
+                        }
                       }
-                    }
-                  }}
-                  className="w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
-                  step="10"
-                  min="10"
-                  max="10000"
-                />
+                    }}
+                    className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
+                      groundTruthParams.Rb < 10 || groundTruthParams.Rb > 10000 
+                        ? 'border-yellow-500 focus:border-yellow-400' 
+                        : 'border-neutral-600 focus:border-blue-500'
+                    }`}
+                    step="10"
+                  />
+                  {(groundTruthParams.Rb < 10 || groundTruthParams.Rb > 10000) && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                  )}
+                </div>
               </div>
               <ParamSlider 
                 label="" 
@@ -588,25 +714,37 @@ export const ToolboxComponent: React.FC<ToolboxComponentProps> = ({
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-neutral-200">Cb (μF)</span>
-                <input
-                  type="number"
-                  value={(groundTruthParams.Cb * 1e6).toFixed(2)}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val >= 0.1 && val <= 50) {
-                      setGroundTruthParams(prev => ({ ...prev, Cb: val / 1e6 }));
-                      updateStatusMessage(`Cb set to ${val.toFixed(2)} μF`);
-                      if (referenceModelId === 'dynamic-reference') {
-                        const updatedModel = createReferenceModel();
-                        setReferenceModel(updatedModel);
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={(groundTruthParams.Cb * 1e6).toFixed(2)}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        const clampedVal = Math.max(0.1, Math.min(50, val));
+                        setGroundTruthParams(prev => ({ ...prev, Cb: clampedVal / 1e6 }));
+                        if (val < 0.1 || val > 50) {
+                          updateStatusMessage(`⚠️ Cb value ${val.toFixed(2)} is out of range (0.1-50 μF), clamped to ${clampedVal.toFixed(2)} μF`);
+                        } else {
+                          updateStatusMessage(`Cb set to ${val.toFixed(2)} μF`);
+                        }
+                        if (referenceModelId === 'dynamic-reference') {
+                          const updatedModel = createReferenceModel();
+                          setReferenceModel(updatedModel);
+                        }
                       }
-                    }
-                  }}
-                  className="w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
-                  step="0.1"
-                  min="0.1"
-                  max="50"
-                />
+                    }}
+                    className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
+                      (groundTruthParams.Cb * 1e6) < 0.1 || (groundTruthParams.Cb * 1e6) > 50 
+                        ? 'border-yellow-500 focus:border-yellow-400' 
+                        : 'border-neutral-600 focus:border-blue-500'
+                    }`}
+                    step="0.1"
+                  />
+                  {((groundTruthParams.Cb * 1e6) < 0.1 || (groundTruthParams.Cb * 1e6) > 50) && (
+                    <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+                  )}
+                </div>
               </div>
               <ParamSlider 
                 label="" 

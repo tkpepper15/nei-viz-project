@@ -12,6 +12,7 @@ interface DataTableTabProps {
   parameters: CircuitParameters;
   groundTruthParams: CircuitParameters;
   gridParameterArrays: GridParameterArrays | null;
+  opacityExponent: number;
 }
 
 // Add formatValue function to handle unit conversions
@@ -33,13 +34,17 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   gridSize,
   parameters,
   groundTruthParams,
-  gridParameterArrays
+  gridParameterArrays,
+  opacityExponent
 }) => {
   // Table sorting state
   const [sortColumn, setSortColumn] = useState<string>('resnorm');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const resultsPerPage = 100;
+
+  // Ensure hiddenGroups is always number[] for type safety
+  const hiddenGroupsNum: number[] = hiddenGroups.map(Number);
 
   // Function to handle sorting
   const handleSort = (column: string) => {
@@ -172,7 +177,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   }, [getSortedGridResults]);
 
   // Get quality label and color based on resnorm value and dynamic percentiles
-  const getQualityInfo = (point: BackendMeshPoint & { id: number }) => {
+  const getQualityInfo = (point: BackendMeshPoint & { id: number }): { qualityLabel: string; groupColor: string; groupIndex: number; qualityCategory: number } => {
     const resnorm = point.resnorm || 0;
     
     let qualityCategory = 4; // Default to Poor
@@ -212,7 +217,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
       (qualityCategory === 4 && group.label.includes('Poor'))
     );
     
-    return { qualityLabel, groupColor, groupIndex: groupIndex >= 0 ? groupIndex : qualityCategory, qualityCategory };
+    return { qualityLabel, groupColor, groupIndex: groupIndex >= 0 ? groupIndex : Number(qualityCategory), qualityCategory };
   };
 
   // Calculate unique values for each parameter
@@ -296,6 +301,17 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
         </div>
       </div>
     );
+  };
+
+  // Find the group for this point
+  const getGroupForPoint = (point: BackendMeshPoint & { id: number }) => {
+    // Find which group this point belongs to based on resnorm range
+    const groupIndex = resnormGroups.findIndex(group => {
+      const resnorm = point.resnorm || 0;
+      return resnorm >= group.range[0] && resnorm <= group.range[1];
+    });
+    
+    return groupIndex >= 0 ? resnormGroups[groupIndex] : null;
   };
 
   return (
@@ -496,6 +512,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     {renderSortArrow('resnorm')}
                   </div>
                 </th>
+                <th>Opacity</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-700">
@@ -524,6 +541,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     <span className="text-xs font-mono text-primary">0.00E+00</span>
                   </div>
                 </td>
+                <td className="p-2">1.000</td>
               </tr>
               
               {/* Paginated Results */}
@@ -531,8 +549,20 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                 // Show all points regardless of visibility status in the spider plot
                 .map((point: BackendMeshPoint & { id: number }, idx: number) => {
                   const { qualityLabel, groupColor, groupIndex } = getQualityInfo(point);
-                  // Calculate visibility status for UI indication
-                  const isHidden = groupIndex >= 0 && hiddenGroups.includes(groupIndex);
+                  const isHidden = groupIndex >= 0 && hiddenGroupsNum.includes(groupIndex);
+                  
+                  const group = getGroupForPoint(point);
+                  let opacity = 1;
+                  if (group && group.items.length > 1 && point.resnorm !== undefined) {
+                    const groupResnorms = group.items.map(item => item.resnorm).filter(r => r !== undefined) as number[];
+                    const minGroupResnorm = Math.min(...groupResnorms);
+                    const maxGroupResnorm = Math.max(...groupResnorms);
+                    if (maxGroupResnorm > minGroupResnorm) {
+                      const normalizedResnorm = (point.resnorm - minGroupResnorm) / (maxGroupResnorm - minGroupResnorm);
+                      const mapped = 1 - Math.pow(normalizedResnorm, opacityExponent);
+                      opacity = 0.05 + (Math.max(0, Math.min(mapped, 1)) * 0.95);
+                    }
+                  }
                   
                   return (
                     <tr 
@@ -570,6 +600,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                           )}
                         </div>
                       </td>
+                      <td className="p-2">{opacity.toFixed(3)}</td>
                     </tr>
                   );
                 })}

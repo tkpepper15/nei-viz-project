@@ -4,20 +4,18 @@ import React, { useState } from 'react';
 import { SpiderPlot } from './visualizations/SpiderPlot';
 import { ModelSnapshot } from './types';
 
-interface TileRenderingExampleProps {
+interface SpiderPlotRendererProps {
   meshItems: ModelSnapshot[];
   opacityFactor: number;
   maxPolygons: number;
   visualizationMode?: 'color' | 'opacity';
-  opacityIntensity?: number;
 }
 
-export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
+export const SpiderPlotRenderer: React.FC<SpiderPlotRendererProps> = ({
   meshItems,
   opacityFactor,
   maxPolygons,
-  visualizationMode = 'color',
-  opacityIntensity = 1.0
+  visualizationMode = 'color'
 }) => {
   const [useTileRendering, setUseTileRendering] = useState(false);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
@@ -107,7 +105,6 @@ export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
             opacityFactor={opacityFactor}
             maxPolygons={maxPolygons}
             visualizationMode={visualizationMode}
-            opacityIntensity={opacityIntensity}
             gridSize={5}
             includeLabels={true}
             backgroundColor="transparent"
@@ -116,9 +113,8 @@ export const TileRenderingExample: React.FC<TileRenderingExampleProps> = ({
           <SpiderPlot
             meshItems={meshItems}
             opacityFactor={opacityFactor}
-            maxPolygons={Math.min(maxPolygons, 10000)} // Limit for interactive mode
+            maxPolygons={Math.min(maxPolygons, 100000)} // Increased limit for interactive mode
             visualizationMode={visualizationMode}
-            opacityIntensity={opacityIntensity}
             gridSize={5}
             includeLabels={true}
             backgroundColor="transparent"

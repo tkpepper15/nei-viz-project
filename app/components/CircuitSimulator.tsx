@@ -7,21 +7,23 @@ import {
   BackendMeshPoint, 
   GridParameterArrays 
 } from './circuit-simulator/types';
-import { ModelSnapshot, ImpedancePoint as TypesImpedancePoint, ResnormGroup } from './circuit-simulator/types';
+import { ModelSnapshot, ImpedancePoint, ResnormGroup, PerformanceLog, PipelinePhase } from './circuit-simulator/types';
 import { CircuitParameters } from './circuit-simulator/types/parameters';
 import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/workerManager';
+import { useComputationState } from './circuit-simulator/hooks/useComputationState';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { DataTableTab } from './circuit-simulator/DataTableTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
-import { OrchestratorTab } from './circuit-simulator/OrchestratorTab';
+// Removed OrchestratorTab - functionality integrated into VisualizerTab
 
 // Import the new ToolboxComponent
 import { ToolboxComponent } from './circuit-simulator/controls/ToolboxComponent';
 import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
 import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
 import { SavedProfiles } from './circuit-simulator/controls/SavedProfiles';
+import { StaticRenderSettings, defaultStaticRenderSettings } from './circuit-simulator/controls/StaticRenderControls';
 import { SavedProfile, SavedProfilesState } from './circuit-simulator/types/savedProfiles';
 
 // Remove empty interface and replace with type
@@ -34,27 +36,112 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Add frequency control state
   const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz
   const [maxFreq, setMaxFreq] = useState<number>(10000); // 10 kHz
-  const [numPoints, setNumPoints] = useState<number>(20); // Default number of frequency points
+  const [numPoints, setNumPoints] = useState<number>(100); // Default number of frequency points
   const [frequencyPoints, setFrequencyPoints] = useState<number[]>([]);
   
-  // Add progress tracking for worker computation
-  const [computationProgress, setComputationProgress] = useState<WorkerProgress | null>(null);
+  // Use the new computation state hook
+  const {
+    gridResults, setGridResults,
+    gridResultsWithIds, setGridResultsWithIds,
+    gridSize, setGridSize,
+    gridError, setGridError,
+    isComputingGrid, setIsComputingGrid,
+    computationProgress, setComputationProgress,
+    computationSummary, setComputationSummary,
+    skippedPoints, setSkippedPoints,
+    totalGridPoints, setTotalGridPoints,
+    actualComputedPoints, setActualComputedPoints,
+    memoryLimitedPoints, setMemoryLimitedPoints,
+    estimatedMemoryUsage, setEstimatedMemoryUsage,
+    userVisualizationPercentage, setUserVisualizationPercentage,
+    maxVisualizationPoints, setMaxVisualizationPoints,
+    isUserControlledLimits, setIsUserControlledLimits,
+    calculateEffectiveVisualizationLimit,
+    resnormGroups, setResnormGroups,
+    hiddenGroups, setHiddenGroups,
+    logMessages,
+    statusMessage,
+    updateStatusMessage,
+    resetComputationState
+  } = useComputationState();
 
-  // State for the circuit simulator
-  const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
-  const [gridResultsWithIds, setGridResultsWithIds] = useState<(BackendMeshPoint & { id: number })[]>([]);
-  const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>([]);
-  const [statusMessage, setStatusMessage] = useState<string>('');
-  const [gridSize, setGridSize] = useState<number>(3);
-  const [gridError, setGridError] = useState<string | null>(null);
-  const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
-  const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
-  // Initialize hidden groups state - start with only top 25% (excellent group) visible for performance
-  const [hiddenGroups, setHiddenGroups] = useState<number[]>([]); // Show all groups by default
-  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity' | 'orchestrator'>('visualizer');
+  // Performance tracking helper functions
+  const startPhase = useCallback((name: string, description: string) => {
+    const phase: PipelinePhase = {
+      name,
+      description,
+      startTime: Date.now(),
+      status: 'running'
+    };
+    setCurrentPhases(prev => [...prev, phase]);
+    updateStatusMessage(`[${name.toUpperCase()}] ${description}`);
+    return phase;
+  }, [updateStatusMessage]);
+
+  const completePhase = useCallback((phaseName: string, details?: Record<string, unknown>) => {
+    setCurrentPhases(prev => {
+      const updated = prev.map(phase => {
+        if (phase.name === phaseName && phase.status === 'running') {
+          const endTime = Date.now();
+          return {
+            ...phase,
+            endTime,
+            duration: endTime - phase.startTime,
+            status: 'completed' as const,
+            details
+          };
+        }
+        return phase;
+      });
+      return updated;
+    });
+  }, []);
+
+  const generatePerformanceLog = useCallback((phases: PipelinePhase[], totalDuration: number, totalPoints: number): PerformanceLog => {
+    const completedPhases = phases.filter(p => p.status === 'completed' && p.duration);
+    
+    // Find bottleneck (longest phase)
+    const bottleneck = completedPhases.reduce((longest, current) => 
+      (current.duration || 0) > (longest.duration || 0) ? current : longest
+    , completedPhases[0]);
+
+    // Calculate efficiency metrics
+    const cpuCores = navigator.hardwareConcurrency || 4;
+    const parallelization = Math.min(1, (totalPoints / totalDuration) / (cpuCores * 1000)); // rough estimate
+    const throughput = totalPoints / (totalDuration / 1000); // points per second
+    const memoryUsage = (totalPoints * 800) / (1024 * 1024); // estimated MB
+
+    // Create summary breakdown
+    const summary = {
+      gridGeneration: completedPhases.find(p => p.name === 'grid-generation')?.duration || 0,
+      impedanceComputation: completedPhases.find(p => p.name === 'impedance-computation')?.duration || 0,
+      resnormAnalysis: completedPhases.find(p => p.name === 'resnorm-analysis')?.duration || 0,
+      dataProcessing: completedPhases.find(p => p.name === 'data-processing')?.duration || 0,
+      rendering: completedPhases.find(p => p.name === 'rendering')?.duration || 0
+    };
+
+    return {
+      totalDuration,
+      phases: completedPhases,
+      bottleneck: bottleneck ? `${bottleneck.name} (${(bottleneck.duration! / 1000).toFixed(2)}s)` : 'Unknown',
+      efficiency: {
+        parallelization,
+        memoryUsage,
+        throughput,
+        cpuCores
+      },
+      summary
+    };
+  }, []);
+
+  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
   const [parameterChanged, setParameterChanged] = useState<boolean>(false);
   // Track if reference model was manually hidden
   const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
+  
+  // Static rendering state
+  const [staticRenderSettings, setStaticRenderSettings] = useState<StaticRenderSettings>(defaultStaticRenderSettings);
+  const [isStaticRendering, setIsStaticRendering] = useState<boolean>(false);
 
   // Auto-manage toolbox visibility based on tab
   useEffect(() => {
@@ -70,6 +157,89 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [opacityLevel, setOpacityLevel] = useState<number>(0.7);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [logScalar, setLogScalar] = useState<number>(1.0);
+  // Add opacity exponent state for spider plot and data table
+  const [opacityExponent, setOpacityExponent] = useState<number>(5);
+  
+  // Visualization settings state
+  const [visualizationSettings, setVisualizationSettings] = useState<{
+    groupPortion: number;
+    selectedOpacityGroups: number[];
+    visualizationType: 'spider' | 'nyquist';
+    view3D: boolean;
+  }>({
+    groupPortion: 0.5,
+    selectedOpacityGroups: [0],
+    visualizationType: 'spider',
+    view3D: false
+  });
+
+  // Callback to handle visualization settings changes
+  const handleVisualizationSettingsChange = useCallback((settings: typeof visualizationSettings) => {
+    setVisualizationSettings(settings);
+    // Mark parameter as changed so the compute button shows "Recompute"
+    setParameterChanged(true);
+  }, []);
+
+  // Apply visualization settings filtering to computed results
+  const applyVisualizationFiltering = useCallback((
+    results: ModelSnapshot[], 
+    groups: ResnormGroup[], 
+    settings: typeof visualizationSettings
+  ): ModelSnapshot[] => {
+    if (!results.length || !groups.length) return results;
+    
+    // Step 1: Filter by selected opacity groups
+    const groupFilteredResults = results.filter(model => {
+      // Find which group this model belongs to
+      const groupIndex = groups.findIndex(group => 
+        group.items.some(item => item.id === model.id)
+      );
+      
+      // Only include models from selected groups
+      return settings.selectedOpacityGroups.includes(groupIndex);
+    });
+    
+    // Step 2: Apply group portion filtering
+    // Group models by their resnorm groups
+    const groupedModels: { [key: number]: ModelSnapshot[] } = {};
+    
+    groupFilteredResults.forEach(model => {
+      const groupIndex = groups.findIndex(group => 
+        group.items.some(item => item.id === model.id)
+      );
+      
+      if (groupIndex !== -1) {
+        if (!groupedModels[groupIndex]) groupedModels[groupIndex] = [];
+        groupedModels[groupIndex].push(model);
+      }
+    });
+    
+    // Step 3: Apply portion filtering to each group
+    const filteredResults: ModelSnapshot[] = [];
+    
+    Object.keys(groupedModels).forEach(groupKey => {
+      const groupIndex = parseInt(groupKey);
+      const groupModels = groupedModels[groupIndex];
+      
+      if (!groupModels || groupModels.length === 0) return;
+      
+      // Sort by resnorm (ascending - lower is better) and apply portion filtering
+      const sortedGroupModels = groupModels
+        .filter(m => m.resnorm !== undefined)
+        .sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+      
+      // Keep only the specified portion of the group (best models)
+      const keepCount = Math.max(1, Math.floor(sortedGroupModels.length * settings.groupPortion));
+      const filteredGroupModels = sortedGroupModels.slice(0, keepCount);
+      
+      filteredResults.push(...filteredGroupModels);
+    });
+    
+    updateStatusMessage(`[VIZ FILTERING] Applied settings: ${settings.selectedOpacityGroups.length} groups, ${(settings.groupPortion * 100).toFixed(1)}% portion`);
+    updateStatusMessage(`[VIZ FILTERING] Filtered from ${results.length} to ${filteredResults.length} models (${((filteredResults.length / results.length) * 100).toFixed(1)}% rendered)`);
+    
+    return filteredResults;
+  }, [updateStatusMessage]);
   
   const [referenceParams, setReferenceParams] = useState<CircuitParameters>({
     Rs: 24,
@@ -82,6 +252,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // Reference model state
   const [referenceModelId, setReferenceModelId] = useState<string | null>(null);
+  
+  // Performance logging state
+  const [performanceLog, setPerformanceLog] = useState<PerformanceLog | null>(null);
+  const [currentPhases, setCurrentPhases] = useState<PipelinePhase[]>([]);
   const [referenceModel, setReferenceModel] = useState<ModelSnapshot | null>(null);
   
   // Ground truth parameters state
@@ -107,9 +281,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Add state for grid parameter arrays
   const [gridParameterArrays, setGridParameterArrays] = useState<GridParameterArrays | null>(null);
   
-  // Add state for computation summary notification
-  const [computationSummary, setComputationSummary] = useState<ComputationSummary | null>(null);
-  
   // Performance settings state
   const [performanceSettings, setPerformanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
   
@@ -123,27 +294,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return 0;
   }, []);
   
-  // Update status message to also store in log history
-  const updateStatusMessage = useCallback((message: string) => {
-    setStatusMessage(message);
-    const timestamp = new Date().toLocaleTimeString();
-    // Categorize messages for better visibility in log
-    let formattedMessage = message;
-    
-    // Add category tags based on message content
-    if (message.includes('Comput') || message.includes('Grid')) {
-      formattedMessage = `[Grid] ${message}`;
-    } else if (message.includes('Parameters') || message.includes('parameter')) {
-      formattedMessage = `[Params] ${message}`;
-    } else if (message.includes('model') || message.includes('Model')) {
-      formattedMessage = `[Visual] ${message}`;
-    } else if (message.includes('Sort')) {
-      formattedMessage = `[Table] ${message}`;
-    }
-    
-    setLogMessages(prev => [...prev.slice(-49), { time: timestamp, message: formattedMessage }]);
-  }, []);
-
   // Initialize parameters
   useEffect(() => {
     // Calculate 50% values for each parameter range
@@ -227,7 +377,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const { Rs, Ra, Ca, Rb, Cb } = groundTruthParams;
     
     // Compute impedance at each frequency
-    const impedanceData: TypesImpedancePoint[] = [];
+    const impedanceData: ImpedancePoint[] = [];
     
     // Generate detailed logs for the first calculation (avoid calling updateStatusMessage in callback)
     
@@ -316,7 +466,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setManuallyHidden(false);
       updateStatusMessage('Reference model shown');
     }
-  }, [referenceModelId, createReferenceModel]);
+  }, [referenceModelId, createReferenceModel, updateStatusMessage]);
 
   // Create and show reference model by default
   useEffect(() => {
@@ -408,7 +558,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       window.removeEventListener('toggleReferenceModel', handleToggleReference);
       window.removeEventListener('toggleResnormGroup', handleToggleResnormGroup);
     };
-  }, [toggleReferenceModel, hiddenGroups, referenceModelId, createReferenceModel, updateStatusMessage]);
+  }, [toggleReferenceModel, hiddenGroups, referenceModelId, createReferenceModel, updateStatusMessage, setHiddenGroups]);
   
   // Optimized helper function to map BackendMeshPoint to ModelSnapshot
   const mapBackendMeshToSnapshot = (meshPoint: BackendMeshPoint, index: number): ModelSnapshot => {
@@ -420,7 +570,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     
     // Only convert spectrum if it exists and has data
     const spectrumData = meshPoint.spectrum && meshPoint.spectrum.length > 0 
-      ? toImpedancePoints(meshPoint.spectrum) as TypesImpedancePoint[]
+      ? toImpedancePoints(meshPoint.spectrum) as ImpedancePoint[]
       : [];
     
     return {
@@ -444,12 +594,289 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     };
   };
 
+  // Helper function for Halton sequence (quasi-random number generation)
+  const haltonSequence = useCallback((index: number, base: number): number => {
+    let result = 0;
+    let fraction = 1 / base;
+    let i = index;
+    while (i > 0) {
+      result += (i % base) * fraction;
+      i = Math.floor(i / base);
+      fraction /= base;
+    }
+    return result;
+  }, []);
+
+  // Calculate synthetic resnorm based on parameter values and profile characteristics
+  const calculateSyntheticResnorm = useCallback((Rs: number, Ra: number, Ca: number, Rb: number, Cb: number, profile: SavedProfile): number => {
+    // Use a realistic model that correlates with actual circuit behavior
+    // Lower resistance and higher capacitance generally lead to better fits (lower resnorm)
+    
+    // Normalize parameters to 0-1 range
+    const rsNorm = Math.log10(Rs / 10) / Math.log10(1000);
+    const raNorm = Math.log10(Ra / 10) / Math.log10(1000);
+    const rbNorm = Math.log10(Rb / 10) / Math.log10(1000);
+    const caNorm = Math.log10(Ca / 0.1e-6) / Math.log10(500);
+    const cbNorm = Math.log10(Cb / 0.1e-6) / Math.log10(500);
+    
+    // Calculate base resnorm with realistic relationships
+    const balanceFactor = Math.abs(raNorm - rbNorm); // Penalty for imbalanced resistances
+    const capacitanceFactor = (caNorm + cbNorm) / 2; // Higher capacitance = better fit
+    const frequencyFactor = Math.log10(profile.maxFreq / profile.minFreq) / 4; // Wider frequency range = more constraints
+    
+    // Combine factors to create realistic resnorm distribution
+    let baseResnorm = 0.01 + 
+                     (rsNorm * 0.02) + 
+                     (balanceFactor * 0.05) + 
+                     ((1 - capacitanceFactor) * 0.08) + 
+                     (frequencyFactor * 0.03);
+    
+    // Add parameter-specific penalties
+    if (Ra < 50 || Rb < 50) baseResnorm += 0.02; // Very low resistance penalty
+    if (Ca < 1e-6 || Cb < 1e-6) baseResnorm += 0.03; // Very low capacitance penalty
+    
+    // Add some noise to create realistic distribution
+    const noise = 1 + (Math.random() - 0.5) * 0.3; // ±15% noise
+    
+    return Math.max(0.001, Math.min(0.5, baseResnorm * noise));
+  }, []);
+
+  // Generate synthetic profile data for profiles that exceed worker limits
+  const generateSyntheticProfileData = useCallback((profile: SavedProfile, sampleSize: number): ModelSnapshot[] => {
+    console.log(`Generating ${sampleSize} synthetic data points for profile "${profile.name}" (grid: ${profile.gridSize}^5)`);
+    
+    const syntheticData: ModelSnapshot[] = [];
+    const paramRanges = {
+      Rs: { min: 10, max: 10000 },
+      Ra: { min: 10, max: 10000 },
+      Rb: { min: 10, max: 10000 },
+      Ca: { min: 0.1e-6, max: 50e-6 },
+      Cb: { min: 0.1e-6, max: 50e-6 }
+    };
+    
+    // Generate parameter combinations using quasi-random Halton sequence for better distribution
+    for (let i = 0; i < sampleSize; i++) {
+      // Use Halton sequence bases for better parameter space coverage
+      const haltonBase2 = haltonSequence(i, 2);
+      const haltonBase3 = haltonSequence(i, 3);
+      const haltonBase5 = haltonSequence(i, 5);
+      const haltonBase7 = haltonSequence(i, 7);
+      const haltonBase11 = haltonSequence(i, 11);
+      
+      // Map to parameter ranges using logarithmic scaling
+      const Rs = paramRanges.Rs.min * Math.pow(paramRanges.Rs.max / paramRanges.Rs.min, haltonBase2);
+      const Ra = paramRanges.Ra.min * Math.pow(paramRanges.Ra.max / paramRanges.Ra.min, haltonBase3);
+      const Rb = paramRanges.Rb.min * Math.pow(paramRanges.Rb.max / paramRanges.Rb.min, haltonBase5);
+      const Ca = paramRanges.Ca.min * Math.pow(paramRanges.Ca.max / paramRanges.Ca.min, haltonBase7);
+      const Cb = paramRanges.Cb.min * Math.pow(paramRanges.Cb.max / paramRanges.Cb.min, haltonBase11);
+      
+      // Calculate synthetic resnorm using realistic circuit behavior model
+      const resnorm = calculateSyntheticResnorm(Rs, Ra, Ca, Rb, Cb, profile);
+      
+      // Calculate TER for the synthetic model
+      const ter = (Rs * (Ra + Rb)) / (Rs + Ra + Rb);
+      
+      // Generate minimal impedance spectrum for compatibility
+      const spectrum: ImpedancePoint[] = [];
+      const numFreqPoints = Math.min(profile.numPoints, 10); // Limit spectrum size for performance
+      for (let j = 0; j < numFreqPoints; j++) {
+        const logMin = Math.log10(profile.minFreq);
+        const logMax = Math.log10(profile.maxFreq);
+        const logFreq = logMin + (j / (numFreqPoints - 1)) * (logMax - logMin);
+        const frequency = Math.pow(10, logFreq);
+        
+        // Calculate simple impedance at this frequency
+        const omega = 2 * Math.PI * frequency;
+        const Za_real = Ra / (1 + Math.pow(omega * Ra * Ca, 2));
+        const Za_imag = -omega * Ra * Ra * Ca / (1 + Math.pow(omega * Ra * Ca, 2));
+        const Zb_real = Rb / (1 + Math.pow(omega * Rb * Cb, 2));
+        const Zb_imag = -omega * Rb * Rb * Cb / (1 + Math.pow(omega * Rb * Cb, 2));
+        
+        const real = Rs + Za_real + Zb_real;
+        const imaginary = Za_imag + Zb_imag;
+        const magnitude = Math.sqrt(real * real + imaginary * imaginary);
+        const phase = Math.atan2(imaginary, real) * (180 / Math.PI);
+        
+        spectrum.push({
+          frequency,
+          real,
+          imaginary,
+          magnitude,
+          phase
+        });
+      }
+      
+      syntheticData.push({
+        id: `synthetic-${profile.id}-${i}`,
+        name: `Synthetic ${profile.name} - Model ${i + 1}`,
+        timestamp: Date.now(),
+        parameters: {
+          Rs,
+          Ra,
+          Rb,
+          Ca,
+          Cb,
+          frequency_range: [profile.minFreq, profile.maxFreq]
+        },
+        data: spectrum,
+        resnorm,
+        color: '#8B5CF6', // Purple color to distinguish synthetic data
+        isVisible: true,
+        opacity: 0.7,
+        ter
+      });
+    }
+    
+    // Sort by resnorm to ensure proper quartile distribution
+    return syntheticData.sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+  }, [haltonSequence, calculateSyntheticResnorm]);
+
+  // Generate mesh data from saved profile (currently unused, was for OrchestratorTab)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const generateProfileMeshData = useCallback(async (profile: SavedProfile, sampleSize: number = 1000): Promise<ModelSnapshot[]> => {
+    if (!profile) return [];
+    
+    try {
+      // Use the profile's saved parameters to generate grid data
+      const profileGridSize = profile.gridSize;
+      const profileMinFreq = profile.minFreq;
+      const profileMaxFreq = profile.maxFreq;
+      const profileNumPoints = profile.numPoints;
+      const profileGroundTruthParams = profile.groundTruthParams;
+      
+      // CRITICAL: Enforce safety limits to prevent crashes
+      const WORKER_MAX_GRID_SIZE = 20; // Hard limit from grid-worker.js
+      const WORKER_MAX_TOTAL_POINTS = 10000000; // 10M points hard limit
+      
+      const totalPoints = Math.pow(profileGridSize, 5);
+      
+      // Check if the profile exceeds worker capabilities
+      if (profileGridSize > WORKER_MAX_GRID_SIZE || totalPoints > WORKER_MAX_TOTAL_POINTS) {
+        console.warn(`Profile "${profile.name}" grid size ${profileGridSize}^5 = ${totalPoints.toLocaleString()} exceeds worker limits (max: ${WORKER_MAX_GRID_SIZE}^5 = ${Math.pow(WORKER_MAX_GRID_SIZE, 5).toLocaleString()})`);
+        
+        // Generate synthetic data instead to prevent crashes
+        updateStatusMessage(`Profile "${profile.name}" exceeds worker limits - generating synthetic dataset...`);
+        
+        return generateSyntheticProfileData(profile, sampleSize);
+      }
+      
+      // Additional safety check for very large grids
+      const estimatedMemoryMB = (totalPoints * 800) / (1024 * 1024); // ~800 bytes per model
+      if (estimatedMemoryMB > 2000) { // 2GB memory limit
+        console.warn(`Profile "${profile.name}" estimated memory usage ${estimatedMemoryMB.toFixed(0)}MB exceeds safe limits`);
+        updateStatusMessage(`Profile "${profile.name}" memory requirements too high - using synthetic data...`);
+        
+        return generateSyntheticProfileData(profile, sampleSize);
+      }
+      
+      // Use a conservative grid size that's guaranteed to work
+      const safeGridSize = Math.min(profileGridSize, WORKER_MAX_GRID_SIZE);
+      const actualSampleSize = Math.min(sampleSize, Math.pow(safeGridSize, 5));
+      
+      updateStatusMessage(`Generating grid data from profile "${profile.name}" (safe grid: ${safeGridSize}^5 = ${Math.pow(safeGridSize, 5).toLocaleString()})...`);
+      
+      // Use ultra-conservative performance settings for large computations
+      const conservativeSettings: PerformanceSettings = {
+        ...DEFAULT_PERFORMANCE_SETTINGS,
+        useSymmetricGrid: true, // Enable symmetric optimization
+        useParallelProcessing: true, // Keep parallel processing enabled
+        enableSmartBatching: true, // Use smart batching
+        chunkSize: Math.floor(DEFAULT_PERFORMANCE_SETTINGS.chunkSize * 0.5), // Use smaller chunks
+        maxMemoryMB: Math.min(DEFAULT_PERFORMANCE_SETTINGS.maxMemoryMB, 1024), // Limit memory to 1GB
+        enableProgressiveRendering: true, // Show progress
+        performanceWarnings: true // Enable warnings
+      };
+      
+      // Use the worker to generate mesh data with timeout protection
+      const gridResults = await Promise.race([
+        computeGridParallel(
+          profileGroundTruthParams,
+          safeGridSize,
+          profileMinFreq,
+          profileMaxFreq,
+          profileNumPoints,
+          conservativeSettings,
+          (progress) => {
+            // Update status with progress
+            if (progress.overallProgress) {
+              updateStatusMessage(`Generating profile data: ${Math.round(progress.overallProgress)}%`);
+            }
+          },
+          (error) => {
+            console.error('Profile generation error:', error);
+            throw new Error(`Worker error: ${error}`);
+          }
+        ),
+        // 5 minute timeout to prevent infinite hangs
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Profile generation timeout (5 minutes)')), 5 * 60 * 1000)
+        )
+      ]);
+      
+      if (!gridResults || gridResults.length === 0) {
+        throw new Error('No grid results generated');
+      }
+      
+      // Convert BackendMeshPoint to ModelSnapshot format and sample if needed
+      const modelSnapshots: ModelSnapshot[] = gridResults.map((result, index) => {
+        const ter = (result.parameters.Rs * (result.parameters.Ra + result.parameters.Rb)) / 
+                   (result.parameters.Rs + result.parameters.Ra + result.parameters.Rb);
+        
+        // Convert spectrum to ImpedancePoint format
+        const data: ImpedancePoint[] = result.spectrum.map(spec => ({
+          real: spec.real,
+          imaginary: spec.imag,
+          frequency: spec.freq,
+          magnitude: spec.mag,
+          phase: spec.phase
+        }));
+        
+        return {
+          id: `profile-${profile.id}-${index}`,
+          name: `Profile ${profile.name} - Model ${index + 1}`,
+          parameters: result.parameters,
+          data,
+          resnorm: result.resnorm,
+          color: '#3B82F6',
+          opacity: 0.7,
+          isVisible: true,
+          timestamp: Date.now(),
+          ter
+        };
+      });
+      
+      // Sample down to requested size if needed
+      if (modelSnapshots.length > actualSampleSize) {
+        const step = Math.floor(modelSnapshots.length / actualSampleSize);
+        const sampledModels = modelSnapshots.filter((_, index) => index % step === 0).slice(0, actualSampleSize);
+        updateStatusMessage(`Sampled ${sampledModels.length} models from profile "${profile.name}"`);
+        return sampledModels;
+      }
+      
+      updateStatusMessage(`Generated ${modelSnapshots.length} models from profile "${profile.name}"`);
+      return modelSnapshots;
+      
+    } catch (error) {
+      console.error('Error generating profile mesh data:', error);
+      updateStatusMessage(`Error generating profile data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Fallback to synthetic data generation if worker computation fails
+      try {
+        updateStatusMessage(`Fallback: generating synthetic data for profile "${profile.name}"...`);
+        return generateSyntheticProfileData(profile, sampleSize);
+      } catch (syntheticError) {
+        console.error('Synthetic data generation also failed:', syntheticError);
+        updateStatusMessage(`Failed to generate any data for profile "${profile.name}"`);
+        return [];
+      }
+    }
+  }, [computeGridParallel, updateStatusMessage, generateSyntheticProfileData]);
+
   // Updated grid computation using Web Workers for parallel processing
-  const handleComputeRegressionMesh = async () => {
+  const handleComputeRegressionMesh = useCallback(async () => {
     // Validate grid size
     if (gridSize < 2 || gridSize > 25) {
       updateStatusMessage('Points per dimension must be between 2 and 25');
-      setTimeout(() => setStatusMessage(''), 3000);
       return;
     }
 
@@ -469,27 +896,29 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       }
     }
 
-    // Start timing
+    // Start comprehensive performance tracking
     const startTime = Date.now();
     let generationStartTime = 0;
     let computationStartTime = 0;
     let processingStartTime = 0;
 
+    // Reset state and start performance tracking
     setIsComputingGrid(true);
-    setGridResults([]);
-    setGridError(null);
-    setResnormGroups([]);
+    resetComputationState();
     setParameterChanged(false);
     setManuallyHidden(false);
-    setComputationProgress(null);
+    setCurrentPhases([]);
     
-    // Clear previous logs
-    setLogMessages([]);
+    // Initialize computation phase
+    startPhase('initialization', 'Setting up parallel computation pipeline');
+    
+    // Set initial grid tracking
+    setTotalGridPoints(totalPointsToCompute);
     
     const totalPoints = totalPointsToCompute;
     updateStatusMessage(`Starting parallel grid computation with ${gridSize} points per dimension...`);
     updateStatusMessage(`MATH: Computing all ${totalPoints.toLocaleString()} parameter combinations using ${navigator.hardwareConcurrency || 4} CPU cores`);
-    updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rs in series with RC elements)`);
+    updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rs shunt resistance with parallel RC elements)`);
     updateStatusMessage(`MATH: Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`);
     updateStatusMessage(`MATH: Using frequency range ${minFreq.toFixed(1)}-${maxFreq.toFixed(1)} Hz with ${numPoints} points`);
 
@@ -501,25 +930,39 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         if (progress.type === 'GENERATION_PROGRESS') {
           if (generationStartTime === 0) {
             generationStartTime = Date.now();
-            updateStatusMessage(`[TIMING] Grid generation phase started`);
+            completePhase('initialization');
+            startPhase('grid-generation', 'Generating parameter space grid combinations');
           }
           if (progress.generated && progress.generated > 0) {
-            updateStatusMessage(`Generating grid points: ${progress.generated.toLocaleString()}/${progress.total.toLocaleString()} (${progress.overallProgress.toFixed(1)}%)`);
+            setActualComputedPoints(progress.generated);
+            const skipped = progress.skipped || (progress.total - progress.generated);
+            setSkippedPoints(skipped);
+            updateStatusMessage(`Generating grid points: ${progress.generated.toLocaleString()}/${progress.total.toLocaleString()} (${progress.overallProgress.toFixed(1)}%) [${skipped.toLocaleString()} skipped by symmetric optimization]`);
           }
           
           // Add small delay for large grids to keep UI responsive
-          if (totalPoints > 100000 && progress.generated && progress.generated % 50000 === 0) {
+          if (totalPoints > 100000 && progress.generated && progress.generated % 100000 === 0) {
             setTimeout(() => {}, 10);
           }
         } else if (progress.type === 'CHUNK_PROGRESS') {
           if (computationStartTime === 0) {
             computationStartTime = Date.now();
             const generationTime = ((computationStartTime - generationStartTime) / 1000).toFixed(2);
-            updateStatusMessage(`[TIMING] Grid generation completed in ${generationTime}s, starting spectrum computation`);
+            completePhase('grid-generation', { 
+              pointsGenerated: progress.total,
+              generationTime: generationTime + 's'
+            });
+            startPhase('impedance-computation', 'Computing complex impedance spectra in parallel');
           }
           const processedStr = progress.processed ? progress.processed.toLocaleString() : '0';
           const totalStr = progress.total.toLocaleString();
-          updateStatusMessage(`Computing spectra & resnorms: ${processedStr}/${totalStr} points (${progress.overallProgress.toFixed(1)}%)`);
+          const memoryWarning = progress.memoryPressure ? ' [MEMORY PRESSURE - Implementing backpressure]' : '';
+          updateStatusMessage(`Computing spectra & resnorms: ${processedStr}/${totalStr} points (${progress.overallProgress.toFixed(1)}%)${memoryWarning}`);
+          
+          // Log memory pressure warnings
+          if (progress.memoryPressure) {
+            updateStatusMessage(`[MEMORY] High memory usage detected - workers implementing staggered processing`);
+          }
           
           // Add periodic UI updates for better responsiveness
           if (totalPoints > 500000 && progress.processed && progress.processed % 100000 === 0) {
@@ -554,7 +997,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       // Start processing phase timing
       processingStartTime = Date.now();
       const computationTime = ((processingStartTime - computationStartTime) / 1000).toFixed(2);
-      updateStatusMessage(`[TIMING] Spectrum computation completed in ${computationTime}s, starting results processing`);
+      completePhase('impedance-computation', {
+        pointsProcessed: results.length,
+        computationTime: computationTime + 's',
+        parallelCores: navigator.hardwareConcurrency || 4
+      });
+      startPhase('resnorm-analysis', 'Analyzing residual norms and grouping results');
 
       // Sort results by resnorm
       const sortingStart = Date.now();
@@ -583,23 +1031,42 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         return count * (500 + avgSpectrumSize) / 1024 / 1024; // MB
       };
 
-      let MAX_VISUALIZATION_MODELS = 100000;
       const estimatedMemory = estimateMemoryUsage(sortedResults.length);
+      setEstimatedMemoryUsage(estimatedMemory);
       
-      // Adaptive limits based on dataset size and estimated memory usage
-      if (estimatedMemory > 500) { // > 500MB
-        MAX_VISUALIZATION_MODELS = 50000;
-        updateStatusMessage(`Large dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using aggressive sampling`);
-      } else if (estimatedMemory > 200) { // > 200MB  
-        MAX_VISUALIZATION_MODELS = 75000;
-        updateStatusMessage(`Medium dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using moderate sampling`);
+      // Use new user-controlled or automatic limit calculation
+      const MAX_VISUALIZATION_MODELS = calculateEffectiveVisualizationLimit(sortedResults.length);
+      
+      // Log memory management strategy
+      if (isUserControlledLimits) {
+        updateStatusMessage(`User-controlled limits: Displaying ${MAX_VISUALIZATION_MODELS.toLocaleString()}/${sortedResults.length.toLocaleString()} points (${userVisualizationPercentage}%)`);
+      } else {
+        if (estimatedMemory > 500) {
+          updateStatusMessage(`Large dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using automatic aggressive sampling`);
+        } else if (estimatedMemory > 200) {
+          updateStatusMessage(`Medium dataset detected (${estimatedMemory.toFixed(1)}MB estimated), using automatic moderate sampling`);
+        }
       }
       
       const shouldLimitModels = sortedResults.length > MAX_VISUALIZATION_MODELS;
       const modelsToProcess = shouldLimitModels ? sortedResults.slice(0, MAX_VISUALIZATION_MODELS) : sortedResults;
       
+      if (shouldLimitModels) {
+        setMemoryLimitedPoints(MAX_VISUALIZATION_MODELS);
+        updateStatusMessage(`Memory management: Displaying ${MAX_VISUALIZATION_MODELS.toLocaleString()}/${sortedResults.length.toLocaleString()} points (${(sortedResults.length - MAX_VISUALIZATION_MODELS).toLocaleString()} hidden for performance)`);
+      }
+      
       updateStatusMessage(`Processing ${modelsToProcess.length}/${sortedResults.length} models for visualization ${shouldLimitModels ? '(limited for performance)' : ''}`);
 
+      completePhase('resnorm-analysis', {
+        pointsAnalyzed: sortedResults.length,
+        resnormRange: {
+          min: sortedResults[0]?.resnorm,
+          max: sortedResults[sortedResults.length - 1]?.resnorm
+        }
+      });
+      startPhase('data-processing', 'Converting results to visualization format');
+      
       // Map to ModelSnapshot format for visualization (optimized)
       const mappingStart = Date.now();
       const models: ModelSnapshot[] = [];
@@ -646,30 +1113,72 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         Array.prototype.push.apply(pointsWithIds, chunkWithIds);
       }
 
-      // Update state
-      setGridResults(sortedResults);
-      setGridResultsWithIds(pointsWithIds);
+      // Complete data processing phase
+      completePhase('data-processing', {
+        modelsProcessed: models.length,
+        groupsCreated: groups.length,
+        memoryOptimized: models.length < sortedResults.length
+      });
       
-      // Calculate final timing
+      // Apply visualization filtering before setting results
+      const filteredModels = applyVisualizationFiltering(models, groups, visualizationSettings);
+      
+      // Convert filtered models back to BackendMeshPoint format for consistency
+      const filteredResults = filteredModels.map(model => {
+        // Find the original BackendMeshPoint for this model
+        const originalResult = sortedResults.find(result => 
+          result.parameters.Rs === model.parameters.Rs &&
+          result.parameters.Ra === model.parameters.Ra &&
+          result.parameters.Ca === model.parameters.Ca &&
+          result.parameters.Rb === model.parameters.Rb &&
+          result.parameters.Cb === model.parameters.Cb
+        );
+        
+        return originalResult || {
+          parameters: model.parameters,
+          spectrum: model.spectrum || [],
+          resnorm: model.resnorm || 0
+        };
+      });
+      
+      // Create filtered points with IDs
+      const filteredPointsWithIds = filteredResults.map((point, idx) => ({
+        ...point,
+        id: idx + 1
+      }));
+      
+      // Update state with filtered results
+      setGridResults(filteredResults);
+      setGridResultsWithIds(filteredPointsWithIds);
+      
+      // Calculate final timing and generate comprehensive performance log
       const endTime = Date.now();
-      const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+      const totalTime = endTime - startTime;
+      
+      // Generate comprehensive performance log
+      const perfLog = generatePerformanceLog(currentPhases, totalTime, totalPoints);
+      setPerformanceLog(perfLog);
+      
+      const totalTimeSec = (totalTime / 1000).toFixed(2);
       const generationTime = ((computationStartTime - generationStartTime) / 1000).toFixed(2);
       const spectrumTime = ((processingStartTime - computationStartTime) / 1000).toFixed(2);
       const processingTime = ((endTime - processingStartTime) / 1000).toFixed(2);
 
-      // Log detailed timing breakdown
-      updateStatusMessage(`[TIMING] Results processing completed in ${processingTime}s`);
-      updateStatusMessage(`[SUMMARY] Grid computation completed successfully in ${totalTime}s total`);
-      updateStatusMessage(`[BREAKDOWN] Grid generation: ${generationTime}s | Spectrum computation: ${spectrumTime}s | Results processing: ${processingTime}s`);
-      updateStatusMessage(`[PERFORMANCE] Processed ${totalPoints.toLocaleString()} parameter combinations using ${navigator.hardwareConcurrency || 4} CPU cores`);
-      updateStatusMessage(`[RESULTS] ${sortedResults.length} valid points, ${groups.length} resnorm groups created`);
+      // Log comprehensive performance breakdown
+      updateStatusMessage(`[PERFORMANCE LOG] Computation completed in ${totalTimeSec}s`);
+      updateStatusMessage(`[BOTTLENECK] Slowest phase: ${perfLog.bottleneck}`);
+      updateStatusMessage(`[THROUGHPUT] ${perfLog.efficiency.throughput.toFixed(0)} points/second using ${perfLog.efficiency.cpuCores} CPU cores`);
+      updateStatusMessage(`[MEMORY] ~${perfLog.efficiency.memoryUsage.toFixed(1)}MB estimated usage`);
+      updateStatusMessage(`[BREAKDOWN] Grid: ${(perfLog.summary.gridGeneration/1000).toFixed(1)}s | Impedance: ${(perfLog.summary.impedanceComputation/1000).toFixed(1)}s | Analysis: ${(perfLog.summary.resnormAnalysis/1000).toFixed(1)}s | Processing: ${(perfLog.summary.dataProcessing/1000).toFixed(1)}s`);
+      updateStatusMessage(`[RESULTS] ${sortedResults.length} computed points, ${filteredResults.length} rendered points, ${groups.length} resnorm groups created`);
       updateStatusMessage(`Resnorm range: ${minResnorm.toExponential(3)} to ${maxResnorm.toExponential(3)}`);
       updateStatusMessage(`Memory usage optimized: ${results.filter(r => r.spectrum.length > 0).length} points with full spectra`);
+      updateStatusMessage(`Rendering efficiency: ${((filteredResults.length / sortedResults.length) * 100).toFixed(1)}% of computed models rendered`);
       
       // Create and show summary notification
       const summaryData: ComputationSummary = {
         title: 'Grid Computation Complete',
-        totalTime,
+        totalTime: totalTimeSec,
         generationTime,
         computationTime: spectrumTime,
         processingTime,
@@ -677,13 +1186,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         validPoints: sortedResults.length,
         groups: groups.length,
         cores: navigator.hardwareConcurrency || 4,
-        throughput: totalPoints / parseFloat(totalTime),
+        throughput: totalPoints / parseFloat(totalTimeSec),
         type: 'success',
         duration: 8000
       };
 
       // Log the summary to activity log with detailed breakdown
-      updateStatusMessage(`[COMPLETION SUMMARY] Total: ${totalTime}s | Generation: ${generationTime}s | Computation: ${spectrumTime}s | Processing: ${processingTime}s | Throughput: ${(totalPoints / parseFloat(totalTime)).toFixed(0)} pts/s`);
+      updateStatusMessage(`[COMPLETION SUMMARY] Total: ${totalTimeSec}s | Generation: ${generationTime}s | Computation: ${spectrumTime}s | Processing: ${processingTime}s | Throughput: ${(totalPoints / parseFloat(totalTimeSec)).toFixed(0)} pts/s`);
 
       // Show the notification
       setComputationSummary(summaryData);
@@ -747,7 +1256,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  };
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering]);
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -879,7 +1388,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setComputationSummary(null);
     setParameterChanged(false);
     updateStatusMessage('Grid results cleared from memory');
-  }, [updateStatusMessage]);
+  }, [updateStatusMessage, setComputationSummary, setGridResults, setGridResultsWithIds, setResnormGroups]);
 
   // Wrapper for cancel computation that also clears pending profile
   const handleCancelComputation = useCallback(() => {
@@ -995,6 +1504,31 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [savedProfilesState.profiles, updateStatusMessage]);
 
+  // Handle static render job creation
+  const handleCreateRenderJob = useCallback(async (settings: StaticRenderSettings, meshData: ModelSnapshot[]) => {
+    setIsStaticRendering(true);
+    updateStatusMessage(`Starting high-quality export (${meshData.length.toLocaleString()} models)...`);
+    
+    try {
+      // For now, just simulate the render process
+      // TODO: Implement actual orchestrator worker integration
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Create a simple export for now using the existing SpiderPlot export
+      const link = document.createElement('a');
+      link.download = `spideyplot-export-${Date.now()}.${settings.format}`;
+      
+      // TODO: Replace with actual high-quality rendering
+      updateStatusMessage(`Export completed (simulated) - ${settings.format.toUpperCase()} format`);
+      
+    } catch (error) {
+      console.error('Static render error:', error);
+      updateStatusMessage(`Export failed: ${error}`);
+    } finally {
+      setIsStaticRendering(false);
+    }
+  }, [updateStatusMessage]);
+
   // Load from localStorage after hydration
   useEffect(() => {
     if (typeof window !== 'undefined' && !hasLoadedFromStorage) {
@@ -1081,6 +1615,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       }
     }
   }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, groundTruthParams.Rs, groundTruthParams.Ra, handleComputeRegressionMesh, updateStatusMessage]);
+
+  // Automatically close toolbox when spider plot is generated
+  useEffect(() => {
+    if (!sidebarCollapsed && resnormGroups && resnormGroups.length > 0) {
+      setSidebarCollapsed(true);
+    }
+  }, [resnormGroups, sidebarCollapsed]);
 
   // Modify the main content area to show the correct tab content
   return (
@@ -1173,7 +1714,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             </button>
             <button 
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'math' 
+                visualizationTab === 'math'
                   ? 'bg-neutral-800 text-white' 
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
               }`}
@@ -1216,21 +1757,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <span>Activity Log</span>
               </div>
             </button>
-            <button 
-              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'orchestrator' 
-                  ? 'bg-neutral-800 text-white' 
-                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('orchestrator')}
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <span>Orchestrator</span>
-              </div>
-            </button>
+            {/* Orchestrator tab removed - functionality integrated into Playground */}
           </div>
           
           {/* Saved Profiles Section */}
@@ -1387,19 +1914,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </button>
-            <button 
-              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'orchestrator' 
-                  ? 'bg-neutral-800 text-white' 
-                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('orchestrator')}
-              title="Orchestrator"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </button>
+            {/* Orchestrator tab removed - functionality integrated into Playground */}
           </div>
         </div>
       </div>
@@ -1420,55 +1935,108 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             )}
           </div>
 
-          {/* Right side: Grid point counter, frequency info, and toolbox button - Only show on visualizer tab */}
-          {visualizationTab === 'visualizer' && (
-            <div className="flex items-center gap-3">
+          {/* Right side: Tab-specific info and toolbox button */}
+          <div className="flex items-center gap-3">
+            {/* Tab-specific status info */}
+            {visualizationTab === 'visualizer' && (
               <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-                <span className="text-neutral-400">Grid Points: </span>
-                <span className="text-white font-medium">{gridResults.length}</span>
-                {gridResults.length !== Math.pow(gridSize, 5) && (
+                <span className="text-neutral-400">Showing: </span>
+                <span className="text-white font-medium">{gridResults.length.toLocaleString()}</span>
+                
+                {/* Show actual computed vs theoretical points */}
+                {actualComputedPoints > 0 && actualComputedPoints !== totalGridPoints && (
                   <>
-                    <span className="text-neutral-400 ml-1.5">/</span>
-                    <span className="text-amber-300 font-semibold ml-1">{Math.pow(gridSize, 5).toLocaleString()}</span>
+                    <span className="text-neutral-400 ml-1.5">of</span>
+                    <span className="text-green-300 font-medium ml-1">{actualComputedPoints.toLocaleString()}</span>
+                    <span className="text-neutral-400 ml-1">computed</span>
                   </>
                 )}
+                
+                <span className="text-neutral-400 ml-1.5">/</span>
+                <span className="text-amber-300 font-semibold ml-1">{totalGridPoints.toLocaleString()}</span>
+                <span className="text-neutral-400 ml-1">total</span>
+                
+                {/* Show skipped points from symmetric optimization */}
+                {skippedPoints > 0 && (
+                  <>
+                    <span className="text-neutral-400 ml-1.5">•</span>
+                    <span className="text-orange-300 ml-1">{skippedPoints.toLocaleString()} skipped</span>
+                  </>
+                )}
+                
+                {/* Show memory-limited points */}
+                {memoryLimitedPoints > 0 && memoryLimitedPoints < gridResults.length && (
+                  <>
+                    <span className="text-neutral-400 ml-1.5">•</span>
+                    <span className="text-red-300 ml-1">{(gridResults.length - memoryLimitedPoints).toLocaleString()} hidden</span>
+                  </>
+                )}
+                
                 <span className="text-neutral-400 ml-1.5">|</span>
                 <span className="text-neutral-400 ml-1.5">Freq: </span>
                 <span className="text-white font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
+                
+                {/* Show memory usage if significant */}
+                {estimatedMemoryUsage > 100 && (
+                  <>
+                    <span className="text-neutral-400 ml-1.5">|</span>
+                    <span className="text-purple-300 ml-1">{estimatedMemoryUsage.toFixed(0)}MB</span>
+                  </>
+                )}
               </div>
-              
-              {/* Chrome-style Tab Integration */}
-              <div className="relative">
-                <button
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  className={`relative px-4 py-2 text-sm font-medium transition-all duration-200 ${
-                    !sidebarCollapsed 
-                      ? 'text-neutral-200 bg-neutral-700 border border-neutral-600 shadow-sm z-10' 
-                      : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white border border-neutral-600 shadow-sm'
-                  }`}
-                  title="Toolbox"
-                  style={{
-                    borderRadius: !sidebarCollapsed 
-                      ? '8px 8px 0px 0px' 
-                      : '8px',
-                    borderBottomColor: !sidebarCollapsed ? 'transparent' : undefined,
-                    zIndex: 10
-                  }}
-                >
-                  <div className="flex items-center gap-2">
-                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 512 512">
-                      <path d="M176 88l0 40 160 0 0-40c0-4.4-3.6-8-8-8L184 80c-4.4 0-8 3.6-8 8zm-48 40l0-40c0-30.9 25.1-56 56-56l144 0c30.9 0 56 25.1 56 56l0 40 28.1 0c12.7 0 24.9 5.1 33.9 14.1l51.9 51.9c9 9 14.1 21.2 14.1 33.9l0 92.1-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32L0 320l0-92.1c0-12.7 5.1-24.9 14.1-33.9l51.9-51.9c9-9 21.2-14.1 33.9-14.1l28.1 0zM0 416l0-64 128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0 0 64c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64z"/>
-                    </svg>
-                    Toolbox
-                  </div>
-                  {/* Chrome tab bottom connector when open - smoother */}
-                  {!sidebarCollapsed && (
-                    <div className="absolute -bottom-px left-0 right-0 h-px bg-neutral-800 z-20"></div>
-                  )}
-                </button>
+            )}
+            
+            {/* Orchestrator status removed - functionality integrated into Playground */}
+            
+            {visualizationTab === 'data' && (
+              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
+                <span className="text-neutral-400">Data: </span>
+                <span className="text-white font-medium">{gridResults.length.toLocaleString()} models</span>
+                <span className="text-neutral-400 ml-1.5">•</span>
+                <span className="text-neutral-400 ml-1.5">Sortable view</span>
               </div>
+            )}
+            
+            {visualizationTab === 'math' && (
+              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
+                <span className="text-neutral-400">Circuit: </span>
+                <span className="text-white font-medium">Randles Model</span>
+                <span className="text-neutral-400 ml-1.5">•</span>
+                <span className="text-neutral-400 ml-1.5">Mathematical reference</span>
+              </div>
+            )}
+            
+            {/* Chrome-style Toolbox Button - Always visible */}
+            <div className="relative">
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className={`relative px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                  !sidebarCollapsed 
+                    ? 'text-neutral-200 bg-neutral-700 border border-neutral-600 shadow-sm z-10' 
+                    : 'bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white border border-neutral-600 shadow-sm'
+                }`}
+                title="Toolbox"
+                style={{
+                  borderRadius: !sidebarCollapsed 
+                    ? '8px 8px 0px 0px' 
+                    : '8px',
+                  borderBottomColor: !sidebarCollapsed ? 'transparent' : undefined,
+                  zIndex: 10
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 512 512">
+                    <path d="M176 88l0 40 160 0 0-40c0-4.4-3.6-8-8-8L184 80c-4.4 0-8 3.6-8 8zm-48 40l0-40c0-30.9 25.1-56 56-56l144 0c30.9 0 56 25.1 56 56l0 40 28.1 0c12.7 0 24.9 5.1 33.9 14.1l51.9 51.9c9 9 14.1 21.2 14.1 33.9l0 92.1-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32-128 0 0-32c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 32L0 320l0-92.1c0-12.7 5.1-24.9 14.1-33.9l51.9-51.9c9-9 21.2-14.1 33.9-14.1l28.1 0zM0 416l0-64 128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0c0 17.7 14.3 32 32 32s32-14.3 32-32l128 0 0 64c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64z"/>
+                  </svg>
+                  Toolbox
+                </div>
+                {/* Chrome tab bottom connector when open - smoother */}
+                {!sidebarCollapsed && (
+                  <div className="absolute -bottom-px left-0 right-0 h-px bg-neutral-800 z-20"></div>
+                )}
+              </button>
             </div>
-          )}
+          </div>
         </header>
         
         {/* Main visualization area */}
@@ -1547,6 +2115,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     parameters={parameters}
                     groundTruthParams={groundTruthParams}
                     gridParameterArrays={gridParameterArrays}
+                    opacityExponent={opacityExponent}
                   />
                 </div>
               ) : (
@@ -1564,6 +2133,33 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
+                
+                {/* Performance Log Display */}
+                {performanceLog && (
+                  <div className="bg-neutral-800 border border-neutral-600 rounded p-3 mb-4 mx-2">
+                    <h4 className="text-sm font-semibold text-neutral-200 mb-2">Latest Performance Report</h4>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="text-neutral-400">Total Duration:</div>
+                      <div className="text-green-400 font-mono">{(performanceLog.totalDuration / 1000).toFixed(2)}s</div>
+                      <div className="text-neutral-400">Bottleneck:</div>
+                      <div className="text-orange-400 font-mono">{performanceLog.bottleneck}</div>
+                      <div className="text-neutral-400">Throughput:</div>
+                      <div className="text-blue-400 font-mono">{performanceLog.efficiency.throughput.toFixed(0)} pts/s</div>
+                      <div className="text-neutral-400">Memory:</div>
+                      <div className="text-purple-400 font-mono">~{performanceLog.efficiency.memoryUsage.toFixed(1)}MB</div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-neutral-600">
+                      <div className="text-xs text-neutral-400 mb-1">Phase Breakdown:</div>
+                      <div className="grid grid-cols-2 gap-1 text-xs font-mono">
+                        <div>Grid: {(performanceLog.summary.gridGeneration/1000).toFixed(1)}s</div>
+                        <div>Impedance: {(performanceLog.summary.impedanceComputation/1000).toFixed(1)}s</div>
+                        <div>Analysis: {(performanceLog.summary.resnormAnalysis/1000).toFixed(1)}s</div>
+                        <div>Processing: {(performanceLog.summary.dataProcessing/1000).toFixed(1)}s</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 <div className="flex-1 overflow-y-auto space-y-1 pr-4">
                   {logMessages.length === 0 ? (
                     <div className="text-neutral-400 text-sm italic px-2">No activity yet...</div>
@@ -1586,25 +2182,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   referenceModelId={referenceModelId}
                   gridSize={gridSize}
                   onGridValuesGenerated={handleGridValuesGenerated}
-                />
-              </div>
-            ) : visualizationTab === 'orchestrator' ? (
-              <div className="h-full">
-                <OrchestratorTab 
-                  resnormGroups={resnormGroups}
-                  savedProfiles={savedProfilesState.profiles}
+                  opacityExponent={opacityExponent}
+                  onOpacityExponentChange={setOpacityExponent}
+                  userReferenceParams={groundTruthParams}
+                  onVisualizationSettingsChange={handleVisualizationSettingsChange}
+                  staticRenderSettings={staticRenderSettings}
+                  onStaticRenderSettingsChange={setStaticRenderSettings}
                 />
               </div>
             ) : (
-              <div className="flex items-center justify-center h-32 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md p-4">
-                <div className="text-center">
-                  <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  <p className="text-sm text-neutral-400">
-                    Unknown tab selected. Please select a valid tab.
-                  </p>
-                </div>
+              <div className="h-full p-8 text-center text-neutral-400">
+                <p>Invalid tab selection</p>
               </div>
             )}
           </div>
@@ -1647,6 +2235,24 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     onSaveProfile={handleSaveProfile}
                     performanceSettings={performanceSettings}
                     setPerformanceSettings={setPerformanceSettings}
+                    
+                    // Visualization limits
+                    userVisualizationPercentage={userVisualizationPercentage}
+                    setUserVisualizationPercentage={setUserVisualizationPercentage}
+                    maxVisualizationPoints={maxVisualizationPoints}
+                    setMaxVisualizationPoints={setMaxVisualizationPoints}
+                    isUserControlledLimits={isUserControlledLimits}
+                    setIsUserControlledLimits={setIsUserControlledLimits}
+                    totalComputedPoints={actualComputedPoints}
+                    currentlyDisplayed={gridResults.length}
+                    estimatedMemory={estimatedMemoryUsage}
+                    
+                    // Static rendering
+                    meshData={gridResults}
+                    staticRenderSettings={staticRenderSettings}
+                    onStaticRenderSettingsChange={setStaticRenderSettings}
+                    onCreateRenderJob={handleCreateRenderJob}
+                    isStaticRendering={isStaticRendering}
                   />
                 </div>
               </div>
@@ -1665,8 +2271,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 } 
 
 // Helper to convert backend spectrum to ImpedancePoint[] (types.ts shape)
-function toImpedancePoints(spectrum: { freq: number; real: number; imag: number; mag: number; phase: number; }[]): TypesImpedancePoint[] {
-  return spectrum.map((p): TypesImpedancePoint => ({
+function toImpedancePoints(spectrum: { freq: number; real: number; imag: number; mag: number; phase: number; }[]): ImpedancePoint[] {
+  return spectrum.map((p): ImpedancePoint => ({
     frequency: p.freq,
     real: p.real,
     imaginary: p.imag,
@@ -1677,22 +2283,17 @@ function toImpedancePoints(spectrum: { freq: number; real: number; imag: number;
 
 // --- Complex math operations now handled in Web Workers ---
 
-// Note: Complex number operations, impedance calculations, and resnorm calculations
-// are now handled efficiently in Web Workers for parallel processing
-
-// Optimized resnorm grouping logic using percentiles instead of hardline boundaries
+// Optimized resnorm grouping logic using quartiles (4 groups)
 const createResnormGroups = (models: ModelSnapshot[], minResnorm: number, maxResnorm: number): ResnormGroup[] => {
   // Limit processing for very large datasets to prevent memory issues
-  const MAX_MODELS_PER_GROUP = 50000;
+  const MAX_MODELS_PER_GROUP = 500000;
   const shouldSample = models.length > MAX_MODELS_PER_GROUP;
-  
-  console.log(`Creating percentile-based resnorm groups for ${models.length} models (sampling: ${shouldSample})`);
-  
+
   // Extract all finite resnorm values for percentile calculation
   const validResnorms = models
     .map(m => m.resnorm)
     .filter(r => r !== undefined && isFinite(r)) as number[];
-  
+
   if (validResnorms.length === 0) {
     console.warn('No valid resnorm values found for grouping');
     return [];
@@ -1700,116 +2301,80 @@ const createResnormGroups = (models: ModelSnapshot[], minResnorm: number, maxRes
 
   // Sort resnorms for percentile calculation
   validResnorms.sort((a, b) => a - b);
-  
-  // Calculate percentile thresholds
+
+  // Calculate quartile thresholds
   const calculatePercentile = (arr: number[], percentile: number): number => {
     const index = Math.ceil((percentile / 100) * arr.length) - 1;
     return arr[Math.max(0, Math.min(index, arr.length - 1))];
   };
 
-  const percentileThresholds = {
-    p25: calculatePercentile(validResnorms, 25),  // Top 25% (best fits)
-    p50: calculatePercentile(validResnorms, 50),  // Top 50% (good fits)
-    p75: calculatePercentile(validResnorms, 75),  // Top 75% (moderate fits)
-    p90: calculatePercentile(validResnorms, 90)   // Top 90% (acceptable fits)
-  };
+  const p25 = calculatePercentile(validResnorms, 25);
+  const p50 = calculatePercentile(validResnorms, 50);
+  const p75 = calculatePercentile(validResnorms, 75);
 
-  console.log('Percentile thresholds:', percentileThresholds);
+  // Pre-allocate arrays for each quartile group
+  const q1: ModelSnapshot[] = [];
+  const q2: ModelSnapshot[] = [];
+  const q3: ModelSnapshot[] = [];
+  const q4: ModelSnapshot[] = [];
 
-  // Pre-allocate arrays for each percentile group
-  const excellentItems: ModelSnapshot[] = [];  // Top 25%
-  const goodItems: ModelSnapshot[] = [];       // 25-50%
-  const moderateItems: ModelSnapshot[] = [];   // 50-75%
-  const acceptableItems: ModelSnapshot[] = []; // 75-90%
-  const poorItems: ModelSnapshot[] = [];       // Bottom 10%
-
-  // Single pass classification with performance optimization
   let processed = 0;
   const maxToProcess = shouldSample ? MAX_MODELS_PER_GROUP : models.length;
   const step = shouldSample ? Math.ceil(models.length / MAX_MODELS_PER_GROUP) : 1;
 
   for (let i = 0; i < models.length && processed < maxToProcess; i += step) {
     const model = models[i];
-    
     if (!model || model.resnorm === undefined || !isFinite(model.resnorm)) continue;
-    
     const resnorm = model.resnorm;
-    
-    // Classify into percentile groups with performance-optimized colors
-    if (resnorm <= percentileThresholds.p25) {
-      excellentItems.push({ ...model, color: '#059669' }); // Emerald-600 (excellent)
-    } else if (resnorm <= percentileThresholds.p50) {
-      goodItems.push({ ...model, color: '#10B981' });      // Emerald-500 (good)
-    } else if (resnorm <= percentileThresholds.p75) {
-      moderateItems.push({ ...model, color: '#F59E0B' }); // Amber-500 (moderate)
-    } else if (resnorm <= percentileThresholds.p90) {
-      acceptableItems.push({ ...model, color: '#F97316' }); // Orange-500 (acceptable)
+    if (resnorm <= p25) {
+      q1.push({ ...model, color: '#059669' }); // Emerald-600
+    } else if (resnorm <= p50) {
+      q2.push({ ...model, color: '#10B981' }); // Emerald-500
+    } else if (resnorm <= p75) {
+      q3.push({ ...model, color: '#F59E0B' }); // Amber-500
     } else {
-      poorItems.push({ ...model, color: '#DC2626' });      // Red-600 (poor)
+      q4.push({ ...model, color: '#DC2626' }); // Red-600
     }
-    
     processed++;
-    
-    // Progress logging for large datasets
-    if (processed % 10000 === 0) {
-      console.log(`Processed ${processed}/${maxToProcess} models for percentile grouping`);
-    }
   }
 
-  console.log(`Percentile group sizes: Excellent(≤25%): ${excellentItems.length}, Good(25-50%): ${goodItems.length}, Moderate(50-75%): ${moderateItems.length}, Acceptable(75-90%): ${acceptableItems.length}, Poor(>90%): ${poorItems.length}`);
-
-  // Create groups array with performance focus - excellent group visible by default
+  // Create groups array with quartile labels
   const groups: ResnormGroup[] = [];
-
-  if (excellentItems.length > 0) {
+  if (q1.length > 0) {
     groups.push({
-      range: [minResnorm, percentileThresholds.p25] as [number, number],
+      range: [minResnorm, p25],
       color: '#059669',
-      label: 'Excellent Fit (Top 25%)',
-      description: `Resnorm ≤ ${percentileThresholds.p25.toExponential(2)} (best ${excellentItems.length} models)`,
-      items: excellentItems
+      label: 'Q1 (Best 25%)',
+      description: `Resnorm ≤ ${p25.toExponential(2)} (best ${q1.length} models)`,
+      items: q1
     });
   }
-
-  if (goodItems.length > 0) {
+  if (q2.length > 0) {
     groups.push({
-      range: [percentileThresholds.p25, percentileThresholds.p50] as [number, number],
+      range: [p25, p50],
       color: '#10B981',
-      label: 'Good Fit (25-50%)',
-      description: `${percentileThresholds.p25.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p50.toExponential(2)} (${goodItems.length} models)`,
-      items: goodItems
+      label: 'Q2 (25-50%)',
+      description: `${p25.toExponential(2)} < Resnorm ≤ ${p50.toExponential(2)} (${q2.length} models)`,
+      items: q2
     });
   }
-
-  if (moderateItems.length > 0) {
+  if (q3.length > 0) {
     groups.push({
-      range: [percentileThresholds.p50, percentileThresholds.p75] as [number, number],
+      range: [p50, p75],
       color: '#F59E0B',
-      label: 'Moderate Fit (50-75%)',
-      description: `${percentileThresholds.p50.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p75.toExponential(2)} (${moderateItems.length} models)`,
-      items: moderateItems
+      label: 'Q3 (50-75%)',
+      description: `${p50.toExponential(2)} < Resnorm ≤ ${p75.toExponential(2)} (${q3.length} models)`,
+      items: q3
     });
   }
-
-  if (acceptableItems.length > 0) {
+  if (q4.length > 0) {
     groups.push({
-      range: [percentileThresholds.p75, percentileThresholds.p90] as [number, number],
-      color: '#F97316',
-      label: 'Acceptable Fit (75-90%)',
-      description: `${percentileThresholds.p75.toExponential(2)} < Resnorm ≤ ${percentileThresholds.p90.toExponential(2)} (${acceptableItems.length} models)`,
-      items: acceptableItems
-    });
-  }
-
-  if (poorItems.length > 0) {
-    groups.push({
-      range: [percentileThresholds.p90, maxResnorm] as [number, number],
+      range: [p75, maxResnorm],
       color: '#DC2626',
-      label: 'Poor Fit (Bottom 10%)',
-      description: `Resnorm > ${percentileThresholds.p90.toExponential(2)} (worst ${poorItems.length} models)`,
-      items: poorItems
+      label: 'Q4 (Worst 25%)',
+      description: `Resnorm > ${p75.toExponential(2)} (worst ${q4.length} models)`,
+      items: q4
     });
   }
-
   return groups;
 };
