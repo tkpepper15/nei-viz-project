@@ -143,6 +143,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [staticRenderSettings, setStaticRenderSettings] = useState<StaticRenderSettings>(defaultStaticRenderSettings);
   const [isStaticRendering, setIsStaticRendering] = useState<boolean>(false);
 
+  // Saved profiles state - start with empty state to avoid hydration mismatch
+  const [savedProfilesState, setSavedProfilesState] = useState<SavedProfilesState>({
+    profiles: [],
+    selectedProfile: null
+  });
+
   // Auto-manage toolbox visibility based on tab
   useEffect(() => {
     if (visualizationTab === 'visualizer') {
@@ -1136,7 +1142,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         
         return originalResult || {
           parameters: model.parameters,
-          spectrum: model.data || [],
+          spectrum: (model.data || []).map(point => ({
+            freq: point.frequency,
+            real: point.real,
+            imag: point.imaginary,
+            mag: point.magnitude,
+            phase: point.phase
+          })),
           resnorm: model.resnorm || 0
         };
       });
@@ -1439,12 +1451,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // State for collapsible sidebar
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [leftNavCollapsed, setLeftNavCollapsed] = useState(false);
-  
-  // Saved profiles state - start with empty state to avoid hydration mismatch
-  const [savedProfilesState, setSavedProfilesState] = useState<SavedProfilesState>({
-    profiles: [],
-    selectedProfile: null
-  });
 
   // Track if we've loaded from localStorage to avoid hydration issues
   const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
@@ -2188,6 +2194,28 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   onVisualizationSettingsChange={handleVisualizationSettingsChange}
                   staticRenderSettings={staticRenderSettings}
                   onStaticRenderSettingsChange={setStaticRenderSettings}
+                  setGridSize={setGridSize}
+                  minFreq={minFreq}
+                  setMinFreq={setMinFreq}
+                  maxFreq={maxFreq}
+                  setMaxFreq={setMaxFreq}
+                  numPoints={numPoints}
+                  setNumPoints={setNumPoints}
+                  updateFrequencies={updateFrequencies}
+                  updateStatusMessage={updateStatusMessage}
+                  parameterChanged={parameterChanged}
+                  setParameterChanged={setParameterChanged}
+                  handleComputeRegressionMesh={handleComputeRegressionMesh}
+                  isComputingGrid={isComputingGrid}
+                  onClearResults={clearGridResults}
+                  hasGridResults={gridResults.length > 0}
+                  groundTruthParams={groundTruthParams}
+                  setGroundTruthParams={setGroundTruthParams}
+                  createReferenceModel={createReferenceModel}
+                  setReferenceModel={setReferenceModel}
+                  onSaveProfile={handleSaveProfile}
+                  performanceSettings={performanceSettings}
+                  setPerformanceSettings={setPerformanceSettings}
                 />
               </div>
             ) : (
@@ -2248,7 +2276,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     estimatedMemory={estimatedMemoryUsage}
                     
                     // Static rendering
-                    meshData={gridResults}
+                    meshData={gridResults.map(mapBackendMeshToSnapshot)}
                     staticRenderSettings={staticRenderSettings}
                     onStaticRenderSettingsChange={setStaticRenderSettings}
                     onCreateRenderJob={handleCreateRenderJob}
