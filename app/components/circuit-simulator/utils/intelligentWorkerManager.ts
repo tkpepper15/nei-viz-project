@@ -1,3 +1,5 @@
+import React from 'react';
+
 /**
  * Intelligent Multi-Worker Management System
  * 
@@ -107,7 +109,7 @@ class IntelligentWorkerManager {
         abortController: new AbortController()
       };
 
-      this.pendingTasks.set(task.id, pendingTask);
+      this.pendingTasks.set(task.id, pendingTask as PendingTask<unknown>);
 
       // Try to assign immediately or queue
       if (!this.tryAssignTask(pendingTask)) {
@@ -121,7 +123,7 @@ class IntelligentWorkerManager {
   /**
    * Try to assign task to best available worker
    */
-  private tryAssignTask<T, R>(pendingTask: PendingTask<T, R>): boolean {
+  private tryAssignTask<T>(pendingTask: PendingTask<T>): boolean {
     const { task } = pendingTask;
     
     // Find best worker for this task type
@@ -212,7 +214,7 @@ class IntelligentWorkerManager {
   /**
    * Assign a specific task to a worker
    */
-  private assignTaskToWorker<T, R>(pendingTask: PendingTask<T, R>, worker: WorkerInstance): void {
+  private assignTaskToWorker<T>(pendingTask: PendingTask<T>, worker: WorkerInstance): void {
     const { task } = pendingTask;
     
     worker.busy = true;
@@ -290,20 +292,21 @@ class IntelligentWorkerManager {
     worker.performance.avgDuration = worker.performance.taskHistory.reduce((a, b) => a + b, 0) / worker.performance.taskHistory.length;
 
     // Create result
+    const resultData = result as { type: string; data?: unknown; error?: string };
     const workerResult: WorkerResult = {
       id: taskId,
-      success: result.type === 'complete',
-      data: result.data,
-      error: result.error,
+      success: resultData.type === 'complete',
+      data: resultData.data,
+      error: resultData.error,
       duration,
       workerId
     };
 
     // Resolve or reject the pending task
-    if (result.type === 'complete') {
+    if (resultData.type === 'complete') {
       pendingTask.resolve(workerResult);
     } else {
-      pendingTask.reject(new Error(result.error || 'Worker task failed'));
+      pendingTask.reject(new Error(resultData.error || 'Worker task failed'));
     }
 
     // Clean up
@@ -347,7 +350,7 @@ class IntelligentWorkerManager {
   /**
    * Add task to priority queue
    */
-  private addToQueue<T, R>(pendingTask: PendingTask<T, R>): void {
+  private addToQueue<T>(pendingTask: PendingTask<T>): void {
     const priorityOrder = { critical: 0, high: 1, normal: 2, low: 3 };
     const taskPriority = priorityOrder[pendingTask.task.priority];
     
@@ -361,7 +364,7 @@ class IntelligentWorkerManager {
       }
     }
     
-    this.taskQueue.splice(insertIndex, 0, pendingTask);
+    this.taskQueue.splice(insertIndex, 0, pendingTask as PendingTask<unknown>);
   }
 
   /**
@@ -547,7 +550,7 @@ export const WorkerTasks = {
 
 // React hook for using the worker manager
 export function useIntelligentWorkerManager() {
-  const runTask = <T, R>(task: WorkerTask<T, R>) => intelligentWorkerManager.runTask(task);
+  const runTask = <T>(task: WorkerTask<T>) => intelligentWorkerManager.runTask(task);
   const cancelTask = (taskId: string) => intelligentWorkerManager.cancelTask(taskId);
   const getStatus = () => intelligentWorkerManager.getStatus();
 

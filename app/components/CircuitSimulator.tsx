@@ -1136,7 +1136,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         
         return originalResult || {
           parameters: model.parameters,
-          spectrum: model.spectrum || [],
+          spectrum: model.data || [],
           resnorm: model.resnorm || 0
         };
       });
@@ -1256,7 +1256,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering]);
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, groundTruthParams, isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, setSavedProfilesState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

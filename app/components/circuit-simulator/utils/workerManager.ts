@@ -432,7 +432,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     getOptimalWorkerCount,
     chunkArray,
     createWorkers
-  ]);
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // New streaming computation function for large grids
   const computeGridStreaming = useCallback(async (

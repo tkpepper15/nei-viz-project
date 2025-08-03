@@ -99,16 +99,16 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   onStaticRenderSettingsChange,
   // Grid computation props
   setGridSize,
-  minFreq,
-  setMinFreq,
-  maxFreq,
-  setMaxFreq,
-  numPoints,
-  setNumPoints,
-  updateFrequencies,
+  minFreq: _minFreq, // eslint-disable-line @typescript-eslint/no-unused-vars
+  setMinFreq: _setMinFreq, // eslint-disable-line @typescript-eslint/no-unused-vars
+  maxFreq: _maxFreq, // eslint-disable-line @typescript-eslint/no-unused-vars
+  setMaxFreq: _setMaxFreq, // eslint-disable-line @typescript-eslint/no-unused-vars
+  numPoints: _numPoints, // eslint-disable-line @typescript-eslint/no-unused-vars
+  setNumPoints: _setNumPoints, // eslint-disable-line @typescript-eslint/no-unused-vars
+  updateFrequencies: _updateFrequencies, // eslint-disable-line @typescript-eslint/no-unused-vars
   updateStatusMessage,
   parameterChanged,
-  setParameterChanged,
+  setParameterChanged: _setParameterChanged, // eslint-disable-line @typescript-eslint/no-unused-vars
   handleComputeRegressionMesh,
   isComputingGrid,
   onClearResults,
@@ -130,7 +130,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [showGridControls, setShowGridControls] = useState(true);
   const [showCircuitParams, setShowCircuitParams] = useState(false);
-  const [showPerformanceControls, setShowPerformanceControls] = useState(false);
+  const [showPerformanceControls, setShowPerformanceControls] = useState(false); // eslint-disable-line @typescript-eslint/no-unused-vars
   
   // Use static render settings instead of local state
   const chromaEnabled = staticRenderSettings.chromaEnabled;
@@ -258,23 +258,22 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       return;
     }
     
-    // Use functional update to avoid dependency on selectedOpacityGroups
-    setSelectedOpacityGroups(prevSelected => {
-      if (resnormGroups.length > 0 && prevSelected.length === 0) {
-        // Default to "Excellent" group (index 0) when groups are available but none selected
-        return [0];
-      }
-      
-      // Filter out groups that no longer exist
-      const validGroups = prevSelected.filter(groupIndex => groupIndex < resnormGroups.length);
-      
-      if (validGroups.length !== prevSelected.length) {
-        return validGroups.length > 0 ? validGroups : [0];
-      }
-      
-      return prevSelected; // No change needed
-    });
-  }, [resnormGroups]); // Only depend on resnormGroups
+    // Check if we need to update the selected groups
+    const currentSelected = selectedOpacityGroups;
+    
+    if (resnormGroups.length > 0 && currentSelected.length === 0) {
+      // Default to "Excellent" group (index 0) when groups are available but none selected
+      setSelectedOpacityGroups([0]);
+      return;
+    }
+    
+    // Filter out groups that no longer exist
+    const validGroups = currentSelected.filter(groupIndex => groupIndex < resnormGroups.length);
+    
+    if (validGroups.length !== currentSelected.length) {
+      setSelectedOpacityGroups(validGroups.length > 0 ? validGroups : [0]);
+    }
+  }, [resnormGroups, setSelectedOpacityGroups, selectedOpacityGroups]);
 
   // Automatic rendering mode selection based on dataset size
   const actualRenderingMode = useMemo(() => {
@@ -334,7 +333,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         // Apply groupPortion to each selected group
         const keepCount = Math.max(1, Math.floor(group.items.length * groupPortion));
         // Sort by resnorm (ascending = best fits first) and take the top portion
-        const sortedItems = [...group.items].sort((a, b) => a.resnorm - b.resnorm);
+        const sortedItems = [...group.items].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
         filteredModels.push(...sortedItems.slice(0, keepCount));
       });
     
@@ -1190,7 +1189,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           } else {
                             updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
                           }
-                          if (referenceModelId === 'dynamic-reference') {
+                          if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
                             setReferenceModel(updatedModel);
                           }
@@ -1218,7 +1217,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   onChange={(val: number) => {
                     setGroundTruthParams(prev => ({ ...prev, Rs: val }));
                     updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
-                    if (referenceModelId === 'dynamic-reference') {
+                    if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
@@ -1248,7 +1247,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           } else {
                             updateStatusMessage(`Ra set to ${val.toFixed(0)} Ω`);
                           }
-                          if (referenceModelId === 'dynamic-reference') {
+                          if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
                             setReferenceModel(updatedModel);
                           }
@@ -1276,7 +1275,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   onChange={(val: number) => {
                     setGroundTruthParams(prev => ({ ...prev, Ra: val }));
                     updateStatusMessage(`Ra set to ${val.toFixed(0)} Ω`);
-                    if (referenceModelId === 'dynamic-reference') {
+                    if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
@@ -1306,7 +1305,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           } else {
                             updateStatusMessage(`Ca set to ${val.toFixed(2)} μF`);
                           }
-                          if (referenceModelId === 'dynamic-reference') {
+                          if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
                             setReferenceModel(updatedModel);
                           }
@@ -1334,7 +1333,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   onChange={(val: number) => {
                     setGroundTruthParams(prev => ({ ...prev, Ca: val / 1e6 }));
                     updateStatusMessage(`Ca set to ${val.toFixed(2)} μF`);
-                    if (referenceModelId === 'dynamic-reference') {
+                    if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
@@ -1365,7 +1364,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           } else {
                             updateStatusMessage(`Rb set to ${val.toFixed(0)} Ω`);
                           }
-                          if (referenceModelId === 'dynamic-reference') {
+                          if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
                             setReferenceModel(updatedModel);
                           }
@@ -1393,7 +1392,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   onChange={(val: number) => {
                     setGroundTruthParams(prev => ({ ...prev, Rb: val }));
                     updateStatusMessage(`Rb set to ${val.toFixed(0)} Ω`);
-                    if (referenceModelId === 'dynamic-reference') {
+                    if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
@@ -1423,7 +1422,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           } else {
                             updateStatusMessage(`Cb set to ${val.toFixed(2)} μF`);
                           }
-                          if (referenceModelId === 'dynamic-reference') {
+                          if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
                             setReferenceModel(updatedModel);
                           }
@@ -1451,7 +1450,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   onChange={(val: number) => {
                     setGroundTruthParams(prev => ({ ...prev, Cb: val / 1e6 }));
                     updateStatusMessage(`Cb set to ${val.toFixed(2)} μF`);
-                    if (referenceModelId === 'dynamic-reference') {
+                    if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
@@ -1496,12 +1495,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             <ExportModal
               isOpen={isExportModalOpen}
               onClose={() => setIsExportModalOpen(false)}
-              meshItems={visibleModelsWithOpacity}
-              opacityFactor={opacityLevel}
+              visibleModels={visibleModelsWithOpacity}
+              opacityLevel={opacityLevel}
               chromaEnabled={chromaEnabled}
               gridSize={gridSize}
-              showGroundTruth={showGroundTruth}
-              groundTruthParams={groundTruthParams}
             />
             
             <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex flex-col">
@@ -1610,9 +1607,15 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                           <SpiderPlot3D
                             models={visibleModelsWithOpacity}
                             referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
+                              id: 'ground-truth',
+                              name: 'Ground Truth Reference',
+                              timestamp: Date.now(),
                               parameters: effectiveGroundTruthParams,
+                              data: [],
                               resnorm: 0,
-                              id: 'ground-truth'
+                              color: '#FFFFFF',
+                              isVisible: true,
+                              opacity: 1
                             } : null}
                             chromaEnabled={chromaEnabled}
                             width={800}

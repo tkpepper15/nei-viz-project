@@ -577,4 +577,4 @@ export const getOrchestratorWorkerManager = (): OrchestratorWorkerManager => {
 };
 
 // Export singleton instance - only initialize in browser
-export const orchestratorWorkerManager = typeof window !== 'undefined' ? getOrchestratorWorkerManager() : null as OrchestratorWorkerManager;
+export const orchestratorWorkerManager = typeof window !== 'undefined' ? getOrchestratorWorkerManager() : (null as unknown as OrchestratorWorkerManager);

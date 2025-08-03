@@ -4,6 +4,19 @@
 import { ModelSnapshot } from '../types';
 import { getOrchestratorWorkerManager } from './orchestratorWorkerManager';
 
+interface RenderJobParameters {
+  format: 'png' | 'svg' | 'pdf' | 'webp' | 'jpg';
+  resolution: string;
+  quality: number;
+  includeLabels: boolean;
+  chromaEnabled: boolean;
+  selectedGroups: number[];
+  backgroundColor: 'transparent' | 'white' | 'black';
+  opacityFactor: number;
+  visualizationMode: 'color' | 'opacity';
+  opacityIntensity: number;
+}
+
 interface SharedWorkerOptions {
   threshold?: number; // Dataset size threshold for parallel processing
   maxWorkers?: number; // Maximum number of workers to use
@@ -112,7 +125,7 @@ export class SharedWorkerStrategy {
       getOrchestratorWorkerManager().addJob(
         jobId,
         meshData,
-        renderParams,
+        renderParams as RenderJobParameters,
         'high',
         {
           onProgress: (progress) => {
@@ -161,10 +174,10 @@ export class SharedWorkerStrategy {
           chunkJobId,
           chunk,
           {
-            ...renderParams,
+            ...(renderParams as RenderJobParameters),
             chunkIndex: index,
             totalChunks: chunks.length
-          },
+          } as RenderJobParameters,
           'high',
           {
             onProgress: (progress) => {
