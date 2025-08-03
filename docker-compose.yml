@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  spideyplot:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: spideyplot-app
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      # Persistent data storage
+      - spideyplot_data:/app/data
+      # Optional: mount config directory
+      - ./config:/app/config:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - NEXT_TELEMETRY_DISABLED=1
+      # Add custom environment variables here
+      - DATA_PATH=/app/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "traefik.enable=true"
+      - "traefik.http.routers.spideyplot.rule=Host(`spideyplot.local`)"
+      - "traefik.http.services.spideyplot.loadbalancer.server.port=3000"
+    networks:
+      - spideyplot_network
+
+  # Optional: Add a reverse proxy (uncomment if needed)
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: spideyplot-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/ssl/certs:ro
+  #   depends_on:
+  #     - spideyplot
+  #   networks:
+  #     - spideyplot_network
+
+volumes:
+  spideyplot_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_DIR:-./data}
+
+networks:
+  spideyplot_network:
+    driver: bridge

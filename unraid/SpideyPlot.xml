@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>SpideyPlot</Name>
+  <Repository>spideyplot:latest</Repository>
+  <Registry>https://hub.docker.com/</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/your-username/nei-viz-project</Support>
+  <Project>https://github.com/your-username/nei-viz-project</Project>
+  <Overview>SpideyPlot - Advanced Electrochemical Impedance Spectroscopy (EIS) simulation and visualization tool for retinal pigment epithelium (RPE) research. Features parallel computation, spider plot visualization, and circuit parameter analysis.</Overview>
+  <Category>Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/your-username/nei-viz-project/main/unraid/SpideyPlot.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/your-username/nei-viz-project/main/public/favicon.ico</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled>1640995200</DateInstalled>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="WebUI Port" Target="3000" Default="3000" Mode="tcp" Description="Port for the web interface" Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Data Directory" Target="/app/data" Default="/mnt/user/appdata/spideyplot/data" Mode="rw" Description="Directory for persistent data storage (simulation results, profiles, etc.)" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/spideyplot/data</Config>
+  <Config Name="Config Directory" Target="/app/config" Default="/mnt/user/appdata/spideyplot/config" Mode="rw" Description="Directory for configuration files" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/spideyplot/config</Config>
+  <Config Name="Logs Directory" Target="/app/logs" Default="/mnt/user/appdata/spideyplot/logs" Mode="rw" Description="Directory for application logs" Type="Path" Display="always" Required="false" Mask="false">/mnt/user/appdata/spideyplot/logs</Config>
+  <Config Name="NODE_ENV" Target="NODE_ENV" Default="production" Mode="" Description="Node.js environment" Type="Variable" Display="advanced" Required="false" Mask="false">production</Config>
+  <Config Name="NEXT_TELEMETRY_DISABLED" Target="NEXT_TELEMETRY_DISABLED" Default="1" Mode="" Description="Disable Next.js telemetry" Type="Variable" Display="advanced" Required="false" Mask="false">1</Config>
+  <Config Name="NODE_OPTIONS" Target="NODE_OPTIONS" Default="--max-old-space-size=8192" Mode="" Description="Node.js memory settings for large computations" Type="Variable" Display="advanced" Required="false" Mask="false">--max-old-space-size=8192</Config>
+  <Config Name="LOG_LEVEL" Target="LOG_LEVEL" Default="info" Mode="" Description="Application log level (debug, info, warn, error)" Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID for file permissions" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+</Container>
