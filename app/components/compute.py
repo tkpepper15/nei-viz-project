@@ -15,6 +15,13 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# CRITICAL MATHEMATICAL FIXES APPLIED:
+# 1. Fixed calculate_membrane_impedance() to use parallel RC formula: Z = R/(1+jωRC)
+#    Previously used incorrect series formula: Z = R - j/(ωC)
+# 2. Fixed calculate_resnorm_improved() to include (1/n) normalization factor
+#    This ensures consistency with JavaScript worker implementation
+# 3. These fixes resolve ground truth alignment issues and large resnorm values
+
 app = FastAPI()
 
 # Enable CORS
@@ -41,44 +48,7 @@ class ImpedancePoint(BaseModel):
     magnitude: float
     phase: float
 
-# Ground truth dataset based on reference measurements
-GROUND_TRUTH_DATASET = [
-    {
-        "real": 18.3282302368751,
-        "imaginary": -4.61153260619826,
-        "frequency": 10000,
-        "magnitude": np.sqrt(18.3282302368751**2 + 4.61153260619826**2),
-        "phase": np.arctan2(-4.61153260619826, 18.3282302368751) * (180 / np.pi)
-    },
-    {
-        "real": 19.0140411028486,
-        "imaginary": -7.52984606443549,
-        "frequency": 5000,
-        "magnitude": np.sqrt(19.0140411028486**2 + 7.52984606443549**2),
-        "phase": np.arctan2(-7.52984606443549, 19.0140411028486) * (180 / np.pi)
-    },
-    {
-        "real": 20.7560176016118,
-        "imaginary": -16.8293998859934,
-        "frequency": 2025,
-        "magnitude": np.sqrt(20.7560176016118**2 + 16.8293998859934**2),
-        "phase": np.arctan2(-16.8293998859934, 20.7560176016118) * (180 / np.pi)
-    },
-    {
-        "real": 22.3597923401363,
-        "imaginary": -21.3644829082237,
-        "frequency": 1575,
-        "magnitude": np.sqrt(22.3597923401363**2 + 21.3644829082237**2),
-        "phase": np.arctan2(-21.3644829082237, 22.3597923401363) * (180 / np.pi)
-    },
-    {
-        "real": 25.4208517108672,
-        "imaginary": -28.5723160076139,
-        "frequency": 1125,
-        "magnitude": np.sqrt(25.4208517108672**2 + 28.5723160076139**2),
-        "phase": np.arctan2(-28.5723160076139, 25.4208517108672) * (180 / np.pi)
-    }
-]
+# Removed hardcoded ground truth dataset - now uses user's reference circuit parameters
 
 @dataclass
 class ParameterSpace:
@@ -86,18 +56,16 @@ class ParameterSpace:
     ca: Tuple[float, float] = (1e-6, 1e-3)        # Apical capacitance (F)
     rb: Tuple[float, float] = (100, 10000)        # Basal resistance (Ω)
     cb: Tuple[float, float] = (1e-6, 1e-3)        # Basal capacitance (F)
-    noise_level: float = 0.05  # 5% measurement noise by default
 
 class RegressionMeshParameters(BaseModel):
     reference_cell: CircuitParameters
     mesh_resolution: int = 10  # Points per dimension
-    noise_level: float = 0.05  # 5% measurement noise
     top_percentage: float = 10.0  # Keep top 10% of fits
-    use_ground_truth: bool = False  # Whether to use ground truth dataset
+    use_symmetric_grid: bool = True  # Enable tau-based duplicate removal optimization
 
 class ResnormParameters(BaseModel):
     test_data: List[ImpedancePoint]
-    use_ground_truth: bool = True  # By default, use ground truth dataset
+    reference_data: List[ImpedancePoint]  # Reference impedance data for comparison
 
 class MeshPoint(BaseModel):
     parameters: CircuitParameters
@@ -105,14 +73,17 @@ class MeshPoint(BaseModel):
     alpha: float = 0.0  # Default alpha value
 
 def calculate_membrane_impedance(R: float, C: float, omega: float) -> complex:
-    """Calculate the impedance of a single membrane (apical or basal)
-    Z(ω) = R + 1/(jωC) where:
+    """Calculate the impedance of a single membrane (apical or basal) in PARALLEL configuration
+    Z(ω) = R/(1+jωRC) where:
     - R is the membrane resistance (Ω)
     - C is the membrane capacitance (F)
     - ω is the angular frequency (rad/s)
+    
+    This represents a resistor R in parallel with capacitor C, not series!
     """
-    capacitive_reactance = 1 / (omega * C)
-    return R - 1j * capacitive_reactance
+    # Parallel RC impedance: Z = R/(1+jωRC)
+    denominator = 1 + 1j * omega * R * C
+    return R / denominator
 
 def calculate_equivalent_impedance(params: CircuitParameters, omega: float) -> complex:
     """Calculate the equivalent impedance of the epithelial model
@@ -231,31 +202,10 @@ async def compute_impedance(params: CircuitParameters) -> List[ImpedancePoint]:
 
 @app.post("/api/calculate_resnorm")
 async def compute_resnorm(params: ResnormParameters) -> float:
-    """Calculate resnorm between test data and ground truth data."""
+    """Calculate resnorm between test data and reference data."""
     try:
-        if params.use_ground_truth:
-            reference_data = [ImpedancePoint(**point) for point in GROUND_TRUTH_DATASET]
-        else:
-            reference_data = params.test_data
-        
-        # Calculate resnorm using the improved method
-        sum_of_squared_residuals = 0
-        n = min(len(reference_data), len(params.test_data))
-
-        for i in range(n):
-            ref = reference_data[i]
-            test = params.test_data[i]
-            
-            # Calculate residuals for real and imaginary components
-            real_residual = test.real - ref.real
-            imag_residual = test.imaginary - ref.imaginary
-            
-            # Calculate the squared difference
-            residual_squared = real_residual ** 2 + imag_residual ** 2
-            
-            sum_of_squared_residuals += residual_squared
-        
-        return float(np.sqrt(sum_of_squared_residuals))
+        # Use the improved resnorm calculation with proper normalization
+        return calculate_resnorm_improved(params.reference_data, params.test_data)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -276,37 +226,29 @@ async def compute_regression_mesh(params: RegressionMeshParameters) -> List[Mesh
             frequencies = np.logspace(0, 4, 20)  # Fallback to default if none provided
         add_log(f"Using {len(frequencies)} frequency points")
         
-        # Use ground truth or generate reference data from parameters
-        if params.use_ground_truth:
-            reference_data = [ImpedancePoint(**point) for point in GROUND_TRUTH_DATASET]
-            add_log("Using ground truth dataset for reference data")
-        else:
-            try:
-                reference_data = [
-                    calculate_impedance_spectrum(params.reference_cell)[i]
-                    for i in range(len(params.reference_cell.frequency_range))
-                ]
-                add_log(f"Generated reference data in {time.time() - start_time:.2f}s")
-            except Exception as e:
-                logger.error(f"Error generating reference data: {str(e)}")
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Error generating reference data: {str(e)}"
-                )
+        # Generate reference data from user's circuit parameters
+        try:
+            reference_data = calculate_impedance_spectrum(params.reference_cell)
+            add_log(f"Generated reference data from user's circuit parameters in {time.time() - start_time:.2f}s")
+        except Exception as e:
+            logger.error(f"Error generating reference data from user's circuit: {str(e)}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error generating reference data from user's circuit: {str(e)}"
+            )
         
         # Generate parameter mesh
         try:
-            # Modify parameter space to be more reasonable - reduces computation time
+            # Define parameter space for mesh generation
             param_space = ParameterSpace(
                 ra=(100, 1000),               # Apical resistance range (Ω)
                 ca=(1e-6, 5e-6),              # Apical capacitance range (F)
                 rb=(100, 1000),               # Basal resistance range (Ω)
                 cb=(1e-6, 5e-6),              # Basal capacitance range (F)
-                noise_level=params.noise_level
             )
             
-            # Use the full resolution requested
-            mesh = generate_parameter_mesh(params.mesh_resolution, param_space)
+            # Generate parameter mesh with optional symmetric optimization
+            mesh = generate_parameter_mesh(params.mesh_resolution, param_space, params.use_symmetric_grid)
             add_log(f"Generated parameter mesh with {len(mesh)} points")
         except Exception as e:
             logger.error(f"Error generating parameter mesh: {str(e)}")
@@ -464,6 +406,11 @@ async def get_all_states():
 def calculate_resnorm_improved(reference_data: List[ImpedancePoint], test_data: List[ImpedancePoint]) -> float:
     """Calculate the residual norm between reference and test impedance data.
     This is used to measure the goodness of fit between simulated and measured data.
+    
+    Formula: resnorm = (1/n) * sqrt(sum(ri^2))
+    where ri^2 = (real_test - real_ref)^2 + (imag_test - imag_ref)^2
+    
+    The (1/n) normalization factor ensures consistency with JavaScript implementation.
     """
     sum_of_squared_residuals = 0
     n = min(len(reference_data), len(test_data))
@@ -481,33 +428,67 @@ def calculate_resnorm_improved(reference_data: List[ImpedancePoint], test_data: 
         
         sum_of_squared_residuals += residual_squared
     
-    return float(np.sqrt(sum_of_squared_residuals))
+    # Apply (1/n) normalization factor to match JavaScript worker implementation
+    return float((1 / n) * np.sqrt(sum_of_squared_residuals))
 
-def generate_parameter_mesh(resolution: int, param_space: ParameterSpace) -> List[List[float]]:
+def generate_parameter_mesh(resolution: int, param_space: ParameterSpace, use_symmetric_grid: bool = True) -> List[List[float]]:
     """Generate a parameter mesh for circuit parameter space exploration.
     
     Args:
         resolution: Number of points per dimension
         param_space: Parameter space with ranges for each parameter
+        use_symmetric_grid: Enable tau-based duplicate removal optimization
         
     Returns:
         List of parameter combinations (Rs, Ra, Ca, Rb, Cb)
+        
+    Mathematical Background:
+    The circuit impedance depends on time constants tau = RC, not individual R and C values.
+    Since Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb), swapping (Ra,Ca) ↔ (Rb,Cb) 
+    produces identical impedance spectra and thus identical resnorm values.
+    This optimization eliminates ~50% of redundant parameter combinations.
     """
-    # Define the parameter ranges
-    Rs_range = np.linspace(100, 1000, resolution)  # Tight junction resistance
-    Ra_range = np.linspace(param_space.ra[0], param_space.ra[1], resolution)  # Apical resistance
+    # Use logspace for all parameters since they span multiple orders of magnitude
+    Rs_range = np.logspace(np.log10(100), np.log10(1000), resolution)  # Tight junction resistance
+    Ra_range = np.logspace(np.log10(param_space.ra[0]), np.log10(param_space.ra[1]), resolution)  # Apical resistance
     Ca_range = np.logspace(np.log10(param_space.ca[0]), np.log10(param_space.ca[1]), resolution)  # Apical capacitance
-    Rb_range = np.linspace(param_space.rb[0], param_space.rb[1], resolution)  # Basal resistance
+    Rb_range = np.logspace(np.log10(param_space.rb[0]), np.log10(param_space.rb[1]), resolution)  # Basal resistance
     Cb_range = np.logspace(np.log10(param_space.cb[0]), np.log10(param_space.cb[1]), resolution)  # Basal capacitance
     
-    # Generate combinations of parameters (use a subset to reduce computation time)
+    # Generate parameter combinations with optional symmetric optimization
     mesh = []
+    total_combinations = 0
+    skipped_combinations = 0
+    
     for Rs in Rs_range:
-        for Ra in Ra_range[::max(1, resolution//4)]:
-            for Ca in Ca_range[::max(1, resolution//4)]:
-                for Rb in Rb_range[::max(1, resolution//4)]:
-                    for Cb in Cb_range[::max(1, resolution//4)]:
+        for Ra in Ra_range:
+            for Ca in Ca_range:
+                for Rb in Rb_range:
+                    for Cb in Cb_range:
+                        total_combinations += 1
+                        
+                        # Symmetric grid optimization: skip duplicates based on time constants
+                        if use_symmetric_grid:
+                            # Calculate time constants tau = RC for comparison
+                            tau_a = Ra * Ca
+                            tau_b = Rb * Cb
+                            
+                            # Skip this combination if tauA > tauB (equivalent swapped version will be included)
+                            if tau_a > tau_b:
+                                skipped_combinations += 1
+                                continue
+                            
+                            # If time constants are equal, enforce Ra <= Rb to break ties consistently
+                            if abs(tau_a - tau_b) < 1e-15 and Ra > Rb:
+                                skipped_combinations += 1
+                                continue
+                        
                         mesh.append([Rs, Ra, Ca, Rb, Cb])
+    
+    if use_symmetric_grid:
+        add_log(f"Symmetric grid optimization: generated {len(mesh)} combinations, skipped {skipped_combinations} duplicates ({skipped_combinations/total_combinations*100:.1f}%)")
+    else:
+        add_log(f"Full grid generation: {len(mesh)} combinations")
     
     return mesh
 

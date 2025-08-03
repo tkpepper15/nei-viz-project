@@ -97,8 +97,8 @@ This is **SpideyPlot** - an advanced electrochemical impedance spectroscopy (EIS
 #### 1. Circuit Simulation Engine (`app/components/CircuitSimulator.tsx`)
 - Main orchestrator component managing the entire application state
 - Handles parallel computation using Web Workers via `useWorkerManager`
-- Implements Randles equivalent circuit model for RPE cell impedance
-- Complex impedance calculation: `Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`
+- Implements Randles equivalent circuit model for RPE cell impedance  
+- Complex impedance calculation: `Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)` (Rs = shunt resistance)
 - Supports parameter space exploration with up to 25^5 (9.7M+) parameter combinations
 
 #### 2. Web Worker System (`app/components/circuit-simulator/utils/workerManager.ts`)
@@ -138,7 +138,7 @@ This is **SpideyPlot** - an advanced electrochemical impedance spectroscopy (EIS
 #### Equivalent Circuit
 The application implements a modified Randles circuit model:
 ```
-       Rs (Series Resistance)
+       Rs (Shunt Resistance)
    ────[Rs]────┬──────────┬──────
                │          │
            [Ra]│      [Rb]│

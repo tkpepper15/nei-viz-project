@@ -6,4 +6,7 @@ export type { PerformanceSettings } from './PerformanceControls';
 export { SavedProfiles } from './SavedProfiles';
 export { SaveProfileModal } from './SaveProfileModal';
 export { EditProfileModal } from './EditProfileModal';
-export { ProfileCard } from './ProfileCard'; 
+export { ProfileCard } from './ProfileCard';
+export { ResizableSplitPane } from './ResizableSplitPane';
+export { SystemMonitor } from './SystemMonitor';
+export { VisualizationLimitsControl } from './VisualizationLimitsControl'; 

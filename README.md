@@ -301,3 +301,36 @@ This project was created to support research in retinal physiology and provide a
 <div align="center">
   <sub>Built with ❤️ to accelerate Vision Research</sub>
 </div>
+
+## Features
+
+### Grid Computation with Advanced Tracking
+
+The system now provides detailed tracking of grid computation statistics:
+
+#### Symmetric Grid Optimization
+- **Skipped Points**: Shows how many parameter combinations were skipped due to symmetric optimization
+- **Example**: For a 20-point grid (3.2M total combinations), symmetric optimization typically skips ~1.6M duplicate combinations
+- **Display**: Orange text shows "X skipped" in the grid status
+
+#### Memory Management
+- **Adaptive Limits**: Automatically limits displayed points based on estimated memory usage
+- **Performance Thresholds**:
+  - > 500MB estimated: Limit to 50,000 displayed points
+  - > 200MB estimated: Limit to 75,000 displayed points
+- **Display**: Red text shows "X hidden" when memory limits are applied
+
+#### Enhanced Grid Status Display
+
+The grid status bar now shows:
+```
+Showing: 50,000 of 1,600,000 computed / 3,200,000 total • 1,600,000 skipped • 1,550,000 hidden | Freq: 0.10 - 10000 Hz | 320MB
+```
+
+Where:
+- **Showing**: Points currently displayed in visualizations
+- **Computed**: Points actually computed (after symmetric optimization)
+- **Total**: Theoretical maximum points (gridSize^5)
+- **Skipped**: Points skipped by symmetric optimization
+- **Hidden**: Points hidden due to memory management
+- **Memory**: Estimated memory usage (when > 100MB)

@@ -79,8 +79,9 @@ function calculateImpedanceSpectrum(params, freqs) {
   });
 }
 
-// Calculate resnorm between two spectra using simplified formula: (1/n) * sqrt(sum(ri^2))
-function calculateResnorm(referenceSpectrum, testSpectrum) {
+// Calculate resnorm between two spectra using formula: (1/n) * sqrt(sum(ri^2))
+// With frequency weighting: wi = 1 / max(1, log10(fi))
+function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting = true) {
   if (!referenceSpectrum.length || !testSpectrum.length) return Infinity;
   
   let sumSquaredResiduals = 0;
@@ -95,14 +96,22 @@ function calculateResnorm(referenceSpectrum, testSpectrum) {
       continue;
     }
     
-    // Calculate residuals for real and imaginary components (no normalization)
+    // Calculate residuals for real and imaginary components
     const realResidual = testPoint.real - refPoint.real;
     const imagResidual = testPoint.imag - refPoint.imag;
     
     // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    sumSquaredResiduals += squaredResidual;
+    // Apply frequency weighting if enabled
+    let weightedSquaredResidual = squaredResidual;
+    if (useFrequencyWeighting) {
+      // Apply frequency-based weighting: wi = 1 / max(1, log10(fi))
+      const weight = 1 / Math.max(1, Math.log10(testPoint.freq));
+      weightedSquaredResidual = weight * squaredResidual;
+    }
+    
+    sumSquaredResiduals += weightedSquaredResidual;
   }
   
   // Calculate final resnorm: (1/n) * sqrt(sum(ri^2))
@@ -122,16 +131,76 @@ function generateLogSpace(min, max, num) {
   return result;
 }
 
+// Generate logarithmic space with ground truth value included
+function generateLogSpaceWithReference(min, max, num, referenceValue) {
+  // First generate standard logarithmic space
+  const logValues = generateLogSpace(min, max, num);
+  
+  // If reference value is within range and not already close to a sampled point
+  if (referenceValue >= min && referenceValue <= max) {
+    // Find the closest existing point
+    let closestIndex = 0;
+    let minDistance = Math.abs(Math.log10(logValues[0]) - Math.log10(referenceValue));
+    
+    for (let i = 1; i < logValues.length; i++) {
+      const distance = Math.abs(Math.log10(logValues[i]) - Math.log10(referenceValue));
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestIndex = i;
+      }
+    }
+    
+    // If the closest point is more than 5% away in log space, replace it with reference value
+    const logRef = Math.log10(referenceValue);
+    const logClosest = Math.log10(logValues[closestIndex]);
+    const relativeError = Math.abs(logRef - logClosest) / Math.abs(logRef);
+    
+    if (relativeError > 0.05) {
+      logValues[closestIndex] = referenceValue;
+      // Re-sort the array to maintain order
+      logValues.sort((a, b) => a - b);
+    }
+  }
+  
+  return logValues;
+}
+
 // Stream grid points in chunks to prevent memory overflow
-function* streamGridPoints(gridSize, useSymmetricGrid) {
+function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
   const totalPoints = Math.pow(gridSize, 5);
   
-  // Generate parameter ranges
-  const rsValues = generateLogSpace(10, 10000, gridSize);
-  const raValues = generateLogSpace(10, 10000, gridSize);
-  const rbValues = generateLogSpace(10, 10000, gridSize);
-  const caValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
-  const cbValues = generateLogSpace(0.1e-6, 50e-6, gridSize);
+  // Ground truth parameters (reference values to ensure are included)
+  // Use input parameters if provided, otherwise use defaults
+  const groundTruthParams = inputGroundTruth || {
+    Rs: 24,        // Shunt resistance (Ω)
+    Ra: 500,       // Apical resistance (Ω) 
+    Ca: 0.5e-6,    // Apical capacitance (F)
+    Rb: 500,       // Basal resistance (Ω)
+    Cb: 0.5e-6     // Basal capacitance (F)
+  };
+  
+  // Generate parameter ranges with ground truth values included
+  const rsValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rs);
+  const raValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Ra);
+  const rbValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rb);
+  const caValues = generateLogSpaceWithReference(0.1e-6, 50e-6, gridSize, groundTruthParams.Ca);
+  const cbValues = generateLogSpaceWithReference(0.1e-6, 50e-6, gridSize, groundTruthParams.Cb);
+  
+  // Debug: Check if ground truth values are included
+  const debugInfo = {
+    Rs_included: rsValues.includes(groundTruthParams.Rs),
+    Ra_included: raValues.includes(groundTruthParams.Ra),
+    Rb_included: rbValues.includes(groundTruthParams.Rb),
+    Ca_included: caValues.includes(groundTruthParams.Ca),
+    Cb_included: cbValues.includes(groundTruthParams.Cb),
+    rs_closest: rsValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Rs) < Math.abs(prev - groundTruthParams.Rs) ? curr : prev),
+    ra_closest: raValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Ra) < Math.abs(prev - groundTruthParams.Ra) ? curr : prev),
+    rb_closest: rbValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Rb) < Math.abs(prev - groundTruthParams.Rb) ? curr : prev),
+    ca_closest: caValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Ca) < Math.abs(prev - groundTruthParams.Ca) ? curr : prev),
+    cb_closest: cbValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Cb) < Math.abs(prev - groundTruthParams.Cb) ? curr : prev)
+  };
+  
+  console.log('Ground Truth Parameter Inclusion Debug:', debugInfo);
   
   let generatedCount = 0;
   
@@ -186,7 +255,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid) {
 }
 
 // Main worker message handler
-self.onmessage = function(e) {
+self.onmessage = async function(e) {
   const { type, data } = e.data;
   
   try {
@@ -200,19 +269,70 @@ self.onmessage = function(e) {
           referenceSpectrum 
         } = data;
         
-        // Process chunk efficiently with memory management
+        // Process chunk with aggressive memory management for large datasets
         const results = [];
         
-        // Adaptive batch size based on chunk size to prevent memory issues
-        let batchSize = 50;
-        if (chunkParams.length > 10000) {
-          batchSize = 25; // Smaller batches for large chunks
+        // Ultra-aggressive adaptive batch sizing with memory pressure monitoring
+        let batchSize = 25; // Start conservative
+        const memoryThreshold = 100 * 1024 * 1024; // 100MB memory limit per worker
+        
+        if (chunkParams.length > 50000) {
+          batchSize = 5; // Micro-batches for huge chunks
+        } else if (chunkParams.length > 25000) {
+          batchSize = 10; // Very small batches for very large chunks
+        } else if (chunkParams.length > 10000) {
+          batchSize = 15; // Small batches for large chunks
         } else if (chunkParams.length < 1000) {
-          batchSize = 100; // Larger batches for small chunks
+          batchSize = 50; // Larger batches for small chunks
         }
+        
+        // Memory usage estimation
+        let estimatedMemoryUsage = 0;
+        const bytesPerResult = 800; // Estimated bytes per result object
         
         for (let i = 0; i < chunkParams.length; i += batchSize) {
           const batch = chunkParams.slice(i, i + batchSize);
+          
+          // Memory pressure check - implement back-pressure if needed
+          estimatedMemoryUsage = results.length * bytesPerResult;
+          if (estimatedMemoryUsage > memoryThreshold) {
+            // Trigger intermediate cleanup and result streaming
+            self.postMessage({
+              type: 'MEMORY_PRESSURE',
+              data: {
+                chunkIndex,
+                estimatedMemory: Math.round(estimatedMemoryUsage / 1024 / 1024) + 'MB',
+                resultsCount: results.length,
+                message: 'High memory usage detected, implementing backpressure'
+              }
+            });
+            
+            // Wait for memory pressure to subside (simple backpressure)
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Implement progressive data streaming if results are large
+            if (results.length > 5000) {
+              // Stream partial results and clear buffer
+              const partialResults = results.splice(0, 3000); // Take first 3000 results
+              self.postMessage({
+                type: 'PARTIAL_RESULTS',
+                data: {
+                  chunkIndex,
+                  partialResults: partialResults.slice(0, 1000), // Only send top 1000
+                  totalPartialCount: partialResults.length
+                }
+              });
+              // Clear memory references
+              partialResults.length = 0;
+              estimatedMemoryUsage = results.length * bytesPerResult;
+            }
+          }
+          
+          // Add staggered processing with small delays for very large batches
+          if (chunkParams.length > 25000 && i % (batchSize * 20) === 0) {
+            // Small delay every 20 batches for very large chunks to prevent blocking
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
           
           for (const params of batch) {
             try {
@@ -226,8 +346,8 @@ self.onmessage = function(e) {
               // Calculate spectrum
               const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
               
-              // Calculate resnorm directly (avoid creating model objects)
-              const resnorm = calculateResnorm(referenceSpectrum, spectrum);
+              // Calculate resnorm directly with frequency weighting enabled
+              const resnorm = calculateResnorm(referenceSpectrum, spectrum, true);
               
               // Skip infinite or NaN resnorms
               if (!isFinite(resnorm) || isNaN(resnorm)) {
@@ -286,7 +406,7 @@ self.onmessage = function(e) {
       }
       
       case 'GENERATE_GRID_POINTS': {
-        const { gridSize, useSymmetricGrid } = data;
+        const { gridSize, useSymmetricGrid, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size to prevent memory issues
         if (gridSize > 20) {
@@ -300,7 +420,7 @@ self.onmessage = function(e) {
         
         // Use streaming approach to prevent memory overflow
         const gridPoints = [];
-        const stream = streamGridPoints(gridSize, useSymmetricGrid);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth);
         let lastProgressReport = 0;
         
         for (const { point, progress } of stream) {
@@ -336,7 +456,7 @@ self.onmessage = function(e) {
       }
       
       case 'GENERATE_GRID_STREAM': {
-        const { gridSize, useSymmetricGrid, chunkSize = 1000 } = data;
+        const { gridSize, useSymmetricGrid, chunkSize = 1000, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size
         if (gridSize > 20) {
@@ -349,7 +469,7 @@ self.onmessage = function(e) {
         }
         
         // Stream grid points in chunks to prevent memory overflow
-        const stream = streamGridPoints(gridSize, useSymmetricGrid);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth);
         let currentChunk = [];
         let totalGenerated = 0;
         

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 
 export interface ComputationSummary {
   title: string;
@@ -29,6 +29,14 @@ export const ComputationNotification: React.FC<ComputationNotificationProps> = (
   const [isVisible, setIsVisible] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
 
+  const handleDismiss = useCallback(() => {
+    setIsExiting(true);
+    setTimeout(() => {
+      setIsVisible(false);
+      onDismiss();
+    }, 300); // Animation duration
+  }, [onDismiss]);
+
   useEffect(() => {
     if (summary) {
       setIsVisible(true);
@@ -41,15 +49,7 @@ export const ComputationNotification: React.FC<ComputationNotificationProps> = (
 
       return () => clearTimeout(timer);
     }
-  }, [summary]);
-
-  const handleDismiss = () => {
-    setIsExiting(true);
-    setTimeout(() => {
-      setIsVisible(false);
-      onDismiss();
-    }, 300); // Animation duration
-  };
+  }, [summary, handleDismiss]);
 
   if (!summary || !isVisible) return null;
 

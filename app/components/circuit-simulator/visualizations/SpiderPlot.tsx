@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ModelSnapshot } from '../types';
+import { CircuitParameters } from '../types/parameters';
 
 interface SpiderPlotProps {
   meshItems: ModelSnapshot[];
@@ -10,35 +11,54 @@ interface SpiderPlotProps {
   maxPolygons: number;
   onExportImage?: (canvas: HTMLCanvasElement) => void;
   visualizationMode?: 'color' | 'opacity';
-  opacityIntensity?: number;
   gridSize?: number;
   includeLabels?: boolean;
   backgroundColor?: 'transparent' | 'white' | 'black';
+  groundTruthParams?: CircuitParameters;
+  showGroundTruth?: boolean;
 }
 
-// High-performance Canvas-based spider plot renderer
+// Ultra-high performance Canvas-based spider plot renderer
 class OptimizedSpiderRenderer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private animationFrameId: number | null = null;
   private isRendering = false;
   private lastRenderTime = 0;
-  private readonly THROTTLE_MS = 16; // ~60fps
+  private readonly THROTTLE_MS = 4; // ~240fps for ultra-smooth interaction
   private needsRender = false;
   private pendingModels: ModelSnapshot[] = [];
   private renderConfig: RenderConfig;
+  private offscreenCanvas: HTMLCanvasElement | null = null;
+  private offscreenCtx: CanvasRenderingContext2D | null = null;
+  private cachedPaths = new Map<string, Path2D>();
+  private viewport = { models: [] as ModelSnapshot[], hash: '' };
 
   constructor(canvas: HTMLCanvasElement, config: RenderConfig) {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d')!;
+    this.ctx = canvas.getContext('2d', { 
+      alpha: config.backgroundColor === 'transparent',
+      willReadFrequently: false, // Enable GPU acceleration
+      desynchronized: true // Reduce input latency
+    })!;
     this.renderConfig = config;
     this.setupCanvas();
+    this.setupOffscreenCanvas();
     this.startRenderLoop();
   }
 
   private setupCanvas() {
-    this.ctx.imageSmoothingEnabled = true;
-    this.ctx.imageSmoothingQuality = 'high';
+    this.ctx.imageSmoothingEnabled = false; // Disable for performance with large datasets
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+  }
+
+  private setupOffscreenCanvas() {
+    this.offscreenCanvas = document.createElement('canvas');
+    this.offscreenCtx = this.offscreenCanvas.getContext('2d', {
+      alpha: false,
+      willReadFrequently: false
+    })!;
   }
 
   private startRenderLoop() {
@@ -52,19 +72,77 @@ class OptimizedSpiderRenderer {
     renderLoop();
   }
 
-  // Throttled render function using RequestAnimationFrame
+  // Ultra-optimized render function with intelligent caching and virtualization
   public render(models: ModelSnapshot[]) {
+    // Skip rendering if no models
+    if (!models.length) {
+      this.pendingModels = [];
+      this.needsRender = false;
+      this.clearCanvas();
+      return;
+    }
+
+    // Generate hash for model set to detect changes
+    const modelHash = this.generateModelHash(models);
+    
+    // Skip if same data is already rendered
+    if (this.viewport.hash === modelHash) {
+      return;
+    }
+
+    // Apply intelligent virtualization for large datasets
+    const optimizedModels = this.virtualizeModels(models);
+
     const now = performance.now();
     if (now - this.lastRenderTime < this.THROTTLE_MS) {
       // Throttle updates to prevent excessive rendering
-      this.pendingModels = models;
+      this.pendingModels = optimizedModels;
       this.needsRender = true;
       return;
     }
 
     this.lastRenderTime = now;
-    this.pendingModels = models;
+    this.pendingModels = optimizedModels;
+    this.viewport.hash = modelHash;
     this.needsRender = true;
+  }
+
+  // Intelligent model virtualization for performance
+  private virtualizeModels(models: ModelSnapshot[]): ModelSnapshot[] {
+    const maxRenderPoints = 100000; // Maximum points to render for performance
+    
+    if (models.length <= maxRenderPoints) {
+      return models;
+    }
+
+    // For large datasets, use adaptive sampling
+    // Prioritize models with better resnorm (lower values)
+    const sortedModels = [...models].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+    
+    // Take best 70% of max points, then sample remaining 30% for coverage
+    const bestCount = Math.floor(maxRenderPoints * 0.7);
+    const sampleCount = maxRenderPoints - bestCount;
+    
+    const bestModels = sortedModels.slice(0, bestCount);
+    const remainingModels = sortedModels.slice(bestCount);
+    
+    // Sample remaining models uniformly
+    const sampleStep = Math.max(1, Math.floor(remainingModels.length / sampleCount));
+    const sampledModels = remainingModels.filter((_, index) => index % sampleStep === 0).slice(0, sampleCount);
+    
+    return [...bestModels, ...sampledModels];
+  }
+
+  // Generate hash for model set to enable caching
+  private generateModelHash(models: ModelSnapshot[]): string {
+    const key = `${models.length}_${models[0]?.id || ''}_${models[models.length - 1]?.id || ''}`;
+    return key;
+  }
+
+  // Efficient canvas clearing
+  private clearCanvas() {
+    // Use clearRect for better performance than resetting width
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
   private performRender() {
@@ -72,19 +150,37 @@ class OptimizedSpiderRenderer {
     this.isRendering = true;
 
     try {
-      // Clear canvas with background
-      this.drawBackground();
+      // Use requestIdleCallback for non-blocking rendering when available
+      const renderTask = () => {
+        // Efficient canvas clearing
+        this.clearCanvas();
+        
+        // Draw background
+        this.drawBackground();
 
-      // Draw grid
-      this.drawGrid();
+        // Draw grid (cached when possible)
+        this.drawGrid();
 
-      // Draw labels if enabled
-      if (this.renderConfig.includeLabels) {
-        this.drawLabels();
+        // Ultra-optimized batch drawing with Path2D caching
+        this.ultraOptimizedBatchDraw(this.pendingModels);
+
+        // Draw ground truth overlay if enabled
+        if (this.renderConfig.showGroundTruth && this.renderConfig.groundTruthParams) {
+          this.drawGroundTruthOverlay();
+        }
+
+        // Draw labels AFTER polygons to ensure highest z-index
+        if (this.renderConfig.includeLabels) {
+          this.drawLabels();
+        }
+      };
+
+      // Use requestIdleCallback for better performance when available
+      if ('requestIdleCallback' in window) {
+        (window as Window & { requestIdleCallback: (callback: () => void, options?: { timeout: number }) => void }).requestIdleCallback(renderTask, { timeout: 16 });
+      } else {
+        renderTask();
       }
-
-      // Batch draw all polygons
-      this.batchDrawPolygons(this.pendingModels);
 
     } finally {
       this.isRendering = false;
@@ -112,31 +208,36 @@ class OptimizedSpiderRenderer {
     // Increase radius for better space utilization - from 0.35 to 0.42
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
+    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
 
     this.ctx.strokeStyle = '#4B5563';
     this.ctx.lineWidth = 1;
     this.ctx.globalAlpha = 0.3;
 
-    // Draw concentric pentagon grids based on actual grid size
+    // Draw concentric grid circles/ticks only on axes (no connecting lines)
     for (let level = 1; level <= gridSize; level++) {
       const radius = (maxRadius * level) / gridSize;
       
-      // Draw pentagon grid at this level
-      this.ctx.beginPath();
-      for (let i = 0; i <= params.length; i++) {
+      // Draw small tick marks on each axis instead of connecting pentagon
+      for (let i = 0; i < params.length; i++) {
         const angle = i * angleStep - Math.PI / 2;
         const x = centerX + Math.cos(angle) * radius;
         const y = centerY + Math.sin(angle) * radius;
         
-        if (i === 0) {
-          this.ctx.moveTo(x, y);
-        } else {
-          this.ctx.lineTo(x, y);
-        }
+        // Draw small perpendicular tick mark
+        const tickLength = 4;
+        const perpAngle = angle + Math.PI / 2;
+        const tickStartX = x - Math.cos(perpAngle) * tickLength / 2;
+        const tickStartY = y - Math.sin(perpAngle) * tickLength / 2;
+        const tickEndX = x + Math.cos(perpAngle) * tickLength / 2;
+        const tickEndY = y + Math.sin(perpAngle) * tickLength / 2;
+        
+        this.ctx.beginPath();
+        this.ctx.moveTo(tickStartX, tickStartY);
+        this.ctx.lineTo(tickEndX, tickEndY);
+        this.ctx.stroke();
       }
-      this.ctx.stroke();
     }
 
     // Draw radial axes
@@ -162,7 +263,7 @@ class OptimizedSpiderRenderer {
     // Use same increased radius for consistency
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
+    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
 
     // Fixed parameter ranges exactly matching playground
@@ -195,23 +296,23 @@ class OptimizedSpiderRenderer {
         const logValue = logMin + (level / gridSize) * (logMax - logMin);
         const actualValue = Math.pow(10, logValue);
         
-        // Format value based on parameter type
+        // Format value based on parameter type (no units - they're in the parameter name)
         let displayValue: string;
         if (param.includes('C')) {
           const valueInMicroF = actualValue * 1e6;
           if (valueInMicroF >= 10) {
-            displayValue = `${Math.round(valueInMicroF)}µF`;
+            displayValue = `${Math.round(valueInMicroF)}`;
           } else if (valueInMicroF >= 1) {
-            displayValue = `${valueInMicroF.toFixed(1)}µF`;
+            displayValue = `${valueInMicroF.toFixed(1)}`;
           } else {
-            displayValue = `${valueInMicroF.toFixed(2)}µF`;
+            displayValue = `${valueInMicroF.toFixed(2)}`;
           }
         } else {
           if (actualValue >= 1000) {
             const kValue = actualValue / 1000;
-            displayValue = kValue >= 10 ? `${Math.round(kValue)}kΩ` : `${kValue.toFixed(1)}kΩ`;
+            displayValue = kValue >= 10 ? `${Math.round(kValue)}k` : `${kValue.toFixed(1)}k`;
           } else {
-            displayValue = actualValue >= 100 ? `${Math.round(actualValue)}Ω` : `${actualValue.toFixed(0)}Ω`;
+            displayValue = actualValue >= 100 ? `${Math.round(actualValue)}` : `${actualValue.toFixed(0)}`;
           }
         }
         
@@ -256,16 +357,7 @@ class OptimizedSpiderRenderer {
       const labelX = centerX + Math.cos(angle) * labelDistance;
       const labelY = centerY + Math.sin(angle) * labelDistance;
       
-      // Enhanced axis labels with units and ranges
-      const ranges = {
-        Rs: '10Ω - 10kΩ',
-        Ra: '10Ω - 10kΩ', 
-        Rb: '10Ω - 10kΩ',
-        Ca: '0.1 - 50µF',
-        Cb: '0.1 - 50µF'
-      };
-      
-      // Draw parameter name with enhanced visibility
+      // Draw parameter name with units in parentheses
       this.ctx.save();
       this.ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
       this.ctx.shadowBlur = 4;
@@ -273,23 +365,29 @@ class OptimizedSpiderRenderer {
       this.ctx.shadowOffsetY = 1;
       this.ctx.font = '700 14px Inter, sans-serif';
       this.ctx.fillStyle = '#F3F4F6';
-      this.ctx.fillText(param, labelX, labelY - 8);
       
-      // Draw range with enhanced visibility
-      this.ctx.shadowBlur = 2;
-      this.ctx.font = '500 10px Inter, sans-serif';
-      this.ctx.fillStyle = '#D1D5DB';
-      this.ctx.fillText(ranges[param as keyof typeof ranges], labelX, labelY + 8);
+      // Add units to parameter names
+      const paramWithUnits = {
+        Rs: 'Rs (Ω)',
+        Ra: 'Ra (Ω)', 
+        Rb: 'Rb (Ω)',
+        Ca: 'Ca (µF)',
+        Cb: 'Cb (µF)'
+      };
+      
+      this.ctx.fillText(paramWithUnits[param as keyof typeof paramWithUnits] || param, labelX, labelY);
       this.ctx.restore();
     }
   }
 
-  // Batch drawing for performance - group by color and draw in batches
-  private batchDrawPolygons(models: ModelSnapshot[]) {
+  private drawGroundTruthOverlay() {
+    if (!this.renderConfig.groundTruthParams) return;
+    
     const centerX = this.canvas.width / 2;
     const centerY = this.canvas.height / 2;
-    // Use same increased radius for consistency
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
+    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+    const angleStep = (2 * Math.PI) / params.length;
 
     // Fixed parameter ranges exactly matching playground
     const paramRanges = {
@@ -300,43 +398,150 @@ class OptimizedSpiderRenderer {
       Cb: { min: 0.1e-6, max: 50e-6 }
     };
 
-    // Group polygons by color for efficient batching
-    const colorGroups = new Map<string, ModelSnapshot[]>();
+    const groundTruthPath = new Path2D();
     
+    // Calculate ground truth polygon points
+    const groundTruthPoints: { x: number; y: number }[] = [];
+    
+    for (let i = 0; i < params.length; i++) {
+      const param = params[i];
+      const angle = i * angleStep - Math.PI / 2;
+      const range = paramRanges[param as keyof typeof paramRanges];
+      
+      // Get ground truth value for this parameter
+      const groundTruthValue = this.renderConfig.groundTruthParams[param as keyof CircuitParameters];
+      
+      // Calculate logarithmic position
+      const logMin = Math.log10(range.min);
+      const logMax = Math.log10(range.max);
+      const logValue = Math.log10(groundTruthValue as number);
+      const normalizedValue = (logValue - logMin) / (logMax - logMin);
+      
+      // Clamp to valid range
+      const clampedValue = Math.max(0, Math.min(1, normalizedValue));
+      
+      // Calculate position
+      const radius = maxRadius * clampedValue;
+      const x = centerX + Math.cos(angle) * radius;
+      const y = centerY + Math.sin(angle) * radius;
+      
+      groundTruthPoints.push({ x, y });
+      
+      if (i === 0) {
+        groundTruthPath.moveTo(x, y);
+      } else {
+        groundTruthPath.lineTo(x, y);
+      }
+    }
+    
+    // Close the path
+    groundTruthPath.closePath();
+    
+    // Draw ground truth overlay with distinctive white color
+    this.ctx.save();
+    this.ctx.strokeStyle = '#FFFFFF';
+    this.ctx.lineWidth = 1.5;
+    this.ctx.setLineDash([6, 3]); // Dashed line for distinction
+    this.ctx.globalAlpha = 0.9;
+    this.ctx.stroke(groundTruthPath);
+    
+    this.ctx.restore();
+    
+    // Draw ground truth indicator points
+    this.ctx.save();
+    this.ctx.fillStyle = '#FFFFFF';
+    this.ctx.strokeStyle = '#000000';
+    this.ctx.lineWidth = 2;
+    this.ctx.globalAlpha = 1;
+    
+    for (const point of groundTruthPoints) {
+      this.ctx.beginPath();
+      this.ctx.arc(point.x, point.y, 6, 0, 2 * Math.PI);
+      this.ctx.fill();
+      this.ctx.stroke();
+    }
+    
+    this.ctx.restore();
+  }
+
+  // Ultra-optimized batch drawing with Path2D caching and GPU acceleration
+  private ultraOptimizedBatchDraw(models: ModelSnapshot[]) {
+    if (!models.length) return;
+    
+    const centerX = this.canvas.width / 2;
+    const centerY = this.canvas.height / 2;
+    const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
+
+    // Cached parameter ranges for performance
+    const paramRanges = {
+      Rs: { min: 10, max: 10000 },
+      Ra: { min: 10, max: 10000 },
+      Rb: { min: 10, max: 10000 },
+      Ca: { min: 0.1e-6, max: 50e-6 },
+      Cb: { min: 0.1e-6, max: 50e-6 }
+    };
+
+    // Ultra-efficient grouping with minimal object creation
+    const renderGroups = new Map<string, {
+      path: Path2D,
+      color: string,
+      opacity: number,
+      count: number
+    }>();
+    
+    // Single pass through models for grouping and path creation
     models.forEach(model => {
       const color = model.color || '#3B82F6';
-      if (!colorGroups.has(color)) {
-        colorGroups.set(color, []);
+      const opacity = Math.round((model.opacity || 0.7) * 10) / 10; // 0.1 steps for performance
+      const groupKey = `${color}_${opacity}`;
+      
+      let group = renderGroups.get(groupKey);
+      if (!group) {
+        group = {
+          path: new Path2D(),
+          color,
+          opacity,
+          count: 0
+        };
+        renderGroups.set(groupKey, group);
       }
-      colorGroups.get(color)!.push(model);
-    });
-
-    // Draw each color group in batches
-    colorGroups.forEach((groupModels, color) => {
-      this.ctx.strokeStyle = color;
-      this.ctx.lineWidth = 1;
-
-      // Batch draw all polygons of the same color
-      this.ctx.beginPath();
       
-      groupModels.forEach(model => {
-        const points = this.calculatePolygonPoints(model, centerX, centerY, maxRadius, paramRanges);
-        if (points.length >= 3) {
-          const opacity = model.opacity || 0.7;
-          this.ctx.globalAlpha = opacity * (this.renderConfig.opacityFactor || 1);
-          
-          // Draw polygon path
-          this.ctx.moveTo(points[0].x, points[0].y);
-          for (let i = 1; i < points.length; i++) {
-            this.ctx.lineTo(points[i].x, points[i].y);
-          }
-          this.ctx.closePath();
+      // Calculate polygon points and add to path
+      const points = this.calculatePolygonPoints(model, centerX, centerY, maxRadius, paramRanges);
+      if (points.length >= 3) {
+        group.path.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) {
+          group.path.lineTo(points[i].x, points[i].y);
         }
-      });
-      
-      this.ctx.stroke();
+        group.path.closePath();
+        group.count++;
+      }
     });
 
+    // Render all groups with minimal state changes
+    let lastColor = '';
+    let lastOpacity = -1;
+    
+    for (const group of renderGroups.values()) {
+      if (group.count === 0) continue;
+      
+      // Only change canvas state when necessary
+      if (group.color !== lastColor) {
+        this.ctx.strokeStyle = group.color;
+        lastColor = group.color;
+      }
+      
+      const finalOpacity = group.opacity * (this.renderConfig.opacityFactor || 1);
+      if (finalOpacity !== lastOpacity) {
+        this.ctx.globalAlpha = finalOpacity;
+        lastOpacity = finalOpacity;
+      }
+      
+      // Single draw call per group using Path2D for GPU acceleration
+      this.ctx.stroke(group.path);
+    }
+
+    // Reset canvas state
     this.ctx.globalAlpha = 1;
   }
 
@@ -349,7 +554,7 @@ class OptimizedSpiderRenderer {
   ) {
     if (!model.parameters) return [];
 
-    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
+    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const points = [];
     const gridSize = this.renderConfig.gridSize || 5;
 
@@ -395,17 +600,20 @@ interface RenderConfig {
   gridSize?: number;
   includeLabels?: boolean;
   opacityFactor?: number;
+  groundTruthParams?: CircuitParameters;
+  showGroundTruth?: boolean;
 }
 
-export const SpiderPlot: React.FC<SpiderPlotProps> = ({
+const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
   meshItems,
   opacityFactor,
   maxPolygons,
   visualizationMode = 'color',
-  opacityIntensity = 1.0,
   gridSize = 5,
   includeLabels = true,
-  backgroundColor = 'transparent'
+  backgroundColor = 'transparent',
+  groundTruthParams,
+  showGroundTruth = false
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -420,65 +628,17 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
   // Memoized filtered models for performance
   const visibleModels = useMemo(() => {
     if (!meshItems?.length) return [];
-
-    // Apply polygon limit
-    const effectivePolygons = meshItems.slice(0, maxPolygons);
-    
-    return effectivePolygons.map(model => {
-      const resnorm = model?.resnorm || 0;
-      let logOpacity: number;
-      
-      if (visualizationMode === 'opacity') {
-        // Use logarithmic scaling for opacity mode
-        const allResnorms = effectivePolygons.map(i => i.resnorm).filter(r => r !== undefined) as number[];
-        
-        if (resnorm !== undefined && allResnorms.length > 1) {
-          // Use iterative approach to avoid stack overflow
-          let minResnorm = Infinity;
-          let maxResnorm = -Infinity;
-          for (const r of allResnorms) {
-            if (r < minResnorm) minResnorm = r;
-            if (r > maxResnorm) maxResnorm = r;
-          }
-          
-          // Enhanced logarithmic calculation with aggressive contrast (matching orchestrator)
-          const epsilon = 1e-12;
-          const safeMin = Math.max(minResnorm, epsilon);
-          const safeMax = Math.max(maxResnorm, safeMin * 100); // Wider range for better contrast
-          
-          // Calculate log-spaced normalization
-          const logMin = Math.log10(safeMin);
-          const logMax = Math.log10(safeMax);
-          const logRange = Math.max(logMax - logMin, 1e-10);
-          
-          const safeResnorm = Math.max(resnorm, safeMin);
-          const logResnorm = Math.log10(safeResnorm);
-          const normalizedLog = (logResnorm - logMin) / logRange;
-          
-          // Invert so lower resnorm (better fit) = higher opacity
-          const inverted = 1 - Math.max(0, Math.min(1, normalizedLog));
-          
-          // Apply aggressive intensity factor with gamma correction
-          const gamma = 1 / Math.max(opacityIntensity, 0.1); // Prevent division by zero
-          const intensified = Math.pow(inverted, gamma);
-          
-          // Map to more aggressive opacity range: 0.05 to 1.0 for maximum contrast
-          logOpacity = Math.max(0.05, Math.min(1.0, 0.05 + intensified * 0.95));
-        } else {
-          logOpacity = 0.5;
-        }
-      } else {
-        // Color groups mode
-        logOpacity = calculateLogOpacity(resnorm);
-      }
-
-      return {
-        ...model,
-        opacity: logOpacity * (opacityFactor || 1),
-        color: visualizationMode === 'opacity' ? '#3B82F6' : model.color
-      };
-    });
-  }, [meshItems, maxPolygons, visualizationMode, opacityIntensity, opacityFactor]);
+    // Filter out models without valid parameters early to avoid processing
+    const validModels = meshItems.filter(model => 
+      model.parameters && 
+      typeof model.parameters.Rs === 'number' &&
+      typeof model.parameters.Ra === 'number' &&
+      typeof model.parameters.Rb === 'number' &&
+      typeof model.parameters.Ca === 'number' &&
+      typeof model.parameters.Cb === 'number'
+    );
+    return validModels.slice(0, maxPolygons);
+  }, [meshItems, maxPolygons]);
 
   // Initialize canvas renderer
   useEffect(() => {
@@ -493,7 +653,9 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
         backgroundColor,
         gridSize,
         includeLabels,
-        opacityFactor: opacityFactor || 1
+        opacityFactor: opacityFactor || 1,
+        groundTruthParams,
+        showGroundTruth
       });
     }
 
@@ -503,7 +665,7 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
         rendererRef.current = null;
       }
     };
-  }, [isCanvasMode, backgroundColor, gridSize, includeLabels, opacityFactor]);
+  }, [isCanvasMode, backgroundColor, gridSize, includeLabels, opacityFactor, groundTruthParams, showGroundTruth]);
 
   // Render when models change
   useEffect(() => {
@@ -586,7 +748,7 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.min(width, height) * 0.42;
-    const params = ['Rs', 'Ra', 'Rb', 'Ca', 'Cb'];
+    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
     
     // Fixed parameter ranges
@@ -616,17 +778,33 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
         
         {/* Grid */}
         <g stroke="#4B5563" strokeWidth="1" opacity="0.3" fill="none">
-          {/* Concentric pentagons */}
+          {/* Grid tick marks on axes (no connecting lines) */}
           {Array.from({ length: gridSize }, (_, level) => {
             const radius = (maxRadius * (level + 1)) / gridSize;
-            const points = params.map((_, i) => {
+            return params.map((_, i) => {
               const angle = i * angleStep - Math.PI / 2;
               const x = centerX + Math.cos(angle) * radius;
               const y = centerY + Math.sin(angle) * radius;
-              return `${x},${y}`;
-            }).join(' ');
-            return <polygon key={level} points={points} />;
-          })}
+              
+              // Create perpendicular tick mark
+              const tickLength = 4;
+              const perpAngle = angle + Math.PI / 2;
+              const tickStartX = x - Math.cos(perpAngle) * tickLength / 2;
+              const tickStartY = y - Math.sin(perpAngle) * tickLength / 2;
+              const tickEndX = x + Math.cos(perpAngle) * tickLength / 2;
+              const tickEndY = y + Math.sin(perpAngle) * tickLength / 2;
+              
+              return (
+                <line
+                  key={`${level}-${i}`}
+                  x1={tickStartX}
+                  y1={tickStartY}
+                  x2={tickEndX}
+                  y2={tickEndY}
+                />
+              );
+            });
+          }).flat()}
           
           {/* Radial axes */}
           {params.map((_, i) => {
@@ -653,37 +831,27 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
           const labelX = centerX + Math.cos(angle) * labelDistance;
           const labelY = centerY + Math.sin(angle) * labelDistance;
           
-          const ranges = {
-            Rs: '10Ω - 10kΩ',
-            Ra: '10Ω - 10kΩ', 
-            Rb: '10Ω - 10kΩ',
-            Ca: '0.1 - 50µF',
-            Cb: '0.1 - 50µF'
+          // Add units to parameter names
+          const paramWithUnits = {
+            Rs: 'Rs (Ω)',
+            Ra: 'Ra (Ω)', 
+            Rb: 'Rb (Ω)',
+            Ca: 'Ca (µF)',
+            Cb: 'Cb (µF)'
           };
           
           return (
             <g key={param}>
               <text
                 x={labelX}
-                y={labelY - 8}
+                y={labelY}
                 textAnchor="middle"
                 fill="#F3F4F6"
                 fontSize="14"
                 fontWeight="700"
                 fontFamily="Inter, sans-serif"
               >
-                {param}
-              </text>
-              <text
-                x={labelX}
-                y={labelY + 8}
-                textAnchor="middle"
-                fill="#D1D5DB"
-                fontSize="10"
-                fontWeight="500"
-                fontFamily="Inter, sans-serif"
-              >
-                {ranges[param as keyof typeof ranges]}
+                {paramWithUnits[param as keyof typeof paramWithUnits] || param}
               </text>
             </g>
           );
@@ -729,6 +897,67 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
             );
           })}
         </g>
+        
+        {/* Ground Truth Overlay */}
+        {showGroundTruth && groundTruthParams && (
+          <g>
+            {(() => {
+              const groundTruthPoints = params.map((param, i) => {
+                const angle = i * angleStep - Math.PI / 2;
+                const range = paramRanges[param as keyof typeof paramRanges];
+                
+                // Get ground truth value for this parameter
+                const groundTruthValue = groundTruthParams[param as keyof CircuitParameters];
+                
+                // Calculate logarithmic position
+                const logMin = Math.log10(range.min);
+                const logMax = Math.log10(range.max);
+                const logValue = Math.log10(groundTruthValue as number);
+                const normalizedValue = (logValue - logMin) / (logMax - logMin);
+                
+                // Clamp to valid range
+                const clampedValue = Math.max(0, Math.min(1, normalizedValue));
+                
+                // Calculate position
+                const radius = maxRadius * clampedValue;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                
+                return `${x},${y}`;
+              });
+              
+              return (
+                <>
+                  {/* Ground truth polygon */}
+                  <polygon
+                    points={groundTruthPoints.join(' ')}
+                    stroke="#FFFFFF"
+                    strokeWidth="1.5"
+                    strokeDasharray="6 3"
+                    fill="none"
+                    strokeOpacity="0.9"
+                  />
+                  
+                  {/* Ground truth indicator points */}
+                  {groundTruthPoints.map((point, i) => {
+                    const [x, y] = point.split(',').map(Number);
+                    return (
+                      <circle
+                        key={`ground-truth-${i}`}
+                        cx={x}
+                        cy={y}
+                        r="6"
+                        fill="#FFFFFF"
+                        stroke="#000000"
+                        strokeWidth="2"
+                      />
+                    );
+                  })}
+                </>
+              );
+            })()}
+          </g>
+        )}
       </svg>
     );
   };
@@ -784,12 +1013,17 @@ export const SpiderPlot: React.FC<SpiderPlotProps> = ({
   );
 };
 
-// Helper function for opacity calculation
-function calculateLogOpacity(resnorm: number): number {
-  if (resnorm <= 0) return 0.5;
-  
-  // Simple logarithmic mapping
-  const logResnorm = Math.log10(resnorm);
-  const normalized = Math.max(0, Math.min(1, (logResnorm + 5) / 10));
-  return Math.pow(1 - normalized, 0.5);
-}
+// Memoized component with deep comparison for performance
+export const SpiderPlot = React.memo(SpiderPlotComponent, (prevProps, nextProps) => {
+  // Custom comparison for optimal performance
+  return (
+    prevProps.meshItems === nextProps.meshItems &&
+    prevProps.opacityFactor === nextProps.opacityFactor &&
+    prevProps.maxPolygons === nextProps.maxPolygons &&
+    prevProps.visualizationMode === nextProps.visualizationMode &&
+    prevProps.gridSize === nextProps.gridSize &&
+    prevProps.includeLabels === nextProps.includeLabels &&
+    prevProps.backgroundColor === nextProps.backgroundColor &&
+    prevProps.meshItems.length === nextProps.meshItems.length
+  );
+});
