@@ -55,11 +55,13 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
 
     - name: Test image
       if: github.event_name != 'pull_request'
       run: |
-        docker run --rm --name test-spideyplot -d -p 3000:3000 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        sleep 30
+        docker run --rm --name test-spideyplot -d -p 3000:3000 --platform linux/amd64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        sleep 45
         curl -f http://localhost:3000/api/health || exit 1
         docker stop test-spideyplot
