@@ -7,12 +7,6 @@
     <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/intelligentWorkerManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/intelligentWorkerManager.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/orchestratorWorkerManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/orchestratorWorkerManager.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/sharedWorkerStrategy.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/sharedWorkerStrategy.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
