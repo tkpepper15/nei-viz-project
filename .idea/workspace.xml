@@ -6,7 +6,9 @@
   <component name="ChangeListManager">
     <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.github/workflows/docker-build.yml" beforeDir="false" afterPath="$PROJECT_DIR$/.github/workflows/docker-build.yml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Dockerfile" beforeDir="false" afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/next.config.ts" beforeDir="false" afterPath="$PROJECT_DIR$/next.config.ts" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
