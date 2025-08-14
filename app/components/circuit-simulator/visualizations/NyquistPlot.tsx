@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useMemo, useRef, useEffect } from 'react';
 import { ModelSnapshot, ResnormGroup, ImpedancePoint } from '../types';
 import { CircuitParameters } from '../types/parameters';
@@ -10,8 +12,9 @@ interface NyquistPlotProps {
   height?: number;
   showGroundTruth?: boolean;
   chromaEnabled?: boolean;
-  logScaleReal?: boolean;
-  logScaleImaginary?: boolean;
+  numPoints?: number;
+  hiddenGroups?: number[];
+  selectedOpacityGroups?: number[];
 }
 
 // Calculate impedance for given parameters
@@ -37,9 +40,20 @@ const calculateImpedance = (
     const realB = params.Rb / denominatorB;
     const imagB = -params.Rb * omega * tauB / denominatorB;
     
-    // Total impedance: Z_total = Rs + Za + Zb (series combination)
-    const realTotal = params.Rs + realA + realB;
-    const imagTotal = imagA + imagB;
+    // Za + Zb (series combination of membranes)
+    const realSeriesMembranes = realA + realB;
+    const imagSeriesMembranes = imagA + imagB;
+    
+    // Total impedance: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb) (parallel with shunt)
+    const numeratorReal = params.Rsh * realSeriesMembranes;
+    const numeratorImag = params.Rsh * imagSeriesMembranes;
+    
+    const denominatorReal = params.Rsh + realSeriesMembranes;
+    const denominatorImag = imagSeriesMembranes;
+    const denominatorMagSquared = denominatorReal * denominatorReal + denominatorImag * denominatorImag;
+    
+    const realTotal = (numeratorReal * denominatorReal + numeratorImag * denominatorImag) / denominatorMagSquared;
+    const imagTotal = (numeratorImag * denominatorReal - numeratorReal * denominatorImag) / denominatorMagSquared;
     
     const magnitude = Math.sqrt(realTotal * realTotal + imagTotal * imagTotal);
     const phase = Math.atan2(imagTotal, realTotal) * (180 / Math.PI);
@@ -56,67 +70,43 @@ const calculateImpedance = (
   return impedancePoints;
 };
 
-// Generate consistent coordinate plane grid values
-const generateGridValues = (min: number, max: number, isLogScale: boolean, targetCount: number = 10) => {
-  const gridValues = [];
+
+// Generate consistent logarithmic frequency range for proper Nyquist parametric representation
+const generateStandardFrequencies = (minFreq?: number, maxFreq?: number, numPoints?: number): number[] => {
+  const logMin = Math.log10(minFreq || 0.1);
+  const logMax = Math.log10(maxFreq || 10000);
+  const pointsToUse = numPoints || 200; // Use provided numPoints or default to 200
+  const logStep = (logMax - logMin) / (pointsToUse - 1);
   
-  if (isLogScale) {
-    const logMin = Math.log10(Math.max(1e-10, Math.abs(min)));
-    const logMax = Math.log10(Math.abs(max));
-    const logStep = (logMax - logMin) / targetCount;
-    
-    // Major grid lines
-    for (let i = 0; i <= targetCount; i++) {
-      const logValue = logMin + i * logStep;
-      const value = Math.pow(10, logValue);
-      gridValues.push(min < 0 ? -value : value);
-    }
-    
-    // Minor grid lines for better granularity
-    if ((logMax - logMin) > 2) {
-      for (let i = 0; i < targetCount; i++) {
-        const logValue = logMin + i * logStep + logStep / 2;
-        const value = Math.pow(10, logValue);
-        gridValues.push({ value: min < 0 ? -value : value, isMinor: true });
-      }
-    }
-  } else {
-    // Linear grid
-    const step = (max - min) / targetCount;
-    for (let i = 0; i <= targetCount; i++) {
-      const value = min + i * step;
-      gridValues.push(value);
-      
-      // Add minor grid lines
-      if (i < targetCount) {
-        gridValues.push({ value: min + i * step + step / 2, isMinor: true });
-      }
-    }
+  const freqs: number[] = [];
+  for (let i = 0; i < pointsToUse; i++) {
+    const logValue = logMin + i * logStep;
+    freqs.push(Math.pow(10, logValue));
   }
-  
-  return gridValues;
+  return freqs;
 };
 
-// Calculate median impedance for resnorm groups
-const calculateGroupMedian = (group: ResnormGroup): ImpedancePoint[] => {
+// Calculate median impedance for resnorm groups using consistent frequency spacing
+const calculateGroupMedian = (group: ResnormGroup, standardFreqs?: number[]): ImpedancePoint[] => {
   if (group.items.length === 0) {
     return [];
   }
   
-  // Get all unique frequencies from the group models
-  const frequencies = group.items[0]?.data?.map(point => point.frequency) || [];
+  // Use consistent logarithmic frequency spacing
+  const frequencies = standardFreqs || generateStandardFrequencies();
   const median: ImpedancePoint[] = [];
   
   for (const freq of frequencies) {
-    // Collect all real and imaginary values at this frequency
+    // Recalculate impedance for each model at this exact frequency for consistency
     const realValues: number[] = [];
     const imagValues: number[] = [];
     
     for (const model of group.items) {
-      const point = model.data?.find(p => Math.abs(p.frequency - freq) < freq * 0.01);
-      if (point) {
-        realValues.push(point.real);
-        imagValues.push(point.imaginary);
+      // Directly calculate impedance for this frequency using model parameters
+      if (model.parameters) {
+        const impedancePoint = calculateImpedanceAtFrequency(model.parameters, freq);
+        realValues.push(impedancePoint.real);
+        imagValues.push(impedancePoint.imaginary);
       }
     }
     
@@ -140,6 +130,50 @@ const calculateGroupMedian = (group: ResnormGroup): ImpedancePoint[] => {
   return median;
 };
 
+// Calculate impedance at a single frequency for consistent spacing
+const calculateImpedanceAtFrequency = (params: CircuitParameters, freq: number): ImpedancePoint => {
+  const omega = 2 * Math.PI * freq;
+  
+  // Calculate individual membrane impedances: Z = R/(1 + jωRC)
+  // Za (apical membrane)
+  const tauA = params.Ra * params.Ca;
+  const denominatorA = 1 + Math.pow(omega * tauA, 2);
+  const realA = params.Ra / denominatorA;
+  const imagA = -params.Ra * omega * tauA / denominatorA;
+  
+  // Zb (basal membrane)  
+  const tauB = params.Rb * params.Cb;
+  const denominatorB = 1 + Math.pow(omega * tauB, 2);
+  const realB = params.Rb / denominatorB;
+  const imagB = -params.Rb * omega * tauB / denominatorB;
+  
+  // Za + Zb (series combination of membranes)
+  const realSeriesMembranes = realA + realB;
+  const imagSeriesMembranes = imagA + imagB;
+  
+  // Total impedance: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb) (parallel with shunt)
+  const numeratorReal = params.Rsh * realSeriesMembranes;
+  const numeratorImag = params.Rsh * imagSeriesMembranes;
+  
+  const denominatorReal = params.Rsh + realSeriesMembranes;
+  const denominatorImag = imagSeriesMembranes;
+  const denominatorMagSquared = denominatorReal * denominatorReal + denominatorImag * denominatorImag;
+  
+  const realTotal = (numeratorReal * denominatorReal + numeratorImag * denominatorImag) / denominatorMagSquared;
+  const imagTotal = (numeratorImag * denominatorReal - numeratorReal * denominatorImag) / denominatorMagSquared;
+  
+  const magnitude = Math.sqrt(realTotal * realTotal + imagTotal * imagTotal);
+  const phase = Math.atan2(imagTotal, realTotal) * (180 / Math.PI);
+  
+  return {
+    frequency: freq,
+    real: realTotal,
+    imaginary: imagTotal,
+    magnitude,
+    phase
+  };
+};
+
 export const NyquistPlot: React.FC<NyquistPlotProps> = ({
   groundTruthParams,
   resnormGroups,
@@ -148,41 +182,35 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
   height = 450,
   showGroundTruth = true,
   chromaEnabled = true,
-  logScaleReal = false,
-  logScaleImaginary = false,
+  numPoints = 200,
+  hiddenGroups = [],
+  selectedOpacityGroups = [0]
+  // Equal step size enforced - no logarithmic scaling options
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // Generate frequency range for ground truth calculation
+  // Filter groups using both selectedOpacityGroups and hiddenGroups - same logic as spider plots
+  const visibleResnormGroups = useMemo(() => {
+    // If no groups are selected for opacity, show nothing
+    if (selectedOpacityGroups.length === 0) {
+      return [];
+    }
+    
+    // Apply both selectedOpacityGroups (performance tiles) and hiddenGroups (layer control) filtering
+    return resnormGroups.filter((_, index) => 
+      selectedOpacityGroups.includes(index) && !hiddenGroups.includes(index)
+    );
+  }, [resnormGroups, selectedOpacityGroups, hiddenGroups]);
+  
+  // Generate consistent frequency range for proper parametric representation
   const frequencies = useMemo(() => {
     if (!groundTruthParams?.frequency_range) {
-      // Default frequency range: 0.1 Hz to 10 kHz, 100 points for smooth curves
-      const logMin = Math.log10(0.1);
-      const logMax = Math.log10(10000);
-      const numPoints = 100;
-      const logStep = (logMax - logMin) / (numPoints - 1);
-      
-      const freqs: number[] = [];
-      for (let i = 0; i < numPoints; i++) {
-        const logValue = logMin + i * logStep;
-        freqs.push(Math.pow(10, logValue));
-      }
-      return freqs;
+      return generateStandardFrequencies(100, 1000000, numPoints); // Default: 0.1 kHz to 1000 kHz (100 Hz to 1 MHz)
     }
     
     const [minFreq, maxFreq] = groundTruthParams.frequency_range;
-    const logMin = Math.log10(minFreq);
-    const logMax = Math.log10(maxFreq);
-    const numPoints = 100;
-    const logStep = (logMax - logMin) / (numPoints - 1);
-    
-    const freqs: number[] = [];
-    for (let i = 0; i < numPoints; i++) {
-      const logValue = logMin + i * logStep;
-      freqs.push(Math.pow(10, logValue));
-    }
-    return freqs;
-  }, [groundTruthParams]);
+    return generateStandardFrequencies(minFreq, maxFreq, numPoints);
+  }, [groundTruthParams, numPoints]);
   
   // Calculate ground truth impedance
   const groundTruthImpedance = useMemo(() => {
@@ -190,13 +218,13 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     return calculateImpedance(groundTruthParams, frequencies);
   }, [groundTruthParams, frequencies, showGroundTruth]);
   
-  // Calculate group medians
+  // Calculate group medians with consistent frequency spacing (only for visible groups)
   const groupMedians = useMemo(() => {
-    return resnormGroups.map(group => ({
+    return visibleResnormGroups.map(group => ({
       group,
-      median: calculateGroupMedian(group)
+      median: calculateGroupMedian(group, frequencies)
     }));
-  }, [resnormGroups]);
+  }, [visibleResnormGroups, frequencies]);
   
   // Find plot bounds with better scaling logic
   const plotBounds = useMemo(() => {
@@ -234,78 +262,28 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     // Ensure we show negative imaginary impedance (classic Nyquist plot style)
     if (maxImag > 0) maxImag = 0;
     
-    // Smart logarithmic scale bounds calculation
-    if (logScaleReal) {
-      // Enhanced log scale for real axis with better distribution
-      const positiveMinReal = Math.max(0.01, minReal); // Allow smaller minimum for better range
-      const logMin = Math.log10(positiveMinReal);
-      const logMax = Math.log10(maxReal);
-      const logRange = logMax - logMin;
-      
-      // Intelligent padding based on data distribution
-      let logPadding;
-      if (logRange < 1) {
-        // Narrow range: use larger padding for better visibility
-        logPadding = 0.3;
-      } else if (logRange < 3) {
-        // Medium range: moderate padding
-        logPadding = 0.2;
-      } else {
-        // Wide range: smaller padding to preserve detail
-        logPadding = 0.1;
-      }
-      
-      // Apply smart bounds with decimal-friendly limits
-      const newLogMin = logMin - logPadding;
-      const newLogMax = logMax + logPadding;
-      
-      // Round to nice log boundaries (powers of 10 fractions)
-      minReal = Math.pow(10, Math.floor(newLogMin * 2) / 2); // Round to 0.5 log units
-      maxReal = Math.pow(10, Math.ceil(newLogMax * 2) / 2);
-    } else {
-      // Linear scale padding
-      const realRange = maxReal - minReal;
-      const realPadding = realRange * 0.1;
-      minReal = Math.max(0, minReal - realPadding);
-      maxReal = maxReal + realPadding;
+    // Force equal step sizes for proper data interpretation
+    const realRange = maxReal - minReal;
+    const imagRange = maxImag - minImag;
+    const maxRange = Math.max(realRange, Math.abs(imagRange));
+    
+    // Expand smaller axis to match larger axis range (crop if needed)
+    if (realRange < maxRange) {
+      const realCenter = (minReal + maxReal) / 2;
+      minReal = realCenter - maxRange / 2;
+      maxReal = realCenter + maxRange / 2;
+      minReal = Math.max(0, minReal); // Keep real axis non-negative
     }
     
-    if (logScaleImaginary) {
-      // Enhanced log scale for imaginary axis (negative values)
-      const absMinImag = Math.abs(maxImag); // Remember: maxImag is closest to 0 (least negative)
-      const absMaxImag = Math.abs(minImag); // minImag is most negative
-      const positiveAbsMinImag = Math.max(0.01, absMinImag);
-      
-      const logMin = Math.log10(positiveAbsMinImag);
-      const logMax = Math.log10(absMaxImag);
-      const logRange = logMax - logMin;
-      
-      // Intelligent padding for imaginary axis
-      let logPadding;
-      if (logRange < 1) {
-        logPadding = 0.3;
-      } else if (logRange < 3) {
-        logPadding = 0.2;
-      } else {
-        logPadding = 0.1;
-      }
-      
-      const newLogMin = logMin - logPadding;
-      const newLogMax = logMax + logPadding;
-      
-      // Round to nice log boundaries and convert back to negative
-      const newAbsMinImag = Math.pow(10, Math.floor(newLogMin * 2) / 2);
-      const newAbsMaxImag = Math.pow(10, Math.ceil(newLogMax * 2) / 2);
-      
-      minImag = -newAbsMaxImag;
-      maxImag = Math.min(0, -newAbsMinImag);
-    } else {
-      // Linear scale padding
-      const imagRange = maxImag - minImag;
-      const imagPadding = imagRange * 0.1;
-      minImag = minImag - imagPadding;
-      maxImag = Math.min(0, maxImag + imagPadding);
+    if (Math.abs(imagRange) < maxRange) {
+      const imagCenter = (minImag + maxImag) / 2;
+      minImag = imagCenter - maxRange / 2;
+      maxImag = imagCenter + maxRange / 2;
+      maxImag = Math.min(0, maxImag); // Keep imaginary axis non-positive
     }
+    
+    // No additional scaling - equal step sizes enforced above
+    // Remove all logarithmic scaling features as requested
     
     return {
       minReal,
@@ -313,7 +291,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
       minImag,
       maxImag,
     };
-  }, [groundTruthImpedance, groupMedians, logScaleReal, logScaleImaginary]);
+  }, [groundTruthImpedance, groupMedians]); // Removed logScale dependencies
   
   // Plotting area dimensions with better spacing
   const plotMargin = useMemo(() => ({ top: 50, right: 50, bottom: 70, left: 80 }), []);
@@ -331,40 +309,11 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     // Enhanced coordinate transformation functions with smart scaling
     const toCanvasX = (real: number) => {
       const { minReal, maxReal } = plotBounds;
-      if (logScaleReal) {
-        // Clamp to bounds to prevent off-grid values
-        const clampedReal = Math.max(minReal * 0.1, Math.min(maxReal * 10, real));
-        const logValue = Math.log10(Math.max(1e-10, clampedReal));
-        const logMin = Math.log10(minReal);
-        const logMax = Math.log10(maxReal);
-        const normalizedPosition = (logValue - logMin) / (logMax - logMin);
-        
-        // Apply slight sigmoid transformation for better distribution at extremes
-        const enhancedPosition = 0.5 + 0.45 * Math.tanh(2 * (normalizedPosition - 0.5));
-        return plotMargin.left + enhancedPosition * plotWidth;
-      }
       return plotMargin.left + ((real - minReal) / (maxReal - minReal)) * plotWidth;
     };
     
     const toCanvasY = (imag: number) => {
       const { minImag, maxImag } = plotBounds;
-      if (logScaleImaginary) {
-        // Handle negative imaginary values with smart clamping
-        const absImag = Math.abs(imag);
-        const absMinImag = Math.abs(maxImag);
-        const absMaxImag = Math.abs(minImag);
-        
-        // Clamp to bounds
-        const clampedAbsImag = Math.max(absMinImag * 0.1, Math.min(absMaxImag * 10, absImag));
-        const logValue = Math.log10(Math.max(1e-10, clampedAbsImag));
-        const logMin = Math.log10(Math.max(1e-10, absMinImag));
-        const logMax = Math.log10(absMaxImag);
-        const normalizedPosition = (logValue - logMin) / (logMax - logMin);
-        
-        // Apply sigmoid transformation for better distribution
-        const enhancedPosition = 0.5 + 0.45 * Math.tanh(2 * (normalizedPosition - 0.5));
-        return plotMargin.top + enhancedPosition * plotHeight;
-      }
       return plotMargin.top + (1 - (imag - minImag) / (maxImag - minImag)) * plotHeight;
     };
     
@@ -384,14 +333,37 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     // Vertical grid lines
     const { minReal, maxReal, minImag, maxImag } = plotBounds;
     
-    // Generate consistent coordinate plane grid
-    const realGridValues = generateGridValues(minReal, maxReal, logScaleReal, 10);
-    const imagGridValues = generateGridValues(minImag, maxImag, logScaleImaginary, 10);
+    // Generate orthogonal coordinate plane grid with identical step sizes
+    const realRange = maxReal - minReal;
+    const imagRange = maxImag - minImag;
+    const maxRange = Math.max(realRange, Math.abs(imagRange));
     
-    // Draw vertical grid lines (real axis) with consistent coordinate plane styling
-    realGridValues.forEach(gridItem => {
-      const real = typeof gridItem === 'number' ? gridItem : gridItem.value;
-      const isMinor = typeof gridItem === 'object' && gridItem.isMinor;
+    // Calculate unified step size for both axes to ensure orthogonal grid
+    const targetSteps = 10;
+    const unifiedStepSize = maxRange / targetSteps;
+    
+    // Generate grid values with identical step sizes
+    const realGridValues = [];
+    const imagGridValues = [];
+    
+    // Real axis grid with unified step size
+    const realStart = Math.floor(minReal / unifiedStepSize) * unifiedStepSize;
+    for (let step = realStart; step <= maxReal + unifiedStepSize; step += unifiedStepSize) {
+      if (step >= minReal && step <= maxReal) {
+        realGridValues.push(step);
+      }
+    }
+    
+    // Imaginary axis grid with identical step size
+    const imagStart = Math.floor(minImag / unifiedStepSize) * unifiedStepSize;
+    for (let step = imagStart; step <= maxImag + unifiedStepSize; step += unifiedStepSize) {
+      if (step >= minImag && step <= maxImag) {
+        imagGridValues.push(step);
+      }
+    }
+    
+    // Draw vertical grid lines (real axis) with unified step size
+    realGridValues.forEach(real => {
       const x = toCanvasX(real);
       
       if (x >= plotMargin.left && x <= plotMargin.left + plotWidth) {
@@ -399,19 +371,15 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         ctx.moveTo(x, plotMargin.top);
         ctx.lineTo(x, plotMargin.top + plotHeight);
         
-        // Consistent coordinate plane styling
-        ctx.strokeStyle = isMinor ? '#2D3748' : '#4A5568'; // Minor: darker, Major: lighter
-        ctx.lineWidth = isMinor ? 0.5 : 1;
-        ctx.setLineDash(isMinor ? [2, 2] : []); // Dashed for minor lines
+        // Simplified grid styling - all major lines
+        ctx.strokeStyle = '#4A5568';
+        ctx.lineWidth = 1;
         ctx.stroke();
-        ctx.setLineDash([]); // Reset dash
       }
     });
     
-    // Draw horizontal grid lines (imaginary axis) with matching coordinate plane styling
-    imagGridValues.forEach(gridItem => {
-      const imag = typeof gridItem === 'number' ? gridItem : gridItem.value;
-      const isMinor = typeof gridItem === 'object' && gridItem.isMinor;
+    // Draw horizontal grid lines (imaginary axis) with unified step size
+    imagGridValues.forEach(imag => {
       const y = toCanvasY(imag);
       
       if (y >= plotMargin.top && y <= plotMargin.top + plotHeight) {
@@ -420,11 +388,9 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         ctx.lineTo(plotMargin.left + plotWidth, y);
         
         // Match vertical grid line styling exactly
-        ctx.strokeStyle = isMinor ? '#2D3748' : '#4A5568';
-        ctx.lineWidth = isMinor ? 0.5 : 1;
-        ctx.setLineDash(isMinor ? [2, 2] : []);
+        ctx.strokeStyle = '#4A5568';
+        ctx.lineWidth = 1;
         ctx.stroke();
-        ctx.setLineDash([]);
       }
     });
     
@@ -486,13 +452,18 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
     
-    // Generate coordinate plane axis labels (major grid lines only)
-    const realLabelValues = realGridValues
-      .filter(item => typeof item === 'number') // Only major grid lines
-      .filter((_, index) => index % 2 === 0); // Every other major line for readability
+    // Create consistent axis labels using unified step size
+    const formatValue = (value: number) => {
+      const absValue = Math.abs(value);
+      if (absValue >= 1000) {
+        const kValue = value / 1000;
+        return kValue.toFixed(kValue % 1 === 0 ? 0 : 1) + 'k';
+      }
+      return value.toFixed(value % 1 === 0 ? 0 : 1);
+    };
     
-    // Draw X-axis labels with consistent formatting
-    realLabelValues.forEach(real => {
+    // Draw X-axis labels with unified formatting
+    realGridValues.forEach(real => {
       const x = toCanvasX(real);
       if (x >= plotMargin.left - 20 && x <= plotMargin.left + plotWidth + 20) {
         // Tick mark
@@ -503,37 +474,17 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         ctx.lineTo(x, plotMargin.top + plotHeight + 8);
         ctx.stroke();
         
-        // Consistent label formatting
-        let label;
-        if (logScaleReal) {
-          if (real >= 1000000) {
-            label = (real / 1000000).toFixed(real >= 10000000 ? 0 : 1) + 'M';
-          } else if (real >= 1000) {
-            label = (real / 1000).toFixed(real >= 10000 ? 0 : 1) + 'k';
-          } else if (real >= 1) {
-            label = real.toFixed(real >= 10 ? 0 : 1);
-          } else if (real >= 0.001) {
-            label = (real * 1000).toFixed(1) + 'm';
-          } else {
-            label = real.toExponential(0);
-          }
-        } else {
-          label = real >= 1000 ? (real / 1000).toFixed(1) + 'k' : real.toFixed(0);
-        }
+        // Unified label formatting
+        const label = formatValue(real);
         
         ctx.fillStyle = '#e5e7eb';
         ctx.fillText(label, x, plotMargin.top + plotHeight + 25);
       }
     });
     
-    // Generate Y-axis labels matching X-axis density
+    // Draw Y-axis labels with matching unified formatting
     ctx.textAlign = 'right';
-    const imagLabelValues = imagGridValues
-      .filter(item => typeof item === 'number') // Only major grid lines
-      .filter((_, index) => index % 2 === 0); // Every other major line for readability
-    
-    // Draw Y-axis labels with consistent formatting
-    imagLabelValues.forEach(imag => {
+    imagGridValues.forEach(imag => {
       const y = toCanvasY(imag);
       if (y >= plotMargin.top - 10 && y <= plotMargin.top + plotHeight + 10) {
         // Tick mark
@@ -544,24 +495,8 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         ctx.lineTo(plotMargin.left, y);
         ctx.stroke();
         
-        // Consistent label formatting (matching X-axis style)
-        const absImag = Math.abs(imag);
-        let label;
-        if (logScaleImaginary) {
-          if (absImag >= 1000000) {
-            label = '-' + (absImag / 1000000).toFixed(absImag >= 10000000 ? 0 : 1) + 'M';
-          } else if (absImag >= 1000) {
-            label = '-' + (absImag / 1000).toFixed(absImag >= 10000 ? 0 : 1) + 'k';
-          } else if (absImag >= 1) {
-            label = imag.toFixed(absImag >= 10 ? 0 : 1);
-          } else if (absImag >= 0.001) {
-            label = '-' + (absImag * 1000).toFixed(1) + 'm';
-          } else {
-            label = imag.toExponential(0);
-          }
-        } else {
-          label = absImag >= 1000 ? '-' + (absImag / 1000).toFixed(1) + 'k' : imag.toFixed(0);
-        }
+        // Unified label formatting (same as X-axis)
+        const label = formatValue(imag);
         
         ctx.fillStyle = '#e5e7eb';
         ctx.fillText(label, plotMargin.left - 12, y + 5);
@@ -587,7 +522,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     ctx.font = 'bold 18px Arial';
     ctx.fillText('Nyquist Plot', width / 2, 30);
     
-  }, [width, height, groundTruthImpedance, groupMedians, plotBounds, showGroundTruth, chromaEnabled, plotWidth, plotHeight, plotMargin, logScaleReal, logScaleImaginary]);
+  }, [width, height, groundTruthImpedance, groupMedians, plotBounds, showGroundTruth, chromaEnabled, plotWidth, plotHeight, plotMargin]);
   
   return (
     <div className="bg-neutral-800 rounded border border-neutral-600 p-4">
@@ -607,7 +542,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
           </div>
         )}
         
-        {chromaEnabled && resnormGroups.map((group, index) => (
+        {chromaEnabled && visibleResnormGroups.map((group, index) => (
           <div key={index} className="flex items-center gap-2">
             <div 
               className="w-3 h-3 rounded-full"
@@ -618,9 +553,12 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         ))}
       </div>
       
-      {resnormGroups.length === 0 && !showGroundTruth && (
+      {visibleResnormGroups.length === 0 && !showGroundTruth && (
         <div className="mt-4 text-center text-neutral-400 text-sm">
-          No data available. Run a computation to see impedance analysis.
+          {resnormGroups.length === 0 
+            ? "No data available. Run a computation to see impedance analysis."
+            : "No groups selected. Select performance groups or unhide layers to see impedance analysis."
+          }
         </div>
       )}
     </div>

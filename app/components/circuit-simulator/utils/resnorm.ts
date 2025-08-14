@@ -37,19 +37,18 @@ export function createComplex(real: number, imag: number): Complex {
 }
 
 /**
- * Calculate impedance at a given frequency for the Randles circuit
+ * Calculate impedance at a given frequency
  * 
- * The Randles circuit consists of:
- * - Rs (solution resistance)
- * - Ra||Ca (apical membrane)
- * - Rb||Cb (basal membrane)
+ * Z_total = Rsh || (Za + Zb) where:
+ * - Za = Ra/(1+jωRaCa) 
+ * - Zb = Rb/(1+jωRbCb)
  * 
  * @param params Circuit parameters
  * @param frequency Frequency in Hz
  * @returns Complex impedance with real and imaginary parts
  */
 export const calculateImpedance = (params: CircuitParameters, frequency: number): Impedance => {
-  const { Rs, Ra, Ca, Rb, Cb } = params;
+  const { Rsh, Ra, Ca, Rb, Cb } = params;
   const omega = 2 * Math.PI * frequency;
   
   // Calculate impedance of apical membrane (Ra || Ca)
@@ -62,9 +61,24 @@ export const calculateImpedance = (params: CircuitParameters, frequency: number)
   const Zb_real = Rb / (1 + Math.pow(omega * Rb * Cb, 2));
   const Zb_imag = -omega * Rb * Rb * Cb / (1 + Math.pow(omega * Rb * Cb, 2));
   
-  // Total impedance is Rs + Za + Zb
-  const real = Rs + Za_real + Zb_real;
-  const imaginary = Za_imag + Zb_imag;
+  // Calculate sum of membrane impedances (Za + Zb)
+  const Zab_real = Za_real + Zb_real;
+  const Zab_imag = Za_imag + Zb_imag;
+  
+  // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+  // Numerator: Rsh * (Za + Zb)
+  const num_real = Rsh * Zab_real;
+  const num_imag = Rsh * Zab_imag;
+  
+  // Denominator: Rsh + Za + Zb
+  const denom_real = Rsh + Zab_real;
+  const denom_imag = Zab_imag;
+  
+  // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+  const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+  
+  const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+  const imaginary = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
   
   return { real, imaginary };
 };
@@ -115,13 +129,12 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
 /**
  * Calculate residual norm (resnorm) between reference and test data.
  * Uses the simplified formula: (1/n) * sqrt(sum(ri^2))
- * With optional range amplification and frequency weighting.
+ * With optional range amplification.
  * 
  * @param testData Array of impedance points to compare against reference
  * @param referenceData Array of reference impedance points
  * @param logFunction Optional logging function for debugging
  * @param useRangeAmplification Optional toggle for range amplification
- * @param useFrequencyWeighting Optional toggle for frequency weighting
  * @returns The calculated resnorm value
  */
 export const calculateResnorm = (
@@ -129,8 +142,7 @@ export const calculateResnorm = (
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
   frequency?: number,
-  useRangeAmplification: boolean = false,
-  useFrequencyWeighting: boolean = false
+  useRangeAmplification: boolean = false
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
@@ -155,7 +167,7 @@ export const calculateResnorm = (
     };
     
     // Convert to arrays and call the main implementation
-    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification, useFrequencyWeighting);
+    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification);
   }
   
   // Handle arrays case (main implementation)
@@ -174,7 +186,6 @@ export const calculateResnorm = (
     frequency: number;
     test: Impedance;
     reference: Impedance;
-    weight: number;
   }> = [];
 
   // Process each test data point
@@ -184,19 +195,10 @@ export const calculateResnorm = (
       Math.abs(p.frequency - testPoint.frequency) / testPoint.frequency < 0.01);
     
     if (refPoint) {
-      // Calculate weight based on frequency weighting toggle
-      let weight = 1.0; // Default: no weighting
-      
-      if (useFrequencyWeighting) {
-        // Apply frequency-based weighting: wi = 1 / max(1, log10(ωi))
-        weight = 1 / Math.max(1, Math.log10(testPoint.frequency));
-      }
-      
       matchedData.push({
         frequency: testPoint.frequency,
         test: { real: testPoint.real, imaginary: testPoint.imaginary },
-        reference: { real: refPoint.real, imaginary: refPoint.imaginary },
-        weight
+        reference: { real: refPoint.real, imaginary: refPoint.imaginary }
       });
     }
   }
@@ -208,7 +210,7 @@ export const calculateResnorm = (
 
   if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
-  // Calculate sum of squared residuals using new formula: (1/n) * sqrt(sum(ri^2))
+  // Calculate sum of squared residuals using formula: (1/n) * sqrt(sum(ri^2))
   let sumSquaredResiduals = 0;
   const n = matchedData.length;
 
@@ -220,13 +222,10 @@ export const calculateResnorm = (
     // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    // Apply frequency weighting if enabled
-    const weightedSquaredResidual = useFrequencyWeighting ? point.weight * squaredResidual : squaredResidual;
-    
-    sumSquaredResiduals += weightedSquaredResidual;
+    sumSquaredResiduals += squaredResidual;
     
     if (logger) {
-      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}, Weight: ${point.weight.toFixed(2)}`);
+      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}`);
     }
   }
 
@@ -276,17 +275,17 @@ export function impedanceRatioImaginaryHighFreqPenalty(Ca: number, Cb: number, t
  * Calculate junction resistance ratio penalty
  * @param Ra Apical resistance
  * @param Rb Basal resistance
- * @param Rs Shunt resistance
+ * @param Rsh Shunt resistance
  * @param target_jrr Target junction resistance ratio
  * @param use_log10_ratio Whether to use log10 of ratio
  * @returns Penalty value
  */
-export function jrrPenalty(Ra: number, Rb: number, Rs: number, target_jrr: number, use_log10_ratio: boolean): number {
+export function jrrPenalty(Ra: number, Rb: number, Rsh: number, target_jrr: number, use_log10_ratio: boolean): number {
   if (use_log10_ratio) {
-    const dx = Math.log10((Ra + Rb) / Rs) - Math.log10(target_jrr);
+    const dx = Math.log10((Ra + Rb) / Rsh) - Math.log10(target_jrr);
     return dx * dx;
   } else {
-    const dx = (Ra + Rb) / Rs - target_jrr;
+    const dx = (Ra + Rb) / Rsh - target_jrr;
     return dx * dx;
   }
 }
@@ -411,8 +410,8 @@ export const groundTruthDataset: ImpedancePoint[] = [
  * Calculate TER (Transepithelial Resistance)
  */
 export const calculateTER = (params: CircuitParameters): number => {
-  const numerator = params.Rs * (params.Ra + params.Rb);
-  const denominator = params.Rs + params.Ra + params.Rb;
+  const numerator = params.Rsh * (params.Ra + params.Rb);
+  const denominator = params.Rsh + params.Ra + params.Rb;
   return numerator / denominator;
 };
 

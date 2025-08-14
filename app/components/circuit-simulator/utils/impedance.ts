@@ -32,8 +32,8 @@ export const calculateMembraneImpedance = (
 };
 
 /**
- * Calculate the equivalent impedance of the epithelial model
- * Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb) where Za(ω) = Ra/(1+jωRaCa) and Zb(ω) = Rb/(1+jωRbCb)
+ * Calculate the total impedance
+ * Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb) where Za(ω) = Ra/(1+jωRaCa) and Zb(ω) = Rb/(1+jωRbCb)
  */
 export const calculateEquivalentImpedance = (
     params: CircuitParameters,
@@ -68,16 +68,16 @@ export const calculateEquivalentImpedance = (
         imag: Za.imag + Zb.imag
     };
 
-    // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
-    // Numerator: Rs * (Za + Zb)
+    // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+    // Numerator: Rsh * (Za + Zb)
     const numerator = {
-        real: params.Rs * Zab.real,
-        imag: params.Rs * Zab.imag
+        real: params.Rsh * Zab.real,
+        imag: params.Rsh * Zab.imag
     };
     
-    // Denominator: Rs + Za + Zb
+    // Denominator: Rsh + Za + Zb
     const denominator = {
-        real: params.Rs + Zab.real,
+        real: params.Rsh + Zab.real,
         imag: Zab.imag
     };
     
@@ -113,11 +113,11 @@ export const calculateImpedanceSpectrum = (
 
 /**
  * Calculate TER (Transepithelial Resistance)
- * TER = Rs * (Ra + Rb) / (Rs + Ra + Rb)
+ * TER = Rsh * (Ra + Rb) / (Rsh + Ra + Rb)
  */
 export const calculateTER = (params: CircuitParameters): number => {
-    const numerator = params.Rs * (params.Ra + params.Rb);
-    const denominator = params.Rs + params.Ra + params.Rb;
+    const numerator = params.Rsh * (params.Ra + params.Rb);
+    const denominator = params.Rsh + params.Ra + params.Rb;
     return numerator / denominator;
 };
 
@@ -208,7 +208,7 @@ export const calculatePhysicalResnorm = (
     
     // Log detailed residuals if requested and parameters are close to reference
     if (logFunction && 
-        (Math.abs(testParams.Rs - referenceParams.Rs) < 0.01 * referenceParams.Rs ||
+        (Math.abs(testParams.Rsh - referenceParams.Rsh) < 0.01 * referenceParams.Rsh ||
          Math.abs(testParams.Ra - referenceParams.Ra) < 0.01 * referenceParams.Ra ||
          Math.abs(testParams.Ca - referenceParams.Ca) < 0.01 * referenceParams.Ca ||
          Math.abs(testParams.Rb - referenceParams.Rb) < 0.01 * referenceParams.Rb ||
@@ -220,7 +220,7 @@ export const calculatePhysicalResnorm = (
         const highIdx = residuals.length - 1;
         
         logFunction(`MATH DETAIL: Residual calculation for test point close to reference:`);
-        logFunction(`MATH DETAIL: Rs=${testParams.Rs.toFixed(2)}, Ra=${testParams.Ra.toFixed(0)}, Ca=${(testParams.Ca*1e6).toFixed(2)}μF, Rb=${testParams.Rb.toFixed(0)}, Cb=${(testParams.Cb*1e6).toFixed(2)}μF`);
+        logFunction(`MATH DETAIL: Rsh=${testParams.Rsh.toFixed(2)}, Ra=${testParams.Ra.toFixed(0)}, Ca=${(testParams.Ca*1e6).toFixed(2)}μF, Rb=${testParams.Rb.toFixed(0)}, Cb=${(testParams.Cb*1e6).toFixed(2)}μF`);
         logFunction(`MATH DETAIL: Low frequency (${residuals[lowIdx].freq.toFixed(2)}Hz): weight=${residuals[lowIdx].weight.toFixed(4)}, residual=${residuals[lowIdx].residual.toExponential(4)}`);
         logFunction(`MATH DETAIL: Mid frequency (${residuals[midIdx].freq.toFixed(2)}Hz): weight=${residuals[midIdx].weight.toFixed(4)}, residual=${residuals[midIdx].residual.toExponential(4)}`);
         logFunction(`MATH DETAIL: High frequency (${residuals[highIdx].freq.toFixed(2)}Hz): weight=${residuals[highIdx].weight.toFixed(4)}, residual=${residuals[highIdx].residual.toExponential(4)}`);

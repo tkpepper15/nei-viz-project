@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ModelSnapshot } from '../types';
-import { CircuitParameters } from '../types/parameters';
+import { CircuitParameters, PARAMETER_RANGES, DEFAULT_GRID_SIZE } from '../types/parameters';
 
 interface SpiderPlotProps {
   meshItems: ModelSnapshot[];
@@ -208,7 +208,7 @@ class OptimizedSpiderRenderer {
     // Increase radius for better space utilization - from 0.35 to 0.42
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
 
     this.ctx.strokeStyle = '#4B5563';
@@ -263,16 +263,16 @@ class OptimizedSpiderRenderer {
     // Use same increased radius for consistency
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
 
-    // Fixed parameter ranges exactly matching playground
+    // Centralized parameter ranges for consistency
     const paramRanges = {
-      Rs: { min: 10, max: 10000 },
-      Ra: { min: 10, max: 10000 },
-      Rb: { min: 10, max: 10000 },
-      Ca: { min: 0.1e-6, max: 50e-6 },
-      Cb: { min: 0.1e-6, max: 50e-6 }
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
     };
 
     // Add grid value labels on each axis
@@ -368,7 +368,7 @@ class OptimizedSpiderRenderer {
       
       // Add units to parameter names
       const paramWithUnits = {
-        Rs: 'Rs (Ω)',
+        Rsh: 'Rsh (Ω)',
         Ra: 'Ra (Ω)', 
         Rb: 'Rb (Ω)',
         Ca: 'Ca (µF)',
@@ -386,16 +386,16 @@ class OptimizedSpiderRenderer {
     const centerX = this.canvas.width / 2;
     const centerY = this.canvas.height / 2;
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
     const angleStep = (2 * Math.PI) / params.length;
 
-    // Fixed parameter ranges exactly matching playground
+    // Centralized parameter ranges for consistency
     const paramRanges = {
-      Rs: { min: 10, max: 10000 },
-      Ra: { min: 10, max: 10000 },
-      Rb: { min: 10, max: 10000 },
-      Ca: { min: 0.1e-6, max: 50e-6 },
-      Cb: { min: 0.1e-6, max: 50e-6 }
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
     };
 
     const groundTruthPath = new Path2D();
@@ -474,14 +474,42 @@ class OptimizedSpiderRenderer {
 
     // Cached parameter ranges for performance
     const paramRanges = {
-      Rs: { min: 10, max: 10000 },
-      Ra: { min: 10, max: 10000 },
-      Rb: { min: 10, max: 10000 },
-      Ca: { min: 0.1e-6, max: 50e-6 },
-      Cb: { min: 0.1e-6, max: 50e-6 }
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
     };
 
-    // Ultra-efficient grouping with minimal object creation
+    // Calculate consistent quartile-based colors (matching SpiderPlot3D)
+    const resnorms = models.map(m => m.resnorm || 0).filter(r => r > 0);
+    if (resnorms.length === 0) {
+      // Fallback to original color logic if no resnorms available
+      models.forEach(model => {
+        const points = this.calculatePolygonPoints(model, centerX, centerY, maxRadius, paramRanges);
+        if (points.length >= 3) {
+          this.ctx.strokeStyle = model.color || '#3B82F6';
+          this.ctx.globalAlpha = (model.opacity || 0.7) * (this.renderConfig.opacityFactor || 1);
+          this.ctx.beginPath();
+          this.ctx.moveTo(points[0].x, points[0].y);
+          for (let i = 1; i < points.length; i++) {
+            this.ctx.lineTo(points[i].x, points[i].y);
+          }
+          this.ctx.closePath();
+          this.ctx.stroke();
+        }
+      });
+      this.ctx.globalAlpha = 1;
+      return;
+    }
+
+    // Calculate quartile thresholds (same logic as SpiderPlot3D)
+    const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+    const q25 = sortedResnorms[Math.floor(sortedResnorms.length * 0.25)];
+    const q50 = sortedResnorms[Math.floor(sortedResnorms.length * 0.50)];
+    const q75 = sortedResnorms[Math.floor(sortedResnorms.length * 0.75)];
+
+    // Ultra-efficient grouping with consistent quartile colors
     const renderGroups = new Map<string, {
       path: Path2D,
       color: string,
@@ -491,7 +519,14 @@ class OptimizedSpiderRenderer {
     
     // Single pass through models for grouping and path creation
     models.forEach(model => {
-      const color = model.color || '#3B82F6';
+      const resnorm = model.resnorm || 0;
+      
+      // Determine color based on resnorm quartiles (consistent with SpiderPlot3D)
+      let color = '#ef4444'; // Red (worst quartile - highest resnorm)
+      if (resnorm <= q25) color = '#22c55e'; // Green (best quartile - lowest resnorm)
+      else if (resnorm <= q50) color = '#f59e0b'; // Yellow (second quartile)  
+      else if (resnorm <= q75) color = '#f97316'; // Orange (third quartile)
+      
       const opacity = Math.round((model.opacity || 0.7) * 10) / 10; // 0.1 steps for performance
       const groupKey = `${color}_${opacity}`;
       
@@ -554,7 +589,7 @@ class OptimizedSpiderRenderer {
   ) {
     if (!model.parameters) return [];
 
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const points = [];
     const gridSize = this.renderConfig.gridSize || 5;
 
@@ -609,7 +644,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
   opacityFactor,
   maxPolygons,
   visualizationMode = 'color',
-  gridSize = 5,
+  gridSize = DEFAULT_GRID_SIZE,
   includeLabels = true,
   backgroundColor = 'transparent',
   groundTruthParams,
@@ -631,7 +666,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
     // Filter out models without valid parameters early to avoid processing
     const validModels = meshItems.filter(model => 
       model.parameters && 
-      typeof model.parameters.Rs === 'number' &&
+      typeof model.parameters.Rsh === 'number' &&
       typeof model.parameters.Ra === 'number' &&
       typeof model.parameters.Rb === 'number' &&
       typeof model.parameters.Ca === 'number' &&
@@ -748,16 +783,16 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.min(width, height) * 0.42;
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rs (shunt), apical (Ra, Ca), basal (Rb, Cb)
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
     const angleStep = (2 * Math.PI) / params.length;
     
     // Fixed parameter ranges
     const paramRanges = {
-      Rs: { min: 10, max: 10000 },
-      Ra: { min: 10, max: 10000 },
-      Rb: { min: 10, max: 10000 },
-      Ca: { min: 0.1e-6, max: 50e-6 },
-      Cb: { min: 0.1e-6, max: 50e-6 }
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
     };
 
     return (
@@ -833,7 +868,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
           
           // Add units to parameter names
           const paramWithUnits = {
-            Rs: 'Rs (Ω)',
+            Rsh: 'Rsh (Ω)',
             Ra: 'Ra (Ω)', 
             Rb: 'Rb (Ω)',
             Ca: 'Ca (µF)',
@@ -859,43 +894,67 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
         
         {/* Model polygons */}
         <g fill="none" strokeWidth="1">
-          {visibleModels.slice(0, 1000).map((model, index) => { // Limit for SVG performance
-            if (!model.parameters) return null;
+          {(() => {
+            // Calculate consistent quartile-based colors for SVG rendering
+            const modelsToRender = visibleModels.slice(0, 1000); // Limit for SVG performance
+            const resnorms = modelsToRender.map(m => m.resnorm || 0).filter(r => r > 0);
             
-            const points = params.map((param, i) => {
-              const value = model.parameters[param as keyof typeof model.parameters];
-              if (typeof value !== 'number') return null;
-              
-              // Snap to grid levels
-              const range = paramRanges[param as keyof typeof paramRanges];
-              const logMin = Math.log10(range.min);
-              const logMax = Math.log10(range.max);
-              const logValue = Math.log10(Math.max(range.min, Math.min(range.max, value)));
-              
-              const normalizedPosition = (logValue - logMin) / (logMax - logMin);
-              const gridLevel = Math.round(normalizedPosition * gridSize);
-              const clampedGridLevel = Math.max(1, Math.min(gridSize, gridLevel));
-              
-              const radius = (maxRadius * clampedGridLevel) / gridSize;
-              const angle = i * angleStep - Math.PI / 2;
-              const x = centerX + Math.cos(angle) * radius;
-              const y = centerY + Math.sin(angle) * radius;
-              
-              return `${x},${y}`;
-            }).filter(Boolean);
+            // Calculate quartile thresholds (same logic as SpiderPlot3D)
+            const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+            const q25 = resnorms.length > 0 ? sortedResnorms[Math.floor(sortedResnorms.length * 0.25)] : 0;
+            const q50 = resnorms.length > 0 ? sortedResnorms[Math.floor(sortedResnorms.length * 0.50)] : 0;
+            const q75 = resnorms.length > 0 ? sortedResnorms[Math.floor(sortedResnorms.length * 0.75)] : 0;
             
-            if (points.length < 3) return null;
-            
-            return (
-              <polygon
-                key={`${model.id}-${index}`}
-                points={points.join(' ')}
-                stroke={model.color || '#3B82F6'}
-                strokeOpacity={model.opacity || 0.7}
-                fill="none"
-              />
-            );
-          })}
+            return modelsToRender.map((model, index) => {
+              if (!model.parameters) return null;
+              
+              const points = params.map((param, i) => {
+                const value = model.parameters[param as keyof typeof model.parameters];
+                if (typeof value !== 'number') return null;
+                
+                // Snap to grid levels
+                const range = paramRanges[param as keyof typeof paramRanges];
+                const logMin = Math.log10(range.min);
+                const logMax = Math.log10(range.max);
+                const logValue = Math.log10(Math.max(range.min, Math.min(range.max, value)));
+                
+                const normalizedPosition = (logValue - logMin) / (logMax - logMin);
+                const gridLevel = Math.round(normalizedPosition * gridSize);
+                const clampedGridLevel = Math.max(1, Math.min(gridSize, gridLevel));
+                
+                const radius = (maxRadius * clampedGridLevel) / gridSize;
+                const angle = i * angleStep - Math.PI / 2;
+                const x = centerX + Math.cos(angle) * radius;
+                const y = centerY + Math.sin(angle) * radius;
+                
+                return `${x},${y}`;
+              }).filter(Boolean);
+              
+              if (points.length < 3) return null;
+              
+              // Determine color based on resnorm quartiles (consistent with SpiderPlot3D)
+              const resnorm = model.resnorm || 0;
+              let color = '#ef4444'; // Red (worst quartile - highest resnorm)
+              if (resnorms.length > 0) {
+                if (resnorm <= q25) color = '#22c55e'; // Green (best quartile - lowest resnorm)
+                else if (resnorm <= q50) color = '#f59e0b'; // Yellow (second quartile)  
+                else if (resnorm <= q75) color = '#f97316'; // Orange (third quartile)
+              } else {
+                // Fallback to original color if no resnorms available
+                color = model.color || '#3B82F6';
+              }
+              
+              return (
+                <polygon
+                  key={`${model.id}-${index}`}
+                  points={points.join(' ')}
+                  stroke={color}
+                  strokeOpacity={model.opacity || 0.7}
+                  fill="none"
+                />
+              );
+            });
+          })()}
         </g>
         
         {/* Ground Truth Overlay */}

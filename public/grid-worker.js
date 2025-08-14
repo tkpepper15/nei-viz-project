@@ -22,7 +22,7 @@ const complex = {
 
 // Calculate impedance spectrum for a single parameter set using parallel configuration
 function calculateImpedanceSpectrum(params, freqs) {
-  const { Rs, Ra, Ca, Rb, Cb } = params;
+  const { Rsh, Ra, Ca, Rb, Cb } = params;
   
   return freqs.map(freq => {
     const omega = 2 * Math.PI * freq;
@@ -50,16 +50,16 @@ function calculateImpedanceSpectrum(params, freqs) {
     // Calculate sum of membrane impedances (Za + Zb)
     const Zab = complex.add(Za, Zb);
     
-    // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
-    // Numerator: Rs * (Za + Zb)
+    // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+    // Numerator: Rsh * (Za + Zb)
     const numerator = complex.multiply(
-      { real: Rs, imag: 0 },
+      { real: Rsh, imag: 0 },
       Zab
     );
     
-    // Denominator: Rs + Za + Zb
+    // Denominator: Rsh + Za + Zb
     const denominator = complex.add(
-      { real: Rs, imag: 0 },
+      { real: Rsh, imag: 0 },
       Zab
     );
     
@@ -80,8 +80,7 @@ function calculateImpedanceSpectrum(params, freqs) {
 }
 
 // Calculate resnorm between two spectra using formula: (1/n) * sqrt(sum(ri^2))
-// With frequency weighting: wi = 1 / max(1, log10(fi))
-function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting = true) {
+function calculateResnorm(referenceSpectrum, testSpectrum) {
   if (!referenceSpectrum.length || !testSpectrum.length) return Infinity;
   
   let sumSquaredResiduals = 0;
@@ -103,15 +102,7 @@ function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting
     // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    // Apply frequency weighting if enabled
-    let weightedSquaredResidual = squaredResidual;
-    if (useFrequencyWeighting) {
-      // Apply frequency-based weighting: wi = 1 / max(1, log10(fi))
-      const weight = 1 / Math.max(1, Math.log10(testPoint.freq));
-      weightedSquaredResidual = weight * squaredResidual;
-    }
-    
-    sumSquaredResiduals += weightedSquaredResidual;
+    sumSquaredResiduals += squaredResidual;
   }
   
   // Calculate final resnorm: (1/n) * sqrt(sum(ri^2))
@@ -172,7 +163,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
   // Ground truth parameters (reference values to ensure are included)
   // Use input parameters if provided, otherwise use defaults
   const groundTruthParams = inputGroundTruth || {
-    Rs: 24,        // Shunt resistance (Ω)
+    Rsh: 24,        // Shunt resistance (Ω)
     Ra: 500,       // Apical resistance (Ω) 
     Ca: 0.5e-6,    // Apical capacitance (F)
     Rb: 500,       // Basal resistance (Ω)
@@ -180,7 +171,8 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
   };
   
   // Generate parameter ranges with ground truth values included
-  const rsValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rs);
+  // Use consistent ranges: all resistance parameters use 10-10000 Ω
+  const rsValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rsh);
   const raValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Ra);
   const rbValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rb);
   const caValues = generateLogSpaceWithReference(0.1e-6, 50e-6, gridSize, groundTruthParams.Ca);
@@ -188,12 +180,12 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
   
   // Debug: Check if ground truth values are included
   const debugInfo = {
-    Rs_included: rsValues.includes(groundTruthParams.Rs),
+    Rsh_included: rsValues.includes(groundTruthParams.Rsh),
     Ra_included: raValues.includes(groundTruthParams.Ra),
     Rb_included: rbValues.includes(groundTruthParams.Rb),
     Ca_included: caValues.includes(groundTruthParams.Ca),
     Cb_included: cbValues.includes(groundTruthParams.Cb),
-    rs_closest: rsValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Rs) < Math.abs(prev - groundTruthParams.Rs) ? curr : prev),
+    rs_closest: rsValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Rsh) < Math.abs(prev - groundTruthParams.Rsh) ? curr : prev),
     ra_closest: raValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Ra) < Math.abs(prev - groundTruthParams.Ra) ? curr : prev),
     rb_closest: rbValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Rb) < Math.abs(prev - groundTruthParams.Rb) ? curr : prev),
     ca_closest: caValues.reduce((prev, curr) => Math.abs(curr - groundTruthParams.Ca) < Math.abs(prev - groundTruthParams.Ca) ? curr : prev),
@@ -217,7 +209,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
     const raIndex = temp % gridSize;
     const rsIndex = Math.floor(temp / gridSize);
     
-    const Rs = rsValues[rsIndex];
+    const Rsh = rsValues[rsIndex];
     const Ra = raValues[raIndex];
     const Ca = caValues[caIndex];
     const Rb = rbValues[rbIndex];
@@ -244,7 +236,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
     
     // Yield the point and progress info
     yield {
-      point: { Rs, Ra, Ca, Rb, Cb },
+      point: { Rsh, Ra, Ca, Rb, Cb },
       progress: {
         generated: generatedCount,
         processed: pointIndex + 1,
@@ -337,7 +329,7 @@ self.onmessage = async function(e) {
           for (const params of batch) {
             try {
               // Validate parameters before computation
-              if (!params || typeof params.Rs !== 'number' || 
+              if (!params || typeof params.Rsh !== 'number' || 
                   typeof params.Ra !== 'number' || typeof params.Ca !== 'number' ||
                   typeof params.Rb !== 'number' || typeof params.Cb !== 'number') {
                 continue; // Skip invalid parameters
@@ -346,8 +338,8 @@ self.onmessage = async function(e) {
               // Calculate spectrum
               const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
               
-              // Calculate resnorm directly with frequency weighting enabled
-              const resnorm = calculateResnorm(referenceSpectrum, spectrum, true);
+              // Calculate resnorm
+              const resnorm = calculateResnorm(referenceSpectrum, spectrum);
               
               // Skip infinite or NaN resnorms
               if (!isFinite(resnorm) || isNaN(resnorm)) {

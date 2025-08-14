@@ -7,6 +7,7 @@ interface ProfileCardProps {
   onDelete: () => void;
   onCompute: () => void;
   onEdit: () => void;
+  onEditParameters?: () => void;
   onCopyParams?: () => void;
 }
 
@@ -16,6 +17,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
   onDelete,
   onCompute,
   onEdit,
+  onEditParameters,
   onCopyParams
 }) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -114,6 +116,22 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
                   Compute
                 </button>
                 
+                {onEditParameters && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditParameters();
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
+                    </svg>
+                    Edit Parameters
+                  </button>
+                )}
+                
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -122,10 +140,10 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
                   }}
                   className="w-full text-left px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
                 >
-                  <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                   </svg>
-                  Edit
+                  Edit Name
                 </button>
                 
                 {onCopyParams && (
@@ -147,7 +165,7 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (window.confirm(`Delete profile ${profile.name}?`)) {
+                    if (typeof window !== 'undefined' && window.confirm(`Delete profile ${profile.name}?`)) {
                       onDelete();
                     }
                     setOpenMenuId(null);

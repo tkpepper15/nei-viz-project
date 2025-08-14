@@ -9,9 +9,11 @@ interface SavedProfilesProps {
   onSelectProfile: (profileId: string) => void;
   onDeleteProfile: (profileId: string) => void;
   onEditProfile: (profileId: string, name: string, description?: string) => void;
+  onEditParameters?: (profileId: string) => void;
   onComputeProfile: (profileId: string) => void;
   onCopyParams?: (profileId: string) => void;
   isCollapsed: boolean;
+  onRestart?: () => void;
 }
 
 export const SavedProfiles: React.FC<SavedProfilesProps> = ({
@@ -20,9 +22,11 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   onSelectProfile,
   onDeleteProfile,
   onEditProfile,
+  onEditParameters,
   onComputeProfile,
   onCopyParams,
-  isCollapsed
+  isCollapsed,
+  onRestart
 }) => {
   const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(null);
 
@@ -68,10 +72,25 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
     <div className="flex-1 flex flex-col min-h-0">
       {/* Sticky Header */}
       <div className="sticky top-0 z-10 bg-neutral-900 px-3 py-2 border-b border-neutral-700">
-        <h3 className="text-sm font-medium text-neutral-200">Saved Profiles</h3>
-        <p className="text-xs text-neutral-400">
-          {profiles.length} profile{profiles.length !== 1 ? 's' : ''}
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium text-neutral-200">Circuits</h3>
+            <p className="text-xs text-neutral-400">
+              {profiles.length} circuit{profiles.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {onRestart && (
+            <button
+              onClick={onRestart}
+              className="w-8 h-8 flex items-center justify-center rounded-md bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white transition-colors"
+              title="New Circuit Configuration"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
       
       {/* Scrollable Profiles List */}
@@ -95,6 +114,7 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
                 isSelected={selectedProfile === profile.id}
                 onDelete={() => onDeleteProfile(profile.id)}
                 onEdit={() => setEditingProfile(profile)}
+                onEditParameters={onEditParameters ? () => onEditParameters(profile.id) : undefined}
                 onCompute={() => onComputeProfile(profile.id)}
                 onCopyParams={onCopyParams ? () => onCopyParams(profile.id) : undefined}
               />

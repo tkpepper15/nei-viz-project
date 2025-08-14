@@ -6,7 +6,7 @@ export interface ParameterRange {
 }
 
 export interface ParameterSpace {
-    Rs: ParameterRange;
+    Rsh: ParameterRange;
     Ra: ParameterRange;
     Ca: ParameterRange;
     Rb: ParameterRange;
@@ -41,7 +41,7 @@ export const generateParameterMesh = (
     resolution: number
 ): CircuitParameters[] => {
     // Generate parameter values
-    const RsValues = generateLogSpace(space.Rs.min, space.Rs.max, resolution);
+    const RshValues = generateLogSpace(space.Rsh.min, space.Rsh.max, resolution);
     const RaValues = generateLogSpace(space.Ra.min, space.Ra.max, resolution);
     const CaValues = generateLogSpace(space.Ca.min, space.Ca.max, resolution);
     const RbValues = generateLogSpace(space.Rb.min, space.Rb.max, resolution);
@@ -49,13 +49,13 @@ export const generateParameterMesh = (
 
     // Generate all combinations
     const combinations: CircuitParameters[] = [];
-    for (const Rs of RsValues) {
+    for (const Rsh of RshValues) {
         for (const Ra of RaValues) {
             for (const Ca of CaValues) {
                 for (const Rb of RbValues) {
                     for (const Cb of CbValues) {
                         combinations.push({
-                            Rs,
+                            Rsh,
                             Ra,
                             Ca,
                             Rb,

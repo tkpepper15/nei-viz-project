@@ -98,7 +98,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     params: CircuitParameters, 
     frequencies: number[]
   ): Array<{ freq: number; real: number; imag: number; mag: number; phase: number }> => {
-    const { Rs, Ra, Ca, Rb, Cb } = params;
+    const { Rsh, Ra, Ca, Rb, Cb } = params;
     
     return frequencies.map(freq => {
       const omega = 2 * Math.PI * freq;
@@ -113,8 +113,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       const zb_real = Rb / zb_denom;
       const zb_imag = -omega * Rb * Rb * Cb / zb_denom;
       
-      // Z_eq = Rs + Za + Zb
-      const real = Rs + za_real + zb_real;
+      // Z_eq = Rsh + Za + Zb
+      const real = Rsh + za_real + zb_real;
       const imag = za_imag + zb_imag;
       
       const magnitude = Math.sqrt(real * real + imag * imag);
@@ -387,7 +387,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       const finalResults: BackendMeshPoint[] = [
         ...topResults.map(r => ({
           parameters: {
-            Rs: r.parameters.Rs,
+            Rsh: r.parameters.Rsh,
             Ra: r.parameters.Ra,
             Ca: r.parameters.Ca,
             Rb: r.parameters.Rb,
@@ -399,7 +399,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         })),
         ...otherResults.map(r => ({
           parameters: {
-            Rs: r.parameters.Rs,
+            Rsh: r.parameters.Rsh,
             Ra: r.parameters.Ra,
             Ca: r.parameters.Ca,
             Rb: r.parameters.Rb,
@@ -570,7 +570,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
               const chunkResults: BackendMeshPoint[] = [
                 ...result.topResults.map(r => ({
                   parameters: {
-                    Rs: r.parameters.Rs,
+                    Rsh: r.parameters.Rsh,
                     Ra: r.parameters.Ra,
                     Ca: r.parameters.Ca,
                     Rb: r.parameters.Rb,
@@ -582,7 +582,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                 })),
                 ...result.otherResults.map(r => ({
                   parameters: {
-                    Rs: r.parameters.Rs,
+                    Rsh: r.parameters.Rsh,
                     Ra: r.parameters.Ra,
                     Ca: r.parameters.Ca,
                     Rb: r.parameters.Rb,
