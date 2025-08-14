@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { CircuitParameters } from '../types/parameters';
+import { CircuitParameters, PARAMETER_RANGES } from '../types/parameters';
 
 export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: number) => {
   // Frequency control state
@@ -10,7 +10,7 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
 
   // Circuit parameters state
   const [parameters, setParameters] = useState<CircuitParameters>({
-    Rs: 50,
+    Rsh: 50,
     Ra: 100,
     Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
     Rb: 100,
@@ -20,7 +20,7 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
 
   // Reference parameters state
   const [referenceParams, setReferenceParams] = useState<CircuitParameters>({
-    Rs: 24,
+    Rsh: 24,
     Ra: 500,
     Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
     Rb: 500,
@@ -30,7 +30,7 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
 
   // Ground truth parameters state
   const [groundTruthParams, setGroundTruthParams] = useState<CircuitParameters>({
-    Rs: 24,
+    Rsh: 24,
     Ra: 500,
     Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
     Rb: 500,
@@ -43,20 +43,14 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
 
   // Initialize parameters to 50% of ranges
   const initializeParameters = useCallback(() => {
-    const rsRange = { min: 10, max: 10000 };
-    const raRange = { min: 10, max: 10000 };
-    const rbRange = { min: 10, max: 10000 };
-    const caRange = { min: 0.1e-6, max: 50e-6 };
-    const cbRange = { min: 0.1e-6, max: 50e-6 };
-
-    const rs50 = rsRange.min + (rsRange.max - rsRange.min) * 0.5;
-    const ra50 = raRange.min + (raRange.max - raRange.min) * 0.5;
-    const rb50 = rbRange.min + (rbRange.max - rbRange.min) * 0.5;
-    const ca50 = caRange.min + (caRange.max - caRange.min) * 0.5;
-    const cb50 = cbRange.min + (cbRange.max - cbRange.min) * 0.5;
+    const rs50 = PARAMETER_RANGES.Rsh.min + (PARAMETER_RANGES.Rsh.max - PARAMETER_RANGES.Rsh.min) * 0.5;
+    const ra50 = PARAMETER_RANGES.Ra.min + (PARAMETER_RANGES.Ra.max - PARAMETER_RANGES.Ra.min) * 0.5;
+    const rb50 = PARAMETER_RANGES.Rb.min + (PARAMETER_RANGES.Rb.max - PARAMETER_RANGES.Rb.min) * 0.5;
+    const ca50 = PARAMETER_RANGES.Ca.min + (PARAMETER_RANGES.Ca.max - PARAMETER_RANGES.Ca.min) * 0.5;
+    const cb50 = PARAMETER_RANGES.Cb.min + (PARAMETER_RANGES.Cb.max - PARAMETER_RANGES.Cb.min) * 0.5;
 
     setGroundTruthParams({
-      Rs: rs50,
+      Rsh: rs50,
       Ra: ra50,
       Ca: ca50,
       Rb: rb50,
@@ -67,7 +61,7 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
 
   // Update reference parameters when ground truth changes
   useEffect(() => {
-    if (referenceParams.Rs === 24 && 
+    if (referenceParams.Rsh === 24 && 
         referenceParams.Ra === 500 && 
         referenceParams.Ca === 0.5e-6 && 
         referenceParams.Rb === 500 && 
@@ -76,7 +70,7 @@ export const useCircuitParameters = (initialMinFreq: number, initialMaxFreq: num
         referenceParams.frequency_range[0] === minFreq &&
         referenceParams.frequency_range[1] === maxFreq) {
       setReferenceParams({
-        Rs: groundTruthParams.Rs,
+        Rsh: groundTruthParams.Rsh,
         Ra: groundTruthParams.Ra,
         Ca: groundTruthParams.Ca,
         Rb: groundTruthParams.Rb,

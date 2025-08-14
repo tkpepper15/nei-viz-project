@@ -15,6 +15,20 @@ interface DataTableTabProps {
   opacityExponent: number;
 }
 
+interface ImpedanceCalculation {
+  frequency: number;
+  Za_real: number;
+  Za_imag: number;
+  Zb_real: number;
+  Zb_imag: number;
+  Za_plus_Zb_real: number;
+  Za_plus_Zb_imag: number;
+  Z_total_real: number;
+  Z_total_imag: number;
+  magnitude: number;
+  phase: number;
+}
+
 // Add formatValue function to handle unit conversions
 const formatValue = (value: number, isCapacitance: boolean): string => {
   if (isCapacitance) {
@@ -24,6 +38,61 @@ const formatValue = (value: number, isCapacitance: boolean): string => {
   // For resistance values, show 1 decimal place for values < 1000, otherwise no decimals
   return value < 1000 ? value.toFixed(1) : value.toFixed(0);
 };
+
+// Calculate impedance at a specific frequency for given parameters
+const calculateImpedanceAtFrequency = (params: CircuitParameters, frequency: number): ImpedanceCalculation => {
+  const { Rsh, Ra, Ca, Rb, Cb } = params;
+  const omega = 2 * Math.PI * frequency;
+  
+  // Za = Ra/(1+jωRaCa)
+  const Za_denom_real = 1;
+  const Za_denom_imag = omega * Ra * Ca;
+  const Za_denom_mag_squared = Za_denom_real * Za_denom_real + Za_denom_imag * Za_denom_imag;
+  const Za_real = Ra * Za_denom_real / Za_denom_mag_squared;
+  const Za_imag = -Ra * Za_denom_imag / Za_denom_mag_squared;
+  
+  // Zb = Rb/(1+jωRbCb)
+  const Zb_denom_real = 1;
+  const Zb_denom_imag = omega * Rb * Cb;
+  const Zb_denom_mag_squared = Zb_denom_real * Zb_denom_real + Zb_denom_imag * Zb_denom_imag;
+  const Zb_real = Rb * Zb_denom_real / Zb_denom_mag_squared;
+  const Zb_imag = -Rb * Zb_denom_imag / Zb_denom_mag_squared;
+  
+  // Za + Zb
+  const Za_plus_Zb_real = Za_real + Zb_real;
+  const Za_plus_Zb_imag = Za_imag + Zb_imag;
+  
+  // Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+  const numerator_real = Rsh * Za_plus_Zb_real;
+  const numerator_imag = Rsh * Za_plus_Zb_imag;
+  
+  const denominator_real = Rsh + Za_plus_Zb_real;
+  const denominator_imag = Za_plus_Zb_imag;
+  const denominator_mag_squared = denominator_real * denominator_real + denominator_imag * denominator_imag;
+  
+  const Z_total_real = (numerator_real * denominator_real + numerator_imag * denominator_imag) / denominator_mag_squared;
+  const Z_total_imag = (numerator_imag * denominator_real - numerator_real * denominator_imag) / denominator_mag_squared;
+  
+  const magnitude = Math.sqrt(Z_total_real * Z_total_real + Z_total_imag * Z_total_imag);
+  const phase = Math.atan2(Z_total_imag, Z_total_real) * (180 / Math.PI);
+  
+  return {
+    frequency,
+    Za_real,
+    Za_imag,
+    Zb_real,
+    Zb_imag,
+    Za_plus_Zb_real,
+    Za_plus_Zb_imag,
+    Z_total_real,
+    Z_total_imag,
+    magnitude,
+    phase
+  };
+};
+
+// This function is available for future use if needed
+// const calculateImpedanceSpectrum = (params: CircuitParameters): ImpedancePoint[] => { ... }
 
 export const DataTableTab: React.FC<DataTableTabProps> = ({
   gridResults,
@@ -42,6 +111,35 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState<number>(1);
   const resultsPerPage = 100;
+  
+  // Frequency selection and calculation breakdown state
+  const [selectedParams, setSelectedParams] = useState<CircuitParameters | null>(null);
+  const [selectedFrequency, setSelectedFrequency] = useState<number>(1000);
+  const [showCalculationBreakdown, setShowCalculationBreakdown] = useState<boolean>(false);
+  
+  // Generate frequency array for slider (100 points between 1 Hz and 10 kHz)
+  const frequencyArray = useMemo(() => {
+    const frequencies = [];
+    const startFreq = 1;
+    const endFreq = 10000;
+    const numPoints = 100;
+    
+    // Generate logarithmic frequency spacing
+    const logStart = Math.log10(startFreq);
+    const logEnd = Math.log10(endFreq);
+    const step = (logEnd - logStart) / (numPoints - 1);
+    
+    for (let i = 0; i < numPoints; i++) {
+      frequencies.push(Math.pow(10, logStart + i * step));
+    }
+    
+    return frequencies;
+  }, []);
+  
+  // Find current frequency index
+  const currentFreqIndex = useMemo(() => {
+    return frequencyArray.findIndex(f => Math.abs(f - selectedFrequency) === Math.min(...frequencyArray.map(freq => Math.abs(freq - selectedFrequency))));
+  }, [frequencyArray, selectedFrequency]);
 
   // Ensure hiddenGroups is always number[] for type safety
   const hiddenGroupsNum: number[] = hiddenGroups.map(Number);
@@ -66,9 +164,9 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
           aValue = a.id;
           bValue = b.id;
           break;
-        case 'Rs':
-          aValue = a.parameters.Rs;
-          bValue = b.parameters.Rs;
+        case 'Rsh':
+          aValue = a.parameters.Rsh;
+          bValue = b.parameters.Rsh;
           break;
         case 'Ra':
           aValue = a.parameters.Ra;
@@ -220,32 +318,26 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     return { qualityLabel, groupColor, groupIndex: groupIndex >= 0 ? groupIndex : Number(qualityCategory), qualityCategory };
   };
 
-  // Calculate unique values for each parameter
+  // Calculate unique values for each parameter from actual grid arrays
   const uniqueValues = useMemo(() => {
-    const values = {
-      Rs: new Set<number>(),
-      Ra: new Set<number>(),
-      Rb: new Set<number>(),
-      Ca: new Set<number>(),
-      Cb: new Set<number>()
-    };
-
-    gridResults.forEach(point => {
-      values.Rs.add(Number(point.parameters.Rs.toFixed(2)));
-      values.Ra.add(Number(point.parameters.Ra.toFixed(2)));
-      values.Rb.add(Number(point.parameters.Rb.toFixed(2)));
-      values.Ca.add(Number((point.parameters.Ca * 1e6).toFixed(2))); // Convert to µF
-      values.Cb.add(Number((point.parameters.Cb * 1e6).toFixed(2))); // Convert to µF
-    });
-
+    if (!gridParameterArrays) {
+      return {
+        Rsh: [],
+        Ra: [],
+        Rb: [],
+        Ca: [],
+        Cb: []
+      };
+    }
+    
     return {
-      Rs: Array.from(values.Rs).sort((a, b) => a - b),
-      Ra: Array.from(values.Ra).sort((a, b) => a - b),
-      Rb: Array.from(values.Rb).sort((a, b) => a - b),
-      Ca: Array.from(values.Ca).sort((a, b) => a - b),
-      Cb: Array.from(values.Cb).sort((a, b) => a - b)
+      Rsh: [...gridParameterArrays.Rsh].sort((a, b) => a - b),
+      Ra: [...gridParameterArrays.Ra].sort((a, b) => a - b),
+      Rb: [...gridParameterArrays.Rb].sort((a, b) => a - b),
+      Ca: [...gridParameterArrays.Ca].map(v => v * 1e6).sort((a, b) => a - b), // Convert to µF
+      Cb: [...gridParameterArrays.Cb].map(v => v * 1e6).sort((a, b) => a - b)  // Convert to µF
     };
-  }, [gridResults]);
+  }, [gridParameterArrays]);
 
   // Add grid parameter info display
   const renderGridInfo = () => {
@@ -257,7 +349,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     });
 
     const ranges = {
-      Rs: getMinMax(gridParameterArrays.Rs),
+      Rsh: getMinMax(gridParameterArrays.Rsh),
       Ra: getMinMax(gridParameterArrays.Ra),
       Rb: getMinMax(gridParameterArrays.Rb),
       Ca: getMinMax(gridParameterArrays.Ca),
@@ -269,9 +361,9 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
         <h3 className="text-sm font-medium text-neutral-200 mb-2">Grid Parameter Ranges</h3>
         <div className="grid grid-cols-5 gap-4 text-xs">
           <div>
-            <span className="text-neutral-400">Rs: </span>
+            <span className="text-neutral-400">R shunt: </span>
             <span className="font-mono text-neutral-300">
-              {ranges.Rs.min.toFixed(1)} - {ranges.Rs.max.toFixed(1)} Ω
+              {ranges.Rsh.min.toFixed(1)} - {ranges.Rsh.max.toFixed(1)} Ω
             </span>
           </div>
           <div>
@@ -316,6 +408,62 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* Frequency Selector */}
+      <div className="bg-blue-900/20 rounded-lg p-4 border border-blue-700/30">
+        <h3 className="text-sm font-medium text-blue-200 mb-3 flex items-center">
+          <svg className="w-4 h-4 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+          Impedance Calculation Frequency
+        </h3>
+        
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-blue-200">Frequency:</label>
+              <span className="font-mono text-blue-100 text-sm min-w-[80px]">
+                {selectedFrequency < 1000 ? 
+                  `${selectedFrequency.toFixed(1)} Hz` : 
+                  `${(selectedFrequency/1000).toFixed(2)} kHz`
+                }
+              </span>
+            </div>
+            
+            <div className="text-xs text-blue-300/70">
+              Real and imaginary impedance values calculated at this frequency
+            </div>
+          </div>
+          
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs text-blue-300">
+              <span>1 Hz</span>
+              <div className="flex-1 relative">
+                <input
+                  type="range"
+                  min={0}
+                  max={frequencyArray.length - 1}
+                  value={currentFreqIndex}
+                  onChange={(e) => {
+                    const index = parseInt(e.target.value);
+                    setSelectedFrequency(frequencyArray[index]);
+                  }}
+                  className="w-full h-2 bg-neutral-700 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(currentFreqIndex / (frequencyArray.length - 1)) * 100}%, #374151 ${(currentFreqIndex / (frequencyArray.length - 1)) * 100}%, #374151 100%)`,
+                    WebkitAppearance: 'none',
+                    MozAppearance: 'none',
+                  }}
+                />
+              </div>
+              <span>10 kHz</span>
+            </div>
+            <div className="text-xs text-blue-400">
+              100 frequency points available • Position {currentFreqIndex + 1}/100
+            </div>
+          </div>
+        </div>
+      </div>
+      
       {/* Add grid info section */}
       {renderGridInfo()}
 
@@ -379,22 +527,23 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
         </div>
       </div>
 
-      {/* Debug section showing unique values */}
-      <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
-        <h3 className="text-sm font-medium text-neutral-300 mb-3 flex items-center">
-          <svg className="w-4 h-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          Parameter Value Distribution
-        </h3>
+      {/* Parameter Value Distribution - only show when grid data is available */}
+      {gridParameterArrays && (
+        <div className="bg-neutral-800/50 rounded-lg p-4 border border-neutral-700">
+          <h3 className="text-sm font-medium text-neutral-300 mb-3 flex items-center">
+            <svg className="w-4 h-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Parameter Value Distribution (Grid Generation Values)
+          </h3>
         
         <div className="space-y-3 text-sm">
           <div>
-            <span className="text-neutral-400 font-medium">Rs (Ω):</span>
+            <span className="text-neutral-400 font-medium">R shunt (Ω):</span>
             <div className="mt-1 font-mono text-xs text-neutral-300 break-all">
-              [{uniqueValues.Rs.map(v => v.toFixed(1)).join(', ')}]
+              [{uniqueValues.Rsh.map(v => v.toFixed(1)).join(', ')}]
             </div>
-            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Rs.length}</div>
+            <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Rsh.length}</div>
           </div>
           
           <div>
@@ -429,7 +578,8 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
             <div className="text-xs text-neutral-500 mt-1">Count: {uniqueValues.Cb.length}</div>
           </div>
         </div>
-      </div>
+        </div>
+      )}
 
       <div className="card">
         <header className="card-header">
@@ -469,9 +619,9 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
                   <button 
                     className="flex items-center gap-1 hover:text-neutral-200 transition-colors"
-                    onClick={() => handleSort('Rs')}
+                    onClick={() => handleSort('Rsh')}
                   >
-                    Rs (Ω) {renderSortArrow('Rs')}
+                    R shunt (Ω) {renderSortArrow('Rsh')}
                   </button>
                 </th>
                 <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-neutral-400 uppercase tracking-wider">
@@ -512,37 +662,61 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     {renderSortArrow('resnorm')}
                   </div>
                 </th>
+                <th className="p-2 text-left">Real (Ω)</th>
+                <th className="p-2 text-left">Imag (Ω)</th>
+                <th className="p-2 text-left">|Z| (Ω)</th>
                 <th>Opacity</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-700">
               {/* Reference Row */}
-              <tr className="bg-primary/10 hover:bg-primary/15 transition-colors border-t border-neutral-700">
-                <td className="p-2 font-medium text-primary">Ref</td>
-                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                  {formatValue(groundTruthParams?.Rs || parameters.Rs, false)}
-                </td>
-                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                  {formatValue(groundTruthParams?.Ra || parameters.Ra, false)}
-                </td>
-                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                  {formatValue(groundTruthParams?.Ca || parameters.Ca, true)}
-                </td>
-                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                  {formatValue(groundTruthParams?.Rb || parameters.Rb, false)}
-                </td>
-                <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                  {formatValue(groundTruthParams?.Cb || parameters.Cb, true)}
-                </td>
-                <td className="p-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
-                    <span className="font-medium text-primary mr-2">Perfect</span>
-                    <span className="text-xs font-mono text-primary">0.00E+00</span>
-                  </div>
-                </td>
-                <td className="p-2">1.000</td>
-              </tr>
+              {(() => {
+                const refParams = groundTruthParams || parameters;
+                const refCalc = calculateImpedanceAtFrequency(refParams, selectedFrequency);
+                return (
+                  <tr className="bg-primary/10 hover:bg-primary/15 transition-colors border-t border-neutral-700">
+                    <td className="p-2 font-medium text-primary">Ref</td>
+                    <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                      {formatValue(refParams.Rsh, false)}
+                    </td>
+                    <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                      {formatValue(refParams.Ra, false)}
+                    </td>
+                    <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                      {formatValue(refParams.Ca, true)}
+                    </td>
+                    <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                      {formatValue(refParams.Rb, false)}
+                    </td>
+                    <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
+                      {formatValue(refParams.Cb, true)}
+                    </td>
+                    <td className="p-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-primary"></span>
+                        <span className="font-medium text-primary mr-2">Perfect</span>
+                        <span className="text-xs font-mono text-primary">0.00E+00</span>
+                      </div>
+                    </td>
+                    <td className="p-2 text-xs font-mono">{refCalc.Z_total_real.toFixed(2)}</td>
+                    <td className="p-2 text-xs font-mono">{refCalc.Z_total_imag.toFixed(2)}</td>
+                    <td className="p-2 text-xs font-mono">{refCalc.magnitude.toFixed(2)}</td>
+                    <td className="p-2">1.000</td>
+                    <td className="p-2">
+                      <button 
+                        onClick={() => {
+                          setSelectedParams(refParams);
+                          setShowCalculationBreakdown(true);
+                        }}
+                        className="text-xs bg-primary/20 hover:bg-primary/30 text-primary px-2 py-1 rounded"
+                      >
+                        Show Math
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })()}
               
               {/* Paginated Results */}
               {getPaginatedGridResults()
@@ -564,6 +738,8 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     }
                   }
                   
+                  const pointCalc = calculateImpedanceAtFrequency(point.parameters, selectedFrequency);
+                  
                   return (
                     <tr 
                       key={`result-${idx}`} 
@@ -573,7 +749,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     >
                       <td className="p-2 font-medium">{point.id}</td>
                       <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
-                        {formatValue(point.parameters.Rs, false)}
+                        {formatValue(point.parameters.Rsh, false)}
                       </td>
                       <td className="px-3 py-2 text-sm font-mono whitespace-nowrap">
                         {formatValue(point.parameters.Ra, false)}
@@ -600,7 +776,21 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                           )}
                         </div>
                       </td>
+                      <td className="p-2 text-xs font-mono">{pointCalc.Z_total_real.toFixed(2)}</td>
+                      <td className="p-2 text-xs font-mono">{pointCalc.Z_total_imag.toFixed(2)}</td>
+                      <td className="p-2 text-xs font-mono">{pointCalc.magnitude.toFixed(2)}</td>
                       <td className="p-2">{opacity.toFixed(3)}</td>
+                      <td className="p-2">
+                        <button 
+                          onClick={() => {
+                            setSelectedParams(point.parameters);
+                            setShowCalculationBreakdown(true);
+                          }}
+                          className="text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 px-2 py-1 rounded"
+                        >
+                          Show Math
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -655,12 +845,114 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
               </div>
               
               <div className="text-xs text-neutral-400">
-                <span className="font-medium text-neutral-300">TER</span> = Ra + Rb = {((groundTruthParams?.Ra || parameters.Ra) + (groundTruthParams?.Rb || parameters.Rb)).toFixed(0)} Ω (reference)
+                <span className="font-medium text-neutral-300">TER</span> = (Rsh × (Ra + Rb)) / (Rsh + Ra + Rb) = {(() => {
+                  const refParams = groundTruthParams || parameters;
+                  const ter = (refParams.Rsh * (refParams.Ra + refParams.Rb)) / (refParams.Rsh + (refParams.Ra + refParams.Rb));
+                  return ter.toFixed(1);
+                })()} Ω (reference)
               </div>
             </div>
           )}
         </div>
       </div>
+      
+      {/* Calculation Breakdown Modal */}
+      {showCalculationBreakdown && selectedParams && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-neutral-900 rounded-lg border border-neutral-700 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-medium text-neutral-200">Impedance Calculation Breakdown</h2>
+                <button 
+                  onClick={() => setShowCalculationBreakdown(false)}
+                  className="text-neutral-400 hover:text-neutral-200 p-1"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              
+              {(() => {
+                const calc = calculateImpedanceAtFrequency(selectedParams, selectedFrequency);
+                const omega = 2 * Math.PI * selectedFrequency;
+                
+                return (
+                  <div className="space-y-6">
+                    {/* Parameters */}
+                    <div className="bg-neutral-800/50 rounded-lg p-4">
+                      <h3 className="text-lg font-medium text-neutral-200 mb-3">Circuit Parameters</h3>
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div><span className="text-neutral-400">Rsh:</span> <span className="font-mono text-neutral-200">{selectedParams.Rsh.toFixed(2)} Ω</span></div>
+                        <div><span className="text-neutral-400">Ra:</span> <span className="font-mono text-neutral-200">{selectedParams.Ra.toFixed(2)} Ω</span></div>
+                        <div><span className="text-neutral-400">Ca:</span> <span className="font-mono text-neutral-200">{(selectedParams.Ca * 1e6).toFixed(2)} μF</span></div>
+                        <div><span className="text-neutral-400">Rb:</span> <span className="font-mono text-neutral-200">{selectedParams.Rb.toFixed(2)} Ω</span></div>
+                        <div><span className="text-neutral-400">Cb:</span> <span className="font-mono text-neutral-200">{(selectedParams.Cb * 1e6).toFixed(2)} μF</span></div>
+                        <div><span className="text-neutral-400">f:</span> <span className="font-mono text-neutral-200">{selectedFrequency.toLocaleString()} Hz</span></div>
+                      </div>
+                      <div className="mt-3 text-sm">
+                        <span className="text-neutral-400">ω = 2πf = </span>
+                        <span className="font-mono text-neutral-200">{omega.toExponential(3)} rad/s</span>
+                      </div>
+                    </div>
+                    
+                    {/* Step-by-step calculation */}
+                    <div className="bg-neutral-800/50 rounded-lg p-4">
+                      <h3 className="text-lg font-medium text-neutral-200 mb-4">Step-by-Step Calculation</h3>
+                      
+                      <div className="space-y-4 text-sm">
+                        {/* Za calculation */}
+                        <div className="border border-neutral-600 rounded p-3">
+                          <h4 className="font-medium text-green-400 mb-2">Step 1: Calculate Za = Ra/(1+jωRaCa)</h4>
+                          <div className="space-y-2 font-mono text-xs">
+                            <div>ωRaCa = {omega.toExponential(3)} × {selectedParams.Ra.toFixed(2)} × {selectedParams.Ca.toExponential(3)} = {(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)}</div>
+                            <div>Denominator: 1 + j({(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)})</div>
+                            <div>|Denominator|² = 1² + ({(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)})² = {(1 + Math.pow(omega * selectedParams.Ra * selectedParams.Ca, 2)).toExponential(3)}</div>
+                            <div className="text-green-300">Za = {calc.Za_real.toFixed(3)} + j({calc.Za_imag.toFixed(3)}) Ω</div>
+                          </div>
+                        </div>
+                        
+                        {/* Zb calculation */}
+                        <div className="border border-neutral-600 rounded p-3">
+                          <h4 className="font-medium text-blue-400 mb-2">Step 2: Calculate Zb = Rb/(1+jωRbCb)</h4>
+                          <div className="space-y-2 font-mono text-xs">
+                            <div>ωRbCb = {omega.toExponential(3)} × {selectedParams.Rb.toFixed(2)} × {selectedParams.Cb.toExponential(3)} = {(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)}</div>
+                            <div>Denominator: 1 + j({(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)})</div>
+                            <div>|Denominator|² = 1² + ({(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)})² = {(1 + Math.pow(omega * selectedParams.Rb * selectedParams.Cb, 2)).toExponential(3)}</div>
+                            <div className="text-blue-300">Zb = {calc.Zb_real.toFixed(3)} + j({calc.Zb_imag.toFixed(3)}) Ω</div>
+                          </div>
+                        </div>
+                        
+                        {/* Za + Zb */}
+                        <div className="border border-neutral-600 rounded p-3">
+                          <h4 className="font-medium text-purple-400 mb-2">Step 3: Calculate Za + Zb</h4>
+                          <div className="space-y-2 font-mono text-xs">
+                            <div>Real: {calc.Za_real.toFixed(3)} + {calc.Zb_real.toFixed(3)} = {calc.Za_plus_Zb_real.toFixed(3)} Ω</div>
+                            <div>Imaginary: ({calc.Za_imag.toFixed(3)}) + ({calc.Zb_imag.toFixed(3)}) = {calc.Za_plus_Zb_imag.toFixed(3)} Ω</div>
+                            <div className="text-purple-300">Za + Zb = {calc.Za_plus_Zb_real.toFixed(3)} + j({calc.Za_plus_Zb_imag.toFixed(3)}) Ω</div>
+                          </div>
+                        </div>
+                        
+                        {/* Final calculation */}
+                        <div className="border border-neutral-600 rounded p-3">
+                          <h4 className="font-medium text-yellow-400 mb-2">Step 4: Calculate Z_total = (Rsh × (Za + Zb)) / (Rsh + Za + Zb)</h4>
+                          <div className="space-y-2 font-mono text-xs">
+                            <div>Numerator: {selectedParams.Rsh.toFixed(2)} × ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)})</div>
+                            <div>Denominator: {selectedParams.Rsh.toFixed(2)} + ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)})</div>
+                            <div>Denominator: {(selectedParams.Rsh + calc.Za_plus_Zb_real).toFixed(3)} + j({calc.Za_plus_Zb_imag.toFixed(3)})</div>
+                            <div className="text-yellow-300 text-lg font-semibold mt-2">Z_total = {calc.Z_total_real.toFixed(3)} + j({calc.Z_total_imag.toFixed(3)}) Ω</div>
+                            <div className="text-yellow-300">|Z| = {calc.magnitude.toFixed(3)} Ω, φ = {calc.phase.toFixed(2)}°</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }; 

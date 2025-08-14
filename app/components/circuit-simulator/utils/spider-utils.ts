@@ -4,7 +4,7 @@ import { GridParameterArrays } from '../types';
 
 // Update type checking for parameters
 export const isValidParameterKey = (key: string): key is keyof CircuitParameters => {
-  const validKeys = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+  const validKeys = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
   return validKeys.includes(key);
 };
 
@@ -20,7 +20,7 @@ export const generateGridValues = (items: ModelSnapshot[]): GridParameterArrays 
   if (!items || items.length === 0) {
     console.warn('No valid items provided to generateGridValues');
     return {
-      Rs: [],
+      Rsh: [],
       Ra: [],
       Ca: [],
       Rb: [],
@@ -29,7 +29,7 @@ export const generateGridValues = (items: ModelSnapshot[]): GridParameterArrays 
   }
 
   const paramSets = {
-    Rs: new Set<number>(),
+    Rsh: new Set<number>(),
     Ra: new Set<number>(),
     Ca: new Set<number>(),
     Rb: new Set<number>(),
@@ -46,8 +46,8 @@ export const generateGridValues = (items: ModelSnapshot[]): GridParameterArrays 
     const params = item.parameters;
     
     // Validate and add each parameter
-    if (typeof params.Rs === 'number' && isFinite(params.Rs)) {
-      paramSets.Rs.add(params.Rs);
+    if (typeof params.Rsh === 'number' && isFinite(params.Rsh)) {
+      paramSets.Rsh.add(params.Rsh);
     }
     if (typeof params.Ra === 'number' && isFinite(params.Ra)) {
       paramSets.Ra.add(params.Ra);
@@ -65,7 +65,7 @@ export const generateGridValues = (items: ModelSnapshot[]): GridParameterArrays 
 
   // Convert Sets to sorted Arrays with validation
   const result: GridParameterArrays = {
-    Rs: Array.from(paramSets.Rs).sort((a, b) => a - b),
+    Rsh: Array.from(paramSets.Rsh).sort((a, b) => a - b),
     Ra: Array.from(paramSets.Ra).sort((a, b) => a - b),
     Ca: Array.from(paramSets.Ca).sort((a, b) => a - b),
     Rb: Array.from(paramSets.Rb).sort((a, b) => a - b),

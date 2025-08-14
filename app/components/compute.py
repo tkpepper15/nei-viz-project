@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 class CircuitParameters(BaseModel):
-    Rs: float      # Tight junction resistance (Ω)
+    Rsh: float     # Shunt resistance (Ω) - parallel path through tight junctions
     Ra: float      # Apical membrane resistance (Ω)
     Ca: float      # Apical membrane capacitance (F)
     Rb: float      # Basal membrane resistance (Ω)
@@ -87,19 +87,21 @@ def calculate_membrane_impedance(R: float, C: float, omega: float) -> complex:
 
 def calculate_equivalent_impedance(params: CircuitParameters, omega: float) -> complex:
     """Calculate the equivalent impedance of the epithelial model
-    Z_eq(ω) = (Rs * (Za(ω) + Zb(ω))) / (Rs + Za(ω) + Zb(ω))
+    Z_eq(ω) = (Rsh * (Za(ω) + Zb(ω))) / (Rsh + Za(ω) + Zb(ω))
     where:
-    - Rs is the tight junction resistance (Ω)
-    - Za is the apical membrane impedance (Ω)
-    - Zb is the basal membrane impedance (Ω)
+    - Rsh is the shunt resistance (Ω) - parallel path through tight junctions
+    - Za is the apical membrane impedance (Ω) - Ra || Ca
+    - Zb is the basal membrane impedance (Ω) - Rb || Cb  
     - ω is the angular frequency (rad/s)
+    
+    Circuit topology: Rsh || (Za + Zb)
     """
     # Calculate individual membrane impedances
     Za = calculate_membrane_impedance(params.Ra, params.Ca, omega)
     Zb = calculate_membrane_impedance(params.Rb, params.Cb, omega)
 
     # Calculate parallel combination
-    Zparallel = (params.Rs * (Za + Zb)) / (params.Rs + Za + Zb)
+    Zparallel = (params.Rsh * (Za + Zb)) / (params.Rsh + Za + Zb)
 
     # Return the equivalent impedance
     return Zparallel
@@ -121,15 +123,17 @@ def calculate_impedance_spectrum(params: CircuitParameters) -> List[ImpedancePoi
     return results
 
 def calculate_TER(params: CircuitParameters) -> float:
-    """Calculate TER (Transepithelial Resistance)
-    TER = Rs * (Ra + Rb) / (Rs + Ra + Rb)
+    """Calculate TER (Transepithelial Resistance) - DC resistance
+    TER = Rsh * (Ra + Rb) / (Rsh + Ra + Rb) 
     where:
-    - Rs is the tight junction resistance (Ω)
+    - Rsh is the shunt resistance (Ω) - parallel path through tight junctions
     - Ra is the apical membrane resistance (Ω)
     - Rb is the basal membrane resistance (Ω)
+    
+    This is the parallel combination of Rsh with the series combination of Ra and Rb.
     """
-    numerator = params.Rs * (params.Ra + params.Rb)
-    denominator = params.Rs + params.Ra + params.Rb
+    numerator = params.Rsh * (params.Ra + params.Rb)
+    denominator = params.Rsh + params.Ra + params.Rb
     return numerator / denominator
 
 def calculate_TEC(impedance_data: List[ImpedancePoint]) -> float:
@@ -272,7 +276,7 @@ async def compute_regression_mesh(params: RegressionMeshParameters) -> List[Mesh
             
             for j, point in enumerate(batch):
                 test_params = CircuitParameters(
-                    Rs=float(point[0]),
+                    Rsh=float(point[0]),
                     Ra=float(point[1]),
                     Ca=float(point[2]),
                     Rb=float(point[3]),
@@ -440,16 +444,16 @@ def generate_parameter_mesh(resolution: int, param_space: ParameterSpace, use_sy
         use_symmetric_grid: Enable tau-based duplicate removal optimization
         
     Returns:
-        List of parameter combinations (Rs, Ra, Ca, Rb, Cb)
+        List of parameter combinations (Rsh, Ra, Ca, Rb, Cb)
         
     Mathematical Background:
     The circuit impedance depends on time constants tau = RC, not individual R and C values.
-    Since Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb), swapping (Ra,Ca) ↔ (Rb,Cb) 
+    Since Z(ω) = Rsh + Ra/(1+jωRaCa) + Rb/(1+jωRbCb), swapping (Ra,Ca) ↔ (Rb,Cb) 
     produces identical impedance spectra and thus identical resnorm values.
     This optimization eliminates ~50% of redundant parameter combinations.
     """
     # Use logspace for all parameters since they span multiple orders of magnitude
-    Rs_range = np.logspace(np.log10(100), np.log10(1000), resolution)  # Tight junction resistance
+    Rsh_range = np.logspace(np.log10(10), np.log10(10000), resolution)  # Shunt resistance - same range as other resistances
     Ra_range = np.logspace(np.log10(param_space.ra[0]), np.log10(param_space.ra[1]), resolution)  # Apical resistance
     Ca_range = np.logspace(np.log10(param_space.ca[0]), np.log10(param_space.ca[1]), resolution)  # Apical capacitance
     Rb_range = np.logspace(np.log10(param_space.rb[0]), np.log10(param_space.rb[1]), resolution)  # Basal resistance
@@ -460,7 +464,7 @@ def generate_parameter_mesh(resolution: int, param_space: ParameterSpace, use_sy
     total_combinations = 0
     skipped_combinations = 0
     
-    for Rs in Rs_range:
+    for Rsh in Rsh_range:
         for Ra in Ra_range:
             for Ca in Ca_range:
                 for Rb in Rb_range:
@@ -483,7 +487,7 @@ def generate_parameter_mesh(resolution: int, param_space: ParameterSpace, use_sy
                                 skipped_combinations += 1
                                 continue
                         
-                        mesh.append([Rs, Ra, Ca, Rb, Cb])
+                        mesh.append([Rsh, Ra, Ca, Rb, Cb])
     
     if use_symmetric_grid:
         add_log(f"Symmetric grid optimization: generated {len(mesh)} combinations, skipped {skipped_combinations} duplicates ({skipped_combinations/total_combinations*100:.1f}%)")

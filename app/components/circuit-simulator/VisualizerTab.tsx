@@ -5,18 +5,18 @@ import { NyquistPlot } from './visualizations/NyquistPlot';
 import { ModelSnapshot, ResnormGroup } from './types';
 import { GridParameterArrays } from './types';
 import { CircuitParameters } from './types/parameters';
-import { ExportModal } from './controls/ExportModal';
+// import { ExportModal } from './controls/ExportModal'; // Removed export functionality
 import { StaticRenderSettings } from './controls/StaticRenderControls';
 import { ParamSlider } from './ParamSlider';
 import { generateLogSpace } from './utils/parameter-space';
+import { PARAMETER_RANGES, faradToMicroFarad } from './types/parameters';
 import { SaveProfileModal } from './controls/SaveProfileModal';
 import { PerformanceControls, PerformanceSettings } from './controls/PerformanceControls';
 
 interface VisualizationSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
-  visualizationType: 'spider' | 'nyquist';
-  view3D: boolean;
+  visualizationType: 'spider2d' | 'spider3d' | 'nyquist';
 }
 
 interface VisualizerTabProps {
@@ -30,12 +30,7 @@ interface VisualizerTabProps {
   onOpacityExponentChange: (value: number) => void;
   // Circuit parameters from parent
   userReferenceParams?: CircuitParameters | null;
-  // View control props
-  onZoomIn?: () => void;
-  onZoomOut?: () => void;
-  onResetZoom?: () => void;
-  onToggleLabels?: () => void;
-  zoomLevel?: number;
+  // View control props - removed unused controls
   showLabels?: boolean;
   // Visualization settings callback
   onVisualizationSettingsChange?: (settings: VisualizationSettings) => void;
@@ -86,11 +81,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Circuit parameters from parent
   userReferenceParams,
   // View control props
-  onZoomIn,
-  onZoomOut,
-  onResetZoom,
-  onToggleLabels,
-  zoomLevel,
   showLabels,
   // Visualization settings callback
   onVisualizationSettingsChange,
@@ -125,8 +115,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   setPerformanceSettings
 }) => {
 
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [showDistribution, setShowDistribution] = useState(false);
+  // const [isExportModalOpen, setIsExportModalOpen] = useState(false); // Removed export modal
+  // const [showDistribution, setShowDistribution] = useState(false); // Unused after UI cleanup
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [showGridControls, setShowGridControls] = useState(true);
   const [showCircuitParams, setShowCircuitParams] = useState(false);
@@ -139,17 +129,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const effectiveGroundTruthParams = userReferenceParams || groundTruthParams;
   // Use visualization settings from static render settings
   const visualizationType = staticRenderSettings.visualizationType;
-  const view3D = staticRenderSettings.view3D;
-  const setVisualizationType = (type: 'spider' | 'nyquist') => {
+  const view3D = staticRenderSettings.visualizationType === 'spider3d';
+  const setVisualizationType = (type: 'spider2d' | 'spider3d' | 'nyquist') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
-    });
-  };
-  const setView3D = (enabled: boolean) => {
-    onStaticRenderSettingsChange({
-      ...staticRenderSettings,
-      view3D: enabled
     });
   };
   
@@ -194,7 +178,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     unit === 'Ω' ? Number(v).toPrecision(3) : Number(v).toFixed(digits);
   
   // Add view control state - use props if provided, otherwise internal state
-  const [internalZoomLevel, setInternalZoomLevel] = useState(1.0);
+  // const [internalZoomLevel, setInternalZoomLevel] = useState(1.0); // Removed unused
   
   // Add state for selected groups for opacity contrast (multi-select)
   // Use selected opacity groups from static render settings with safety check
@@ -228,7 +212,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const [forceMode] = useState<boolean>(false);
   
   // Use external props if provided, otherwise use internal state
-  const currentZoomLevel = zoomLevel !== undefined ? zoomLevel : internalZoomLevel;
+  // const currentZoomLevel = zoomLevel !== undefined ? zoomLevel : internalZoomLevel; // Unused after UI cleanup
   const currentShowLabels = showLabels !== undefined ? showLabels : staticRenderSettings.includeLabels;
 
   // Notify parent of visualization settings changes
@@ -237,19 +221,15 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       const settings: VisualizationSettings = {
         groupPortion,
         selectedOpacityGroups,
-        visualizationType,
-        view3D
+        visualizationType
       };
       onVisualizationSettingsChange(settings);
     }
-  }, [groupPortion, selectedOpacityGroups, visualizationType, view3D, onVisualizationSettingsChange]);
+  }, [groupPortion, selectedOpacityGroups, visualizationType, onVisualizationSettingsChange]);
 
   // Ground truth parameters now come from userReferenceParams (toolbox)
 
-  // Zoom level is not available in optimized SpiderPlot
-  useEffect(() => {
-    setInternalZoomLevel(1.0);
-  }, []);
+  // Zoom level removed after UI cleanup
 
   // Reset selected groups if they don't exist or set default
   useEffect(() => {
@@ -295,22 +275,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [renderingMode, forceMode, resnormGroups, hiddenGroups]);
 
-  // Performance metrics for display
-  const performanceMetrics = useMemo(() => {
-    const totalModels = (resnormGroups || [])
-      .filter((_, index) => !hiddenGroups.includes(index))
-      .reduce((sum, group) => sum + group.items.length, 0);
-
-    const estimatedMemoryMB = (totalModels * 800) / (1024 * 1024); // ~800 bytes per model
-    const expectedFps = totalModels > 100000 ? '< 1' : totalModels > 50000 ? '1-5' : totalModels > 10000 ? '10-30' : '60+';
-    
-    return {
-      totalModels,
-      estimatedMemoryMB,
-      expectedFps,
-      loadLevel: totalModels > 100000 ? 'High' : totalModels > 50000 ? 'Medium-High' : totalModels > 10000 ? 'Medium' : 'Low'
-    };
-  }, [resnormGroups, hiddenGroups]);
+  // Performance metrics for display - removed unused after UI cleanup
+  // Performance metrics removed after UI cleanup
 
   // Get all models from non-hidden groups for data preservation
   const allAvailableModels: ModelSnapshot[] = (resnormGroups || [])
@@ -487,99 +453,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const hasComputedResults = resnormGroups && resnormGroups.length > 0 && allAvailableModels.length > 0;
 
   const controlsContent = (
-    <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex flex-col">
+    <div className="bg-neutral-800 rounded border border-neutral-700 min-h-[600px] flex flex-col">
       {/* Settings Header */}
       <div className="p-3 border-b border-neutral-600 flex-shrink-0">
         <h3 className="text-sm font-semibold text-neutral-200 mb-3">Settings</h3>
         
         
 
-        {/* Mode and Export Controls */}
-        <div className="space-y-2">
-          {/* Visualization Mode */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-neutral-300">Color Mode</span>
-            <div className="flex items-center space-x-2">
-              <span className={`text-xs ${!chromaEnabled ? 'text-neutral-200' : 'text-neutral-500'}`}>Mono</span>
-              <button
-                onClick={() => onStaticRenderSettingsChange({
-                  ...staticRenderSettings,
-                  chromaEnabled: !chromaEnabled
-                })}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  chromaEnabled ? 'bg-blue-600' : 'bg-neutral-600'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    chromaEnabled ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-              <span className={`text-xs ${chromaEnabled ? 'text-neutral-200' : 'text-neutral-500'}`}>Color</span>
-            </div>
-          </div>
-
-          {/* Live Rendering Toggle */}
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-neutral-300">Rendering Mode</span>
-            <div className="flex items-center space-x-2">
-              <span className={`text-xs ${!staticRenderSettings.liveRendering ? 'text-neutral-200' : 'text-neutral-500'}`}>Static</span>
-              <button
-                onClick={() => onStaticRenderSettingsChange({
-                  ...staticRenderSettings,
-                  liveRendering: !staticRenderSettings.liveRendering
-                })}
-                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                  staticRenderSettings.liveRendering ? 'bg-green-600' : 'bg-neutral-600'
-                }`}
-              >
-                <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                    staticRenderSettings.liveRendering ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-              <span className={`text-xs ${staticRenderSettings.liveRendering ? 'text-neutral-200' : 'text-neutral-500'}`}>Live</span>
-            </div>
-          </div>
-
-          {/* Recompute Button - only show when in static mode */}
-          {!staticRenderSettings.liveRendering && (
-            <button
-              onClick={() => {
-                // Trigger recomputation - we'll need to add this functionality
-                console.log('Recompute triggered');
-              }}
-              className="w-full px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 bg-orange-600 hover:bg-orange-700 text-white shadow-sm hover:shadow-md"
-            >
-              <span className="flex items-center justify-center space-x-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                <span>Recompute</span>
-              </span>
-            </button>
-          )}
-
-          {/* Export Button */}
-          <button
-            onClick={() => setIsExportModalOpen(true)}
-            disabled={!hasComputedResults}
-            className={`w-full px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 ${
-              hasComputedResults 
-                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm hover:shadow-md'
-                : 'bg-neutral-700 text-neutral-400 cursor-not-allowed'
-            }`}
-          >
-            <span className="flex items-center justify-center space-x-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-              </svg>
-              <span>Export Plot</span>
-            </span>
-          </button>
-        </div>
       </div>
 
       {/* Controls Content */}
@@ -595,62 +475,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
               {hasComputedResults ? `${visibleModels.length} models visible` : '0 models'}
             </span>
           </div>
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-neutral-400">Show Info</span>
-            <div>
-              <button
-                onClick={() => setShowDistribution(!showDistribution)}
-                className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
-                  showDistribution
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-neutral-600 text-neutral-300 hover:bg-neutral-500'
-                }`}
-              >
-                {showDistribution ? 'Hide Info' : 'Show Info'}
-              </button>
-            </div>
-          </div>
 
-          {/* Opacity System Info */}
-          {showDistribution && (
-            <div className="space-y-2 p-3 bg-neutral-900 rounded border border-neutral-600">
-              <h5 className="text-xs font-medium text-neutral-200">Group Opacity</h5>
-              <div className="text-xs text-neutral-400 space-y-1">
-                <div>• Each group has its own 5-100% opacity range</div>
-                <div>• Lower resnorm = higher opacity</div>
-                <div>• Higher resnorm = lower opacity</div>
-              </div>
-              
-              {selectedOpacityGroups.length > 0 && resnormGroups && hasComputedResults && (
-                <div className="space-y-1 mt-3">
-                  <div className="text-xs font-medium text-neutral-300">Active Groups:</div>
-                  {selectedOpacityGroups.map(groupIndex => {
-                    const group = resnormGroups[groupIndex];
-                    if (!group) return null;
-                    
-                    const groupResnorms = group.items.map(item => item.resnorm).filter(r => r !== undefined) as number[];
-                    const minResnorm = Math.min(...groupResnorms);
-                    const maxResnorm = Math.max(...groupResnorms);
-                    
-                    return (
-                      <div key={groupIndex} className="flex items-center justify-between text-xs bg-neutral-700 px-2 py-1 rounded">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-2 h-2 rounded-full" 
-                            style={{ backgroundColor: group.color }}
-                          />
-                          <span className="text-neutral-200">{group.label.split(' (')[0]}</span>
-                        </div>
-                        <span className="text-neutral-400 font-mono text-[10px]">
-                          {minResnorm.toExponential(1)} - {maxResnorm.toExponential(1)}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Opacity System Info - removed after UI cleanup */}
 
           {/* Current Settings Display */}
           <div className="flex items-center justify-between text-xs">
@@ -831,38 +657,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
           </div>
         </div>
 
-        {/* Visualization Type Selection */}
-        <div className="space-y-3">
-          <label className="text-sm font-medium text-neutral-300">Visualization Type</label>
-          <div className="flex bg-neutral-800 rounded-lg p-1 border border-neutral-600">
-            <button
-              onClick={() => setVisualizationType('spider')}
-              className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
-                visualizationType === 'spider'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
-              }`}
-            >
-              Spider Plot
-            </button>
-            <button
-              onClick={() => setVisualizationType('nyquist')}
-              className={`flex-1 px-3 py-2 text-sm font-medium rounded-md transition-all duration-200 ${
-                visualizationType === 'nyquist'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
-              }`}
-            >
-              Nyquist Plot
-            </button>
-          </div>
-          <div className="text-xs text-neutral-400">
-            {visualizationType === 'spider' ? 
-              '• Multi-dimensional parameter visualization' : 
-              '• Real vs Imaginary impedance plot'
-            }
-          </div>
-        </div>
           
           {/* Nyquist Plot Specific Controls */}
           {visualizationType === 'nyquist' && (
@@ -903,27 +697,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             </div>
           )}
 
-          {/* Spider Plot Specific Controls */}
-          {visualizationType === 'spider' && (
+          {/* Spider Visualization Specific Controls */}
+          {(visualizationType === 'spider2d' || visualizationType === 'spider3d') && (
             <div className="space-y-3 p-4 bg-neutral-900/50 rounded-lg border border-neutral-700">
-              <div className="text-sm font-medium text-neutral-200">Spider Plot Controls</div>
-              
-              {/* 3D/2D Toggle */}
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-neutral-300">3D View</span>
-                <button
-                  onClick={() => setView3D(!view3D)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                    view3D ? 'bg-purple-600' : 'bg-neutral-600'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                      view3D ? 'translate-x-5' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
+              <div className="text-sm font-medium text-neutral-200">Spider Visualization Controls</div>
 
               {/* 3D Resnorm Scale Control - only show when 3D is enabled */}
               {view3D && (
@@ -997,7 +774,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 <div className="text-xs text-neutral-400 space-y-1">
                   {effectiveGroundTruthParams ? (
                     <>
-                      <div>Rs: {effectiveGroundTruthParams.Rs} Ω</div>
+                      <div>R shunt: {effectiveGroundTruthParams.Rsh} Ω</div>
                       <div>Ra: {effectiveGroundTruthParams.Ra} Ω, Ca: {(effectiveGroundTruthParams.Ca * 1e6).toFixed(1)} µF</div>
                       <div>Rb: {effectiveGroundTruthParams.Rb} Ω, Cb: {(effectiveGroundTruthParams.Cb * 1e6).toFixed(1)} µF</div>
                       <div className="text-neutral-500 text-[10px] mt-2">
@@ -1171,23 +948,23 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             toggleOpen={() => setShowCircuitParams(!showCircuitParams)}
           >
             <div className="space-y-4 pt-2">
-              {/* Rs Parameter */}
+              {/* Rsh Parameter */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-neutral-200">Rs (Ω)</span>
+                  <span className="text-sm font-medium text-neutral-200">R shunt (Ω)</span>
                   <div className="relative">
                     <input
                       type="number"
-                      value={effectiveGroundTruthParams.Rs.toFixed(1)}
+                      value={effectiveGroundTruthParams.Rsh.toFixed(1)}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
                         if (!isNaN(val)) {
                           const clampedVal = Math.max(10, Math.min(10000, val));
-                          setGroundTruthParams(prev => ({ ...prev, Rs: clampedVal }));
+                          setGroundTruthParams(prev => ({ ...prev, Rsh: clampedVal }));
                           if (val < 10 || val > 10000) {
-                            updateStatusMessage(`⚠️ Rs value ${val.toFixed(1)} is out of range (10-10000 Ω), clamped to ${clampedVal.toFixed(1)} Ω`);
+                            updateStatusMessage(`⚠️ Rsh value ${val.toFixed(1)} is out of range (10-10000 Ω), clamped to ${clampedVal.toFixed(1)} Ω`);
                           } else {
-                            updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
+                            updateStatusMessage(`Rsh set to ${val.toFixed(1)} Ω`);
                           }
                           if (_referenceModelId === 'dynamic-reference') {
                             const updatedModel = createReferenceModel();
@@ -1196,35 +973,35 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         }
                       }}
                       className={`w-16 bg-neutral-700 text-white text-xs px-2 py-1 rounded border text-center focus:outline-none ${
-                        effectiveGroundTruthParams.Rs < 10 || effectiveGroundTruthParams.Rs > 10000 
+                        effectiveGroundTruthParams.Rsh < 10 || effectiveGroundTruthParams.Rsh > 10000 
                           ? 'border-yellow-500 focus:border-yellow-400' 
                           : 'border-neutral-600 focus:border-blue-500'
                       }`}
                       step="10"
                     />
-                    {(effectiveGroundTruthParams.Rs < 10 || effectiveGroundTruthParams.Rs > 10000) && (
+                    {(effectiveGroundTruthParams.Rsh < 10 || effectiveGroundTruthParams.Rsh > 10000) && (
                       <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
                     )}
                   </div>
                 </div>
                 <ParamSlider 
                   label="" 
-                  value={effectiveGroundTruthParams.Rs} 
+                  value={effectiveGroundTruthParams.Rsh} 
                   min={10} 
                   max={10000} 
                   step={10}
                   unit="Ω" 
                   onChange={(val: number) => {
-                    setGroundTruthParams(prev => ({ ...prev, Rs: val }));
-                    updateStatusMessage(`Rs set to ${val.toFixed(1)} Ω`);
+                    setGroundTruthParams(prev => ({ ...prev, Rsh: val }));
+                    updateStatusMessage(`Rsh set to ${val.toFixed(1)} Ω`);
                     if (_referenceModelId === 'dynamic-reference') {
                       const updatedModel = createReferenceModel();
                       setReferenceModel(updatedModel);
                     }
                   }} 
-                  ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                  ticks={generateLogSpace(PARAMETER_RANGES.Rsh.min, PARAMETER_RANGES.Rsh.max, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
                   log={true}
-                  tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                  tickLabels={generateLogSpace(PARAMETER_RANGES.Rsh.min, PARAMETER_RANGES.Rsh.max, gridSize).map(v => formatTickValue(v, 'Ω'))}
                   readOnlyRange={false}
                 />
               </div>
@@ -1280,9 +1057,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       setReferenceModel(updatedModel);
                     }
                   }} 
-                  ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                  ticks={generateLogSpace(PARAMETER_RANGES.Ra.min, PARAMETER_RANGES.Ra.max, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
                   log={true}
-                  tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                  tickLabels={generateLogSpace(PARAMETER_RANGES.Ra.min, PARAMETER_RANGES.Ra.max, gridSize).map(v => formatTickValue(v, 'Ω'))}
                   readOnlyRange={false}
                 />
               </div>
@@ -1338,10 +1115,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       setReferenceModel(updatedModel);
                     }
                   }} 
-                  ticks={generateLogSpace(0.1, 50, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                  ticks={generateLogSpace(faradToMicroFarad(PARAMETER_RANGES.Ca.min), faradToMicroFarad(PARAMETER_RANGES.Ca.max), gridSize).map((v, i) => ({ level: i + 1, value: v }))}
                   transformValue={(v) => v.toFixed(2)}
                   log={true}
-                  tickLabels={generateLogSpace(0.1, 50, gridSize).map(v => formatTickValue(v, 'μF', 2))}
+                  tickLabels={generateLogSpace(faradToMicroFarad(PARAMETER_RANGES.Ca.min), faradToMicroFarad(PARAMETER_RANGES.Ca.max), gridSize).map(v => formatTickValue(v, 'μF', 2))}
                   readOnlyRange={false}
                 />
               </div>
@@ -1397,9 +1174,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       setReferenceModel(updatedModel);
                     }
                   }} 
-                  ticks={generateLogSpace(10, 10000, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                  ticks={generateLogSpace(PARAMETER_RANGES.Rb.min, PARAMETER_RANGES.Rb.max, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
                   log={true}
-                  tickLabels={generateLogSpace(10, 10000, gridSize).map(v => formatTickValue(v, 'Ω'))}
+                  tickLabels={generateLogSpace(PARAMETER_RANGES.Rb.min, PARAMETER_RANGES.Rb.max, gridSize).map(v => formatTickValue(v, 'Ω'))}
                   readOnlyRange={false}
                 />
               </div>
@@ -1455,10 +1232,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       setReferenceModel(updatedModel);
                     }
                   }} 
-                  ticks={generateLogSpace(0.1, 50, gridSize).map((v, i) => ({ level: i + 1, value: v }))}
+                  ticks={generateLogSpace(faradToMicroFarad(PARAMETER_RANGES.Cb.min), faradToMicroFarad(PARAMETER_RANGES.Cb.max), gridSize).map((v, i) => ({ level: i + 1, value: v }))}
                   transformValue={(v) => v.toFixed(2)}
                   log={true}
-                  tickLabels={generateLogSpace(0.1, 50, gridSize).map(v => formatTickValue(v, 'μF', 2))}
+                  tickLabels={generateLogSpace(faradToMicroFarad(PARAMETER_RANGES.Cb.min), faradToMicroFarad(PARAMETER_RANGES.Cb.max), gridSize).map(v => formatTickValue(v, 'μF', 2))}
                   readOnlyRange={false}
                 />
               </div>
@@ -1482,90 +1259,61 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   );
 
   return (
-    <div className="h-full flex gap-4">
-      {/* Settings Section - Left Side */}
-      <div className="w-80 flex-shrink-0">
+    <div className="h-full flex gap-4 p-4 overflow-hidden">
+      {/* Settings Section - Left Side - Scrollable */}
+      <div className="w-80 flex-shrink-0 overflow-y-auto h-full">
         {controlsContent}
       </div>
       
-      {/* Spider Plot Section - Right Side */}
-      <div className="flex-1 min-w-0">
+      {/* Visualization Section - Right Side - Sticky */}
+      <div className="flex-1 min-w-0 h-full overflow-hidden">
         {hasComputedResults ? (
           <>
-            <ExportModal
-              isOpen={isExportModalOpen}
-              onClose={() => setIsExportModalOpen(false)}
-              visibleModels={visibleModelsWithOpacity}
-              opacityLevel={opacityLevel}
-              chromaEnabled={chromaEnabled}
-              gridSize={gridSize}
-            />
+            {/* ExportModal removed from settings cleanup */}
             
             <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex flex-col">
               {/* Header with View Controls */}
               <div className="p-3 border-b border-neutral-600 flex-shrink-0">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-neutral-200">Spider Plot Visualization</h3>
+                  <h3 className="text-sm font-semibold text-neutral-200">Visualization</h3>
                   
+                  {/* Visualization Type Selection - Moved to header */}
                   <div className="flex items-center gap-2">
-                    {/* View Controls */}
-                    <div className="flex items-center gap-1">
+                    <div className="flex bg-neutral-900 rounded-lg p-1 border border-neutral-600">
                       <button
-                        onClick={() => {
-                          if (onZoomIn) {
-                            onZoomIn();
-                          }
-                        }}
-                        className="w-7 h-7 flex items-center justify-center text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
-                        title="Zoom In"
+                        onClick={() => setVisualizationType('spider2d')}
+                        className={`px-2 py-1 text-xs font-medium rounded transition-all duration-200 ${
+                          visualizationType === 'spider2d'
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
+                        }`}
+                        title="2D multi-dimensional parameter visualization"
                       >
-                        +
+                        Spider 2D
                       </button>
                       <button
-                        onClick={() => {
-                          if (onZoomOut) {
-                            onZoomOut();
-                          }
-                        }}
-                        className="w-7 h-7 flex items-center justify-center text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
-                        title="Zoom Out"
+                        onClick={() => setVisualizationType('spider3d')}
+                        className={`px-2 py-1 text-xs font-medium rounded transition-all duration-200 ${
+                          visualizationType === 'spider3d'
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
+                        }`}
+                        title="3D multi-dimensional parameter visualization"
                       >
-                        −
+                        Spider 3D
                       </button>
                       <button
-                        onClick={() => {
-                          if (onResetZoom) {
-                            onResetZoom();
-                          }
-                        }}
-                        className="w-7 h-7 flex items-center justify-center text-xs bg-neutral-700 text-neutral-300 rounded hover:bg-neutral-600 transition-colors"
-                        title="Reset View"
+                        onClick={() => setVisualizationType('nyquist')}
+                        className={`px-2 py-1 text-xs font-medium rounded transition-all duration-200 ${
+                          visualizationType === 'nyquist'
+                            ? 'bg-green-600 text-white shadow-sm'
+                            : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700'
+                        }`}
+                        title="Real vs Imaginary impedance plot"
                       >
-                        ⌂
+                        Nyquist
                       </button>
                     </div>
-                    
-                    {/* Labels Toggle */}
-                    <button
-                      onClick={() => {
-                        if (onToggleLabels) {
-                          onToggleLabels();
-                        }
-                      }}
-                      className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-                        currentShowLabels 
-                          ? 'bg-blue-600 text-white' 
-                          : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                      }`}
-                      title="Toggle Labels"
-                    >
-                      Labels
-                    </button>
-                    
-                    {/* Zoom Level Display */}
-                    <span className="text-xs text-neutral-400 font-mono bg-neutral-700 px-2 py-1 rounded">
-                      {(currentZoomLevel * 100).toFixed(0)}%
-                    </span>
                   </div>
                 </div>
               </div>
@@ -1574,8 +1322,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
               {/* Visualization Area */}
               <div className="flex-1 p-4 min-h-0">
-                {visualizationType === 'spider' ? (
-                  /* Spider Plot Visualization */
+                {(visualizationType === 'spider2d' || visualizationType === 'spider3d') ? (
+                  /* Spider Visualization */
                   <div className="w-full h-full min-h-0 flex items-center justify-center">
                     <div className="spider-visualization w-full h-full min-h-0 flex items-center justify-center bg-neutral-900 rounded border border-neutral-600 relative">
                     <div className="w-full h-full max-w-full max-h-full">
@@ -1638,13 +1386,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       )}
                     </div>
                     
-                      {/* Performance Overlay */}
-                      <div className="absolute top-2 right-2 bg-black/70 rounded px-2 py-1 text-xs font-mono text-white">
-                        <div>{performanceMetrics.totalModels.toLocaleString()} polygons</div>
-                        <div className={actualRenderingMode === 'tile' ? 'text-amber-300' : 'text-green-300'}>
-                          {actualRenderingMode === 'tile' ? 'TILE' : 'LIVE'}
-                        </div>
-                      </div>
+                      {/* Removed performance overlay clutter */}
                     </div>
                   </div>
                 ) : (
@@ -1659,8 +1401,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         height={500}
                         showGroundTruth={showGroundTruth}
                         chromaEnabled={chromaEnabled}
-                        logScaleReal={nyquistLogScaleReal}
-                        logScaleImaginary={nyquistLogScaleImaginary}
+                        numPoints={_numPoints}
+                        hiddenGroups={hiddenGroups}
+                        selectedOpacityGroups={selectedOpacityGroups}
                       />
                     </div>
                   </div>
@@ -1669,7 +1412,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
             </div>
           </>
         ) : (
-          <div className="bg-neutral-800 rounded border border-neutral-700 h-full flex items-center justify-center">
+          <div className="bg-neutral-800 rounded border border-neutral-700 min-h-[400px] flex items-center justify-center">
             <div className="text-center max-w-md mx-auto p-8">
               <div className="w-24 h-24 mx-auto mb-6 bg-neutral-700 rounded-full flex items-center justify-center">
                 <svg className="w-12 h-12 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -1,5 +1,8 @@
+"use client";
+
 import React, { useEffect, useRef, useState } from 'react';
 import { ModelSnapshot } from '../types';
+import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad } from '../types/parameters';
 
 // 3D Spider Plot Props
 interface SpiderPlot3DProps {
@@ -9,8 +12,19 @@ interface SpiderPlot3DProps {
   width?: number;
   height?: number;
   showControls?: boolean;
+  showAdvancedControls?: boolean; // New toggle for detailed info
   resnormScale?: number;
+  gridSize?: number; // Number of points per parameter dimension
   onRotationChange?: (rotation: { x: number; y: number; z: number }) => void;
+}
+
+// Spectrum navigation state for traversing resnorm sections
+interface SpectrumNavigation {
+  enabled: boolean;
+  currentSection: number; // Current resnorm section index
+  totalSections: number; // Total number of sections
+  modelsPerSection: number; // Models to show per section
+  sectionRange: { min: number; max: number; }; // Current section's resnorm range
 }
 
 // 3D Point representing a model in parameter space with resnorm as Z-axis
@@ -46,11 +60,27 @@ interface Rotation3D {
   z: number; // Roll
 }
 
-// Camera/View state
+// Modern 3D Camera/View state with professional navigation
 interface Camera3D {
   distance: number;
   fov: number;
   target: { x: number; y: number; z: number };
+  position: { x: number; y: number; z: number };
+  scale: number; // Global scale factor for all elements
+  minDistance: number;
+  maxDistance: number;
+}
+
+// Navigation modes for different interaction behaviors  
+type NavigationMode = 'orbit' | 'pan' | 'zoom';
+
+// Enhanced interaction state
+interface InteractionState {
+  isDragging: boolean;
+  dragMode: NavigationMode;
+  lastMousePos: { x: number; y: number };
+  isShiftPressed: boolean;
+  isCtrlPressed: boolean;
 }
 
 export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
@@ -60,18 +90,38 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   width = 800,
   height = 600,
   showControls = true,
+  showAdvancedControls = false,
   resnormScale = 1.0,
+  gridSize = DEFAULT_GRID_SIZE,
   onRotationChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [rotation, setRotation] = useState<Rotation3D>({ x: -30, y: 45, z: 0 });
   const [camera, setCamera] = useState<Camera3D>({
-    distance: 8,
-    fov: 45,
-    target: { x: 0, y: 0, z: 2.5 }
+    distance: 12,
+    fov: 60,
+    target: { x: 0, y: 0, z: 2.5 },
+    position: { x: 0, y: 0, z: 0 },
+    scale: 1.0,
+    minDistance: 2,
+    maxDistance: 50
   });
-  const [isDragging, setIsDragging] = useState(false);
-  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const [interaction, setInteraction] = useState<InteractionState>({
+    isDragging: false,
+    dragMode: 'orbit',
+    lastMousePos: { x: 0, y: 0 },
+    isShiftPressed: false,
+    isCtrlPressed: false
+  });
+  
+  // Spectrum navigation state
+  const [spectrumNav, setSpectrumNav] = useState<SpectrumNavigation>({
+    enabled: false,
+    currentSection: 0,
+    totalSections: 10, // Default to 10 sections
+    modelsPerSection: 100, // Show 100 models per section
+    sectionRange: { min: 0, max: 1 }
+  });
   
   // Mini-map state for resnorm spectrum visualization
   const [minimapState, setMinimapState] = useState<MinimapState>({
@@ -80,22 +130,48 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     dataDistribution: []
   });
 
+  // Filter models based on spectrum navigation
+  const filteredModels = React.useMemo(() => {
+    if (!models.length || !spectrumNav.enabled) return models;
+    
+    // Sort models by resnorm for consistent sectioning
+    const sortedModels = [...models].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+    
+    const startIndex = spectrumNav.currentSection * spectrumNav.modelsPerSection;
+    const endIndex = Math.min(startIndex + spectrumNav.modelsPerSection, sortedModels.length);
+    
+    const sectionModels = sortedModels.slice(startIndex, endIndex);
+    
+    // Update section range
+    if (sectionModels.length > 0) {
+      const minResnorm = Math.min(...sectionModels.map(m => m.resnorm || 0));
+      const maxResnorm = Math.max(...sectionModels.map(m => m.resnorm || 0));
+      setSpectrumNav(prev => ({
+        ...prev,
+        sectionRange: { min: minResnorm, max: maxResnorm },
+        totalSections: Math.ceil(sortedModels.length / prev.modelsPerSection)
+      }));
+    }
+    
+    return sectionModels;
+  }, [models, spectrumNav.enabled, spectrumNav.currentSection, spectrumNav.modelsPerSection]);
+  
   // Convert models to 3D radar polygons
   const convert3DPolygons = React.useMemo(() => {
-    if (!models.length) return [];
+    if (!filteredModels.length) return [];
 
-    // Parameter definitions for radar chart
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+    // Parameter definitions for radar chart (shared with reference model)
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
     const paramRanges = {
-      Rs: { min: 10, max: 10000 },
-      Ra: { min: 10, max: 10000 },
-      Rb: { min: 10, max: 10000 },
-      Ca: { min: 0.1e-6, max: 50e-6 },
-      Cb: { min: 0.1e-6, max: 50e-6 }
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
     };
 
     // Calculate resnorm range for Z-axis scaling
-    const resnorms = models.map(m => m.resnorm || 0).filter(r => r > 0);
+    const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
     const minResnorm = Math.min(...resnorms);
     const maxResnorm = Math.max(...resnorms);
     const resnormRange = maxResnorm - minResnorm;
@@ -120,24 +196,26 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       dataDistribution: distribution
     });
 
-    return models.map(model => {
+    return filteredModels.map(model => {
       const resnorm = model.resnorm || 0;
       
-      // Calculate Z position based on resnorm (fixed: lower resnorm = lower Z, closer to viewer)
+      // Calculate Z position based on resnorm (FIXED: lower resnorm = lower Z, closer to ground truth)
       const normalizedResnorm = resnormRange > 0 
         ? (resnorm - minResnorm) / resnormRange 
         : 0;
-      const zHeight = normalizedResnorm * 5.0 * resnormScale; // Scale Z from 0 to 5 * scale (lower resnorm = lower Z)
+      // CORRECT: Better models (lower resnorm) should be closer to ground truth (lower Z)
+      const zHeight = normalizedResnorm * 5.0 * resnormScale; // Scale Z from 0 to 5 (lower resnorm = lower Z)
 
-      // Determine color based on resnorm quartiles
-      const q25 = resnorms[Math.floor(resnorms.length * 0.25)];
-      const q50 = resnorms[Math.floor(resnorms.length * 0.50)];
-      const q75 = resnorms[Math.floor(resnorms.length * 0.75)];
+      // Determine color based on resnorm quartiles (FIXED: lower resnorm = better = green)
+      const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+      const q25 = sortedResnorms[Math.floor(sortedResnorms.length * 0.25)];
+      const q50 = sortedResnorms[Math.floor(sortedResnorms.length * 0.50)];
+      const q75 = sortedResnorms[Math.floor(sortedResnorms.length * 0.75)];
 
-      let color = '#22c55e'; // Green (best quartile)
-      if (resnorm > q75) color = '#ef4444'; // Red (worst quartile)
-      else if (resnorm > q50) color = '#f97316'; // Orange (third quartile)  
-      else if (resnorm > q25) color = '#f59e0b'; // Yellow (second quartile)
+      let color = '#ef4444'; // Red (worst quartile - highest resnorm)
+      if (resnorm <= q25) color = '#22c55e'; // Green (best quartile - lowest resnorm)
+      else if (resnorm <= q50) color = '#f59e0b'; // Yellow (second quartile)  
+      else if (resnorm <= q75) color = '#f97316'; // Orange (third quartile)
 
       // Calculate radar polygon vertices
       const vertices = params.map((param, i) => {
@@ -150,9 +228,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         const logValue = Math.log10(Math.max(range.min, Math.min(range.max, value)));
         const normalizedValue = (logValue - logMin) / (logMax - logMin);
         
-        // Calculate radar position (pentagon)
+        // Calculate radar position (pentagon) - restored original bounds
         const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
-        const radius = normalizedValue * 2.0; // Scale to radius of 2
+        const radius = normalizedValue * 2.0; // Back to original 2.0 for undistorted interpretation
         
         return {
           x: Math.cos(angle) * radius,
@@ -169,10 +247,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         zHeight
       };
     });
-  }, [models, chromaEnabled, resnormScale]);
+  }, [filteredModels, chromaEnabled, resnormScale]);
 
-  // 3D to 2D projection with orthographic-like perspective to reduce distortion
-  const project3D = React.useCallback((point: Point3D): { x: number; y: number; visible: boolean } => {
+  // Restored original projection with navigation improvements
+  const project3D = React.useCallback((point: Point3D): { x: number; y: number; visible: boolean; depth: number } => {
     // Apply rotation
     const rad = (deg: number) => (deg * Math.PI) / 180;
     const cos = Math.cos;
@@ -183,7 +261,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const ry = rad(rotation.y);
     const rz = rad(rotation.z);
 
-    // Apply rotations (order: Z, Y, X)
+    // Apply rotations (order: Z, Y, X) - back to original method
     let x = point.x;
     let y = point.y;
     let z = point.z;
@@ -203,41 +281,43 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const z3 = y * sin(rx) + z * cos(rx);
     y = y3; z = z3;
 
-    // Apply camera distance
-    z += camera.distance;
+    // Apply camera distance and target offset
+    x -= camera.target.x;
+    y -= camera.target.y;
+    z += camera.distance - camera.target.z;
 
-    // Orthographic-style projection to reduce fisheye distortion
-    if (z <= 0.1) return { x: 0, y: 0, visible: false };
+    // Original-style projection to avoid distortion
+    if (z <= 0.1) return { x: 0, y: 0, visible: false, depth: 0 };
 
-    // Use a more conservative perspective calculation
-    // Reduce the FOV effect by using a smaller divisor
-    const baseScale = Math.min(width, height) * 0.12; // Fixed scale factor
-    const perspectiveFactor = Math.max(0.7, 1.0 - (camera.distance - 8) * 0.02); // Subtle perspective
+    // Restored conservative perspective calculation
+    const baseScale = Math.min(width, height) * 0.12; // Back to original scale
+    const perspectiveFactor = Math.max(0.7, 1.0 - (camera.distance - 8) * 0.02);
     const scale = baseScale * perspectiveFactor;
     
     const projX = width / 2 + x * scale;
     const projY = height / 2 - y * scale;
 
-    // Reasonable visibility bounds
+    // Original visibility bounds
     const margin = 50;
     return { 
       x: projX, 
       y: projY, 
-      visible: projX >= -margin && projX <= width + margin && projY >= -margin && projY <= height + margin
+      visible: projX >= -margin && projX <= width + margin && projY >= -margin && projY <= height + margin,
+      depth: z
     };
   }, [rotation, camera, width, height]);
 
-  // Draw 3D radar grid
+  // Draw 3D radar grid with dynamic scaling
   const draw3DRadarGrid = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
     
     ctx.save();
-    ctx.strokeStyle = '#505050';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = camera.scale > 0.5 ? '#505050' : '#707070'; // Adapt grid visibility to scale
+    ctx.lineWidth = Math.max(1, camera.scale);
     ctx.globalAlpha = 0.6;
 
-    // Draw base pentagon outline only
-    const baseRadius = 2.0;
+    // Draw base pentagon outline with original radius
+    const baseRadius = 2.0; // Restored original size
     const baseVertices = params.map((_, i) => {
       const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
       return project3D({
@@ -260,9 +340,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.stroke();
     }
 
-    // Draw radial axes (only at base level)
+    // Draw radial axes with improved visibility
     ctx.strokeStyle = '#606060';
-    ctx.globalAlpha = 0.4;
+    ctx.globalAlpha = Math.min(0.6, camera.scale * 0.4); // Scale-aware transparency
     params.forEach((_, i) => {
       const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
       const start = project3D({ x: 0, y: 0, z: 0, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -284,69 +364,74 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
 
     ctx.restore();
-  }, [project3D]);
+  }, [project3D, camera.scale]);
 
-  // Draw 3D polygon wireframe with depth lines
+  // Draw 3D polygon wireframe with depth lines and adaptive styling
   const draw3DPolygon = React.useCallback((ctx: CanvasRenderingContext2D, polygon: Polygon3D) => {
     const projectedVertices = polygon.vertices
-      .map((vertex: Point3D) => project3D(vertex))
-      .filter((p) => p.visible);
+      .map((vertex: Point3D) => ({ vertex, projected: project3D(vertex) }))
+      .filter((p) => p.projected.visible);
 
     if (projectedVertices.length < 3) return;
 
     ctx.save();
     
-    // Draw vertical lines from base to polygon (depth indicators)
-    ctx.strokeStyle = polygon.color;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = Math.max(0.2, polygon.opacity * 0.5);
-    ctx.setLineDash([2, 2]);
+    // Calculate average depth for adaptive styling
+    const avgDepth = projectedVertices.reduce((sum, p) => sum + p.projected.depth, 0) / projectedVertices.length;
+    const depthFactor = Math.max(0.3, Math.min(1.0, 10 / avgDepth)); // Closer = more visible
     
-    polygon.vertices.forEach(vertex => {
-      const topPoint = project3D(vertex);
+    // Draw vertical lines from base to polygon (depth indicators) with adaptive styling
+    ctx.strokeStyle = polygon.color;
+    ctx.lineWidth = Math.max(0.5, depthFactor * camera.scale);
+    ctx.globalAlpha = Math.max(0.15, polygon.opacity * 0.4 * depthFactor);
+    ctx.setLineDash([3 * camera.scale, 3 * camera.scale]);
+    
+    projectedVertices.forEach(({ vertex, projected }) => {
       const basePoint = project3D({ x: vertex.x, y: vertex.y, z: 0, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
       
-      if (topPoint.visible && basePoint.visible) {
+      if (projected.visible && basePoint.visible) {
         ctx.beginPath();
         ctx.moveTo(basePoint.x, basePoint.y);
-        ctx.lineTo(topPoint.x, topPoint.y);
+        ctx.lineTo(projected.x, projected.y);
         ctx.stroke();
       }
     });
     
-    // Draw wireframe polygon
-    ctx.globalAlpha = Math.max(0.6, polygon.opacity);
-    ctx.lineWidth = 1.8;
+    // Draw wireframe polygon with adaptive line width
+    ctx.globalAlpha = Math.max(0.5, polygon.opacity * depthFactor);
+    ctx.lineWidth = Math.max(1, 2 * depthFactor * camera.scale);
     ctx.setLineDash([]);
 
+    const projectedOnly = projectedVertices.map(p => p.projected);
     ctx.beginPath();
-    ctx.moveTo(projectedVertices[0].x, projectedVertices[0].y);
-    for (let i = 1; i < projectedVertices.length; i++) {
-      ctx.lineTo(projectedVertices[i].x, projectedVertices[i].y);
+    ctx.moveTo(projectedOnly[0].x, projectedOnly[0].y);
+    for (let i = 1; i < projectedOnly.length; i++) {
+      ctx.lineTo(projectedOnly[i].x, projectedOnly[i].y);
     }
     ctx.closePath();
     ctx.stroke();
 
-    // Draw vertices as dots for better visibility
+    // Draw vertices as adaptive-sized dots
     ctx.fillStyle = polygon.color;
-    ctx.globalAlpha = Math.min(1.0, polygon.opacity + 0.4);
-    projectedVertices.forEach(vertex => {
+    ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.4) * depthFactor);
+    const dotSize = Math.max(1.5, 3 * depthFactor * camera.scale);
+    projectedOnly.forEach(vertex => {
       ctx.beginPath();
-      ctx.arc(vertex.x, vertex.y, 2.5, 0, 2 * Math.PI);
+      ctx.arc(vertex.x, vertex.y, dotSize, 0, 2 * Math.PI);
       ctx.fill();
     });
 
     ctx.restore();
-  }, [project3D]);
+  }, [project3D, camera.scale]);
 
   // Draw enhanced 3D radar labels with value markers
   const draw3DRadarLabels = React.useCallback((ctx: CanvasRenderingContext2D) => {
     const params = [
-      { name: 'Rs (Ω)', desc: 'Shunt', range: { min: 10, max: 10000 } },
-      { name: 'Ra (Ω)', desc: 'Apical R', range: { min: 10, max: 10000 } },
-      { name: 'Ca (µF)', desc: 'Apical C', range: { min: 0.1, max: 50 } },
-      { name: 'Rb (Ω)', desc: 'Basal R', range: { min: 10, max: 10000 } },
-      { name: 'Cb (µF)', desc: 'Basal C', range: { min: 0.1, max: 50 } }
+      { name: 'Rsh (Ω)', desc: 'Shunt', range: PARAMETER_RANGES.Rsh },
+      { name: 'Ra (Ω)', desc: 'Apical R', range: PARAMETER_RANGES.Ra },
+      { name: 'Ca (µF)', desc: 'Apical C', range: { min: faradToMicroFarad(PARAMETER_RANGES.Ca.min), max: faradToMicroFarad(PARAMETER_RANGES.Ca.max) } },
+      { name: 'Rb (Ω)', desc: 'Basal R', range: PARAMETER_RANGES.Rb },
+      { name: 'Cb (µF)', desc: 'Basal C', range: { min: faradToMicroFarad(PARAMETER_RANGES.Cb.min), max: faradToMicroFarad(PARAMETER_RANGES.Cb.max) } }
     ];
     
     ctx.save();
@@ -380,15 +465,14 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.lineWidth = 1;
       ctx.strokeRect(labelX - backgroundWidth/2, labelY - 15, backgroundWidth, 35);
       
-      // Draw parameter name (bolder)
+      // Draw parameter name with adaptive font
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 13px Arial';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(param.name, labelX, labelY - 5);
+      ctx.fillText(param.name, labelX, labelY - 6 * camera.scale);
       
       // Draw value markers at intervals
-      const numMarkers = 3;
+      const numMarkers = gridSize || 5;
       const markerTexts = [];
       
       for (let j = 0; j < numMarkers; j++) {
@@ -416,13 +500,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
     
     ctx.restore();
-  }, [project3D]);
+  }, [project3D, camera.scale]);
 
-  // Draw 3D orientation cube
+  // Draw modern 3D orientation cube with better visibility
   const drawOrientationCube = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const cubeSize = 60;
-    const cubeX = width / 2 - cubeSize / 2;
-    const cubeY = 15;
+    const cubeSize = Math.max(50, 70 * camera.scale);
+    const cubeX = width - cubeSize - 20;
+    const cubeY = height - cubeSize - 80; // Move to bottom-right
     
     ctx.save();
     
@@ -556,9 +640,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.fillText('Z', xStart.x + 15, xStart.y + 20);
     
     ctx.restore();
-  }, [width, rotation]);
+  }, [width, height, rotation, camera.scale]);
 
-  // Draw clean resnorm Z-axis with proper formatting
+  // Draw dynamic resnorm Z-axis that scales with 3D transformations
   const drawResnormAxis = React.useCallback((ctx: CanvasRenderingContext2D) => {
     if (!models.length) return;
     
@@ -569,42 +653,46 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     
     ctx.save();
     
-    // Position axis away from main chart
-    const axisX = 3.2;
-    const axisY = 3.2;
+    // Dynamic axis positioning relative to camera and scale
+    const axisOffset = 5.0 / camera.scale; // Scale-aware positioning
+    const axisX = axisOffset;
+    const axisY = axisOffset;
+    const zAxisHeight = 5.0 * resnormScale; // Respect resnormScale prop
     
-    // Draw Z-axis line with gradient
+    // Draw Z-axis line with improved scaling
     const axisStart = project3D({ x: axisX, y: axisY, z: 0, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-    const axisEnd = project3D({ x: axisX, y: axisY, z: 5, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+    const axisEnd = project3D({ x: axisX, y: axisY, z: zAxisHeight, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
     
     if (axisStart.visible && axisEnd.visible) {
-      // Main axis line
+      // Dynamic axis line with scale-aware styling
       ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 3;
-      ctx.globalAlpha = 0.9;
+      ctx.lineWidth = Math.max(2, 3 * camera.scale);
+      ctx.globalAlpha = Math.min(0.9, 0.5 + camera.scale * 0.4);
       ctx.beginPath();
       ctx.moveTo(axisStart.x, axisStart.y);
       ctx.lineTo(axisEnd.x, axisEnd.y);
       ctx.stroke();
       
-      // Draw axis ticks and labels with better formatting
-      ctx.font = 'bold 11px Arial';
+      // Draw axis ticks and labels with scale-aware formatting
+      const fontSize = Math.max(9, 11 * camera.scale);
+      ctx.font = `bold ${fontSize}px Arial`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       
-      const numTicks = 6;
+      const numTicks = Math.max(4, Math.min(8, Math.floor(6 * camera.scale))); // Adaptive tick count
       for (let i = 0; i < numTicks; i++) {
-        const z = (i / (numTicks - 1)) * 5;
+        const z = (i / (numTicks - 1)) * zAxisHeight;
         const normalizedZ = i / (numTicks - 1);
-        const resnormValue = maxResnorm - (normalizedZ * (maxResnorm - minResnorm));
+        const resnormValue = minResnorm + (normalizedZ * (maxResnorm - minResnorm));
         
+        const tickSize = 0.2 / camera.scale; // Scale-aware tick size
         const tickPoint = project3D({ x: axisX, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-        const tickEndPoint = project3D({ x: axisX + 0.15, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const tickEndPoint = project3D({ x: axisX + tickSize, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
         
         if (tickPoint.visible && tickEndPoint.visible) {
-          // Draw tick mark
+          // Draw scale-aware tick mark
           ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = Math.max(1, 2 * camera.scale);
           ctx.beginPath();
           ctx.moveTo(tickPoint.x, tickPoint.y);
           ctx.lineTo(tickEndPoint.x, tickEndPoint.y);
@@ -620,30 +708,37 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             labelText = resnormValue.toExponential(2);
           }
           
-          // Draw label with background
+          // Draw label with scale-aware background
           const labelWidth = ctx.measureText(labelText).width;
+          const labelOffset = 8 * camera.scale;
+          const labelHeight = fontSize + 4;
           ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-          ctx.fillRect(tickEndPoint.x + 8, tickEndPoint.y - 8, labelWidth + 6, 16);
+          ctx.fillRect(tickEndPoint.x + labelOffset, tickEndPoint.y - labelHeight/2, labelWidth + 6, labelHeight);
           
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillText(labelText, tickEndPoint.x + 11, tickEndPoint.y);
+          ctx.fillText(labelText, tickEndPoint.x + labelOffset + 3, tickEndPoint.y);
         }
       }
       
-      // Draw axis title with background
-      const titlePoint = project3D({ x: axisX + 0.4, y: axisY, z: 2.5, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      // Draw scale-aware axis title
+      const titleOffset = 0.6 / camera.scale;
+      const titlePoint = project3D({ x: axisX + titleOffset, y: axisY, z: zAxisHeight / 2, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
       if (titlePoint.visible) {
         ctx.save();
         ctx.translate(titlePoint.x, titlePoint.y);
         ctx.rotate(-Math.PI / 2);
         
+        const titleFontSize = Math.max(12, 14 * camera.scale);
+        const titleWidth = 60 * camera.scale;
+        const titleHeight = titleFontSize + 8;
+        
         // Title background
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(-25, -10, 50, 20);
+        ctx.fillRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
         
         // Title text
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 14px Arial';
+        ctx.font = `bold ${titleFontSize}px Arial`;
         ctx.textAlign = 'center';
         ctx.fillText('Resnorm', 0, 0);
         ctx.restore();
@@ -651,7 +746,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     }
     
     ctx.restore();
-  }, [models, project3D]);
+  }, [models, project3D, camera.scale, resnormScale]);
 
   // Draw resnorm spectrum mini-map
   const drawResnormMinimap = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -798,13 +893,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
     // Render reference model if provided
     if (referenceModel) {
-      const params = ['Rs', 'Ra', 'Ca', 'Rb', 'Cb'];
+      const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
       const paramRanges = {
-        Rs: { min: 10, max: 10000 },
-        Ra: { min: 10, max: 10000 },
-        Rb: { min: 10, max: 10000 },
-        Ca: { min: 0.1e-6, max: 50e-6 },
-        Cb: { min: 0.1e-6, max: 50e-6 }
+        Rsh: PARAMETER_RANGES.Rsh,
+        Ra: PARAMETER_RANGES.Ra,
+        Rb: PARAMETER_RANGES.Rb,
+        Ca: PARAMETER_RANGES.Ca,
+        Cb: PARAMETER_RANGES.Cb
       };
 
       // Create reference polygon at base level (z=0)
@@ -818,7 +913,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         const normalizedValue = (logValue - logMin) / (logMax - logMin);
         
         const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
-        const radius = normalizedValue * 2.0;
+        const radius = normalizedValue * 2.0; // Match original radar bounds
         
         return {
           x: Math.cos(angle) * radius,
@@ -880,44 +975,152 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
   }, [convert3DPolygons, project3D, referenceModel, width, height, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawResnormMinimap, drawProceduralContext, drawOrientationCube]);
 
-  // Mouse interaction handlers
+  // Professional 3D navigation handlers (Blender/Onshape-style)
   const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    setLastMousePos({ x: e.clientX, y: e.clientY });
+    // Determine interaction mode based on mouse button and modifiers
+    let dragMode: NavigationMode = 'orbit';
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      dragMode = 'pan';
+    } else if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+      dragMode = 'zoom';
+    }
+
+    setInteraction({
+      isDragging: true,
+      dragMode,
+      lastMousePos: { x: e.clientX, y: e.clientY },
+      isShiftPressed: e.shiftKey,
+      isCtrlPressed: e.ctrlKey
+    });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
+    if (!interaction.isDragging) return;
 
-    const deltaX = e.clientX - lastMousePos.x;
-    const deltaY = e.clientY - lastMousePos.y;
+    const deltaX = e.clientX - interaction.lastMousePos.x;
+    const deltaY = e.clientY - interaction.lastMousePos.y;
+    const sensitivity = 0.5;
 
-    const newRotation = {
-      x: Math.max(-90, Math.min(90, rotation.x + deltaY * 0.5)),
-      y: rotation.y + deltaX * 0.5,
-      z: rotation.z
-    };
-
-    setRotation(newRotation);
-    setLastMousePos({ x: e.clientX, y: e.clientY });
-
-    if (onRotationChange) {
-      onRotationChange(newRotation);
+    if (interaction.dragMode === 'orbit') {
+      // Orbit around target
+      const newRotation = {
+        x: Math.max(-89, Math.min(89, rotation.x + deltaY * sensitivity)),
+        y: (rotation.y + deltaX * sensitivity) % 360,
+        z: rotation.z
+      };
+      setRotation(newRotation);
+      if (onRotationChange) {
+        onRotationChange(newRotation);
+      }
+    } else if (interaction.dragMode === 'pan') {
+      // Pan the target (world space movement)
+      const panSensitivity = 0.005 * camera.distance;
+      setCamera(prev => ({
+        ...prev,
+        target: {
+          x: prev.target.x - deltaX * panSensitivity,
+          y: prev.target.y + deltaY * panSensitivity,
+          z: prev.target.z
+        }
+      }));
+    } else if (interaction.dragMode === 'zoom') {
+      // Zoom by dragging
+      const zoomSensitivity = 0.01;
+      const zoomDelta = 1 + (deltaY * zoomSensitivity);
+      setCamera(prev => ({
+        ...prev,
+        distance: Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomDelta))
+      }));
     }
+
+    setInteraction(prev => ({
+      ...prev,
+      lastMousePos: { x: e.clientX, y: e.clientY }
+    }));
   };
 
   const handleMouseUp = () => {
-    setIsDragging(false);
+    setInteraction(prev => ({ ...prev, isDragging: false }));
   };
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 1.15 : 0.85;
-    setCamera(prev => ({
-      ...prev,
-      distance: Math.max(3, Math.min(25, prev.distance * delta))
-    }));
+    const zoomSpeed = 0.1;
+    const zoomFactor = e.deltaY > 0 ? (1 + zoomSpeed) : (1 - zoomSpeed);
+    
+    if (e.shiftKey) {
+      // Shift+scroll for scale adjustment
+      setCamera(prev => ({
+        ...prev,
+        scale: Math.max(0.1, Math.min(10, prev.scale * zoomFactor))
+      }));
+    } else {
+      // Normal scroll for distance zoom
+      setCamera(prev => ({
+        ...prev,
+        distance: Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomFactor))
+      }));
+    }
   };
+
+  // Keyboard shortcuts for navigation
+  const handleKeyDown = React.useCallback((e: KeyboardEvent) => {
+    if (e.target !== canvasRef.current) return;
+    
+    const moveSpeed = 0.5;
+    const rotateSpeed = 5;
+    
+    switch (e.key.toLowerCase()) {
+      case 'w': // Move forward
+      case 'arrowup':
+        setCamera(prev => ({ ...prev, distance: Math.max(prev.minDistance, prev.distance - moveSpeed) }));
+        break;
+      case 's': // Move back  
+      case 'arrowdown':
+        setCamera(prev => ({ ...prev, distance: Math.min(prev.maxDistance, prev.distance + moveSpeed) }));
+        break;
+      case 'a': // Rotate left
+      case 'arrowleft':
+        setRotation(prev => ({ ...prev, y: (prev.y - rotateSpeed) % 360 }));
+        break;
+      case 'd': // Rotate right
+      case 'arrowright':
+        setRotation(prev => ({ ...prev, y: (prev.y + rotateSpeed) % 360 }));
+        break;
+      case 'q': // Rotate up
+        setRotation(prev => ({ ...prev, x: Math.max(-89, prev.x - rotateSpeed) }));
+        break;
+      case 'e': // Rotate down
+        setRotation(prev => ({ ...prev, x: Math.min(89, prev.x + rotateSpeed) }));
+        break;
+      case 'r': // Reset view
+        setRotation({ x: -30, y: 45, z: 0 });
+        setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
+        break;
+      case 'f': // Focus/fit view
+        setCamera(prev => ({ ...prev, target: { x: 0, y: 0, z: 2.5 }, distance: 12, scale: 1.0 }));
+        break;
+    }
+  }, []);
+
+  // Context menu prevention for right-click pan
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+  };
+
+  // Keyboard event listeners
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Make canvas focusable for keyboard events
+    canvas.tabIndex = 0;
+    canvas.addEventListener('keydown', handleKeyDown);
+    
+    return () => {
+      canvas.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
 
   // Render effect
   useEffect(() => {
@@ -925,39 +1128,163 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   }, [render3D]);
 
   return (
-    <div className="relative bg-black rounded-lg overflow-hidden">
+    <div className="relative bg-black rounded-lg overflow-hidden border border-neutral-700">
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        className="cursor-grab active:cursor-grabbing"
+        className={`${
+          interaction.isDragging 
+            ? interaction.dragMode === 'pan' ? 'cursor-move' 
+              : interaction.dragMode === 'zoom' ? 'cursor-ns-resize'
+              : 'cursor-grabbing'
+            : 'cursor-grab'
+        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50`}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
+        onContextMenu={handleContextMenu}
+        onFocus={() => canvasRef.current?.focus()}
       />
       
+      {/* Navigation Toolbar */}
+      <div className="absolute top-4 left-4 bg-gray-900 bg-opacity-80 rounded p-2">
+        <div className="flex flex-col space-y-2">
+          {/* View Controls */}
+          <div className="flex space-x-1">
+            <button
+              onClick={() => {
+                setRotation({ x: -30, y: 45, z: 0 });
+                setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
+              }}
+              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-xs transition-colors"
+              title="Reset View (R)"
+            >
+              Reset
+            </button>
+            <button
+              onClick={() => setCamera(prev => ({ ...prev, target: { x: 0, y: 0, z: 2.5 }, distance: 12, scale: 1.0 }))}
+              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-xs transition-colors"
+              title="Focus View (F)"
+            >
+              Focus
+            </button>
+            <button
+              onClick={() => setSpectrumNav(prev => ({ ...prev, enabled: !prev.enabled, currentSection: 0 }))}
+              className={`px-2 py-1 rounded text-white text-xs transition-colors ${
+                spectrumNav.enabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+              title="Navigate Spectrum Sections"
+            >
+              {spectrumNav.enabled ? 'Exit Nav' : 'Navigate'}
+            </button>
+          </div>
+          
+          {/* Spectrum Navigation Controls */}
+          {spectrumNav.enabled && (
+            <div className="flex flex-col space-y-1 border-t border-gray-600 pt-2">
+              {/* Section Slider */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setSpectrumNav(prev => ({ ...prev, currentSection: Math.max(0, prev.currentSection - 1) }))}
+                  disabled={spectrumNav.currentSection === 0}
+                  className="px-1 py-0.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-white text-xs"
+                >
+                  ◀
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max={Math.max(0, spectrumNav.totalSections - 1)}
+                  value={spectrumNav.currentSection}
+                  onChange={(e) => setSpectrumNav(prev => ({ ...prev, currentSection: parseInt(e.target.value) }))}
+                  className="flex-1 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spectrumNav.currentSection / Math.max(1, spectrumNav.totalSections - 1)) * 100}%, #4b5563 ${(spectrumNav.currentSection / Math.max(1, spectrumNav.totalSections - 1)) * 100}%, #4b5563 100%)`
+                  }}
+                />
+                <button
+                  onClick={() => setSpectrumNav(prev => ({ ...prev, currentSection: Math.min(prev.totalSections - 1, prev.currentSection + 1) }))}
+                  disabled={spectrumNav.currentSection >= spectrumNav.totalSections - 1}
+                  className="px-1 py-0.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-white text-xs"
+                >
+                  ▶
+                </button>
+              </div>
+              
+              {/* Section Info */}
+              <div className="text-xs text-gray-300">
+                <div>Section {spectrumNav.currentSection + 1} / {spectrumNav.totalSections}</div>
+                <div className="text-gray-400">
+                  Resnorm: {spectrumNav.sectionRange.min.toFixed(3)} - {spectrumNav.sectionRange.max.toFixed(3)}
+                </div>
+                <div className="text-gray-400">
+                  Showing {filteredModels.length} / {models.length} models
+                </div>
+              </div>
+              
+              {/* Models per section control */}
+              <div className="flex items-center space-x-2">
+                <span className="text-xs text-gray-400">Per section:</span>
+                <select
+                  value={spectrumNav.modelsPerSection}
+                  onChange={(e) => setSpectrumNav(prev => ({ ...prev, modelsPerSection: parseInt(e.target.value), currentSection: 0 }))}
+                  className="bg-gray-700 text-white text-xs rounded px-1 py-0.5"
+                >
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      
       {showControls && (
-        <div className="absolute bottom-4 right-4 bg-black bg-opacity-75 p-3 rounded text-white text-sm">
-          <div className="space-y-2">
-            <div>Drag: Rotate view</div>
-            <div>Scroll: Zoom in/out</div>
-            <div className="border-t border-gray-600 pt-2">
-              <div>Pitch: {rotation.x.toFixed(1)}°</div>
-              <div>Yaw: {rotation.y.toFixed(1)}°</div>
-              <div>Roll: {rotation.z.toFixed(1)}°</div>
-              <div>Zoom: {(1/camera.distance * 10).toFixed(1)}x</div>
+        <div className="absolute bottom-4 right-4">
+          <div className="bg-black bg-opacity-80 p-3 rounded text-white text-xs">
+            <div className="space-y-2">
+              <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
+              {showAdvancedControls && (
+                <>
+                  <div className="border-t border-gray-600 pt-2 space-y-1">
+                    <div>Pitch: {rotation.x.toFixed(1)}° • Yaw: {rotation.y.toFixed(1)}°</div>
+                    <div>Distance: {camera.distance.toFixed(1)} • Scale: {camera.scale.toFixed(2)}x</div>
+                  </div>
+                </>
+              )}
+              <button
+                onClick={() => {/* Toggle advanced controls via parent component */}}
+                className="text-xs text-blue-400 hover:text-blue-300 underline"
+              >
+                {showAdvancedControls ? 'Hide' : 'Show'} Details
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {filteredModels.length === 0 && models.length > 0 && spectrumNav.enabled && (
+        <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-black bg-opacity-50">
+          <div className="text-center p-8 bg-gray-900 bg-opacity-80 rounded-lg">
+            <div className="text-lg mb-2 text-white">No models in this section</div>
+            <div className="text-sm mb-4">Try adjusting the section or models per section</div>
+          </div>
+        </div>
+      )}
+      
       {models.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-          <div className="text-center">
-            <div className="text-lg mb-2">No 3D data available</div>
-            <div className="text-sm">Generate grid results to see 3D visualization</div>
+        <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-black bg-opacity-50">
+          <div className="text-center p-8 bg-gray-900 bg-opacity-80 rounded-lg">
+            <div className="text-lg mb-2 text-white">No 3D data available</div>
+            <div className="text-sm mb-4">Generate grid results to see 3D visualization</div>
+            <div className="text-xs text-gray-500">
+              Professional 3D navigation + spectrum traversal ready when data is loaded
+            </div>
           </div>
         </div>
       )}

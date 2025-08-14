@@ -4,12 +4,12 @@
 export * from './types';
 
 // Utilities
-export * from './utils';
+export * from './utils/index';
 
 // Visualizations
 export * from './visualizations';
 
-// Main component (imported from parent directory)
+// Main component (refactored and cleaned up)
 export { CircuitSimulator } from '../CircuitSimulator';
 
 // Export all components for easier imports

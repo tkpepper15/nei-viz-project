@@ -60,11 +60,11 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ activeSnapshot }) => {
   const resnormValue = calculateResnormValue();
 
   return (
-    <div className="bg-surface p-4 rounded border border-border">
+    <div className="bg-neutral-800/50 p-4 rounded border border-neutral-700">
       <div className="mb-3">
-        <h4 className="text-sm font-medium text-text-primary mb-1 flex items-center justify-between">
+        <h4 className="text-sm font-medium text-neutral-300 mb-1 flex items-center justify-between">
           <span>Impedance Values</span>
-          <span className="text-xs font-normal text-accent">
+          <span className="text-xs font-normal text-primary">
             at {groundTruthImpedance.frequency < 1000 ? 
               groundTruthImpedance.frequency.toFixed(1) : 
               (groundTruthImpedance.frequency/1000).toFixed(1) + 'k'} Hz
@@ -72,33 +72,33 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ activeSnapshot }) => {
         </h4>
         <div className="flex justify-between items-center">
           <div>
-            <p className="text-xs text-text-secondary">Current Model</p>
-            <p className="text-sm text-text-primary">
+            <p className="text-xs text-neutral-400">Current Model</p>
+            <p className="text-sm text-neutral-200">
               Z&Apos;: <span className="font-medium">{impedance.real} Ω</span>
             </p>
-            <p className="text-sm text-text-primary">
+            <p className="text-sm text-neutral-200">
               -Z&Apos;&Apos;: <span className="font-medium">{impedance.imag} Ω</span>
             </p>
           </div>
           <div>
-            <p className="text-xs text-text-secondary">Ground Truth</p>
-            <p className="text-sm text-text-primary">
+            <p className="text-xs text-neutral-400">Ground Truth</p>
+            <p className="text-sm text-neutral-200">
             Z&Apos;: <span className="font-medium">{groundTruthImpedance.real.toFixed(3)} Ω</span>
             </p>
-            <p className="text-sm text-text-primary">
+            <p className="text-sm text-neutral-200">
             -Z&Apos;&Apos;: <span className="font-medium">{(-groundTruthImpedance.imaginary).toFixed(3)} Ω</span>
             </p>
           </div>
         </div>
       </div>
       
-      <div className="pt-3 border-t border-border-subtle">
+      <div className="pt-3 border-t border-neutral-600">
         <div className="flex items-center justify-between">
           <div>
-            <h4 className="text-sm font-medium text-text-primary">
+            <h4 className="text-sm font-medium text-neutral-300">
               Residual Norm
             </h4>
-            <p className="text-xs text-text-secondary">Model fit quality (0 = perfect fit)</p>
+            <p className="text-xs text-neutral-400">Model fit quality (0 = perfect fit)</p>
           </div>
           <div className="text-right">
             {activeSnapshot ? (
@@ -109,13 +109,13 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ activeSnapshot }) => {
                 {resnormValue}
               </p>
             ) : (
-              <p className="text-sm text-text-secondary">Select a state</p>
+              <p className="text-sm text-neutral-400">Select a state</p>
             )}
           </div>
         </div>
       </div>
 
-      <div className="text-sm text-text-muted">
+      <div className="text-sm text-neutral-500">
         <p>
           The model&apos;s resnorm value is {formatValue(resnorm, "")} which indicates the goodness of fit.
         </p>
@@ -123,7 +123,7 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ activeSnapshot }) => {
           A lower resnorm value doesn&apos;t necessarily mean a better model - it&apos;s important to consider the physical meaning.
         </p>
       </div>
-      <div className="text-sm text-text-muted mt-4">
+      <div className="text-sm text-neutral-500 mt-4">
         <p>
           The model&apos;s TER value is {formatValue(ter || 0, "Ω")} which represents the total electrode resistance.
         </p>

@@ -12,8 +12,7 @@ export interface StaticRenderSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
   showGroundTruth: boolean;
-  visualizationType: 'spider' | 'nyquist';
-  view3D: boolean;
+  visualizationType: 'spider2d' | 'spider3d' | 'nyquist';
   resnormScale: number;
   liveRendering: boolean;
   resolution: string;
@@ -29,10 +28,9 @@ export const defaultStaticRenderSettings: StaticRenderSettings = {
   opacityLevel: 0.7,
   opacityExponent: 1.0,
   groupPortion: 0.2, // Show best 20% by default
-  selectedOpacityGroups: [0, 1, 2, 3], // All quartiles
+  selectedOpacityGroups: [0], // Default to excellent performance group only
   showGroundTruth: true,
-  visualizationType: 'spider',
-  view3D: false,
+  visualizationType: 'spider3d',
   resnormScale: 1.0,
   liveRendering: true, // Default to live rendering
   resolution: '1920x1080',
@@ -204,9 +202,23 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
 
         {/* Model Portion */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Model Portion: {Math.round(settings.groupPortion * 100)}% of best fits
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-sm font-medium text-gray-700">Model Portion:</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={Math.round(settings.groupPortion * 100)}
+                onChange={(e) => {
+                  const value = parseFloat(e.target.value);
+                  if (!isNaN(value)) {
+                    updateSetting('groupPortion', value / 100);
+                  }
+                }}
+                className="w-12 bg-neutral-700 text-white text-xs px-1 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
+              />
+              <span className="text-xs text-gray-600">% of best fits</span>
+            </div>
+          </div>
           <input
             type="range"
             min="0.1"
@@ -278,11 +290,11 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
             {settings.showGroundTruth && (
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <div>
-                  <label className="block text-xs text-gray-600">Rs (Ω)</label>
+                  <label className="block text-xs text-gray-600">R shunt (Ω)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Rs}
-                    onChange={(e) => handleGroundTruthChange('Rs', parseFloat(e.target.value))}
+                    value={groundTruthParams.Rsh}
+                    onChange={(e) => handleGroundTruthChange('Rsh', parseFloat(e.target.value))}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                   />
                 </div>

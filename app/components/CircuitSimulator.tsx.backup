@@ -10,7 +10,12 @@ import {
 import { ModelSnapshot, ImpedancePoint, ResnormGroup, PerformanceLog, PipelinePhase } from './circuit-simulator/types';
 import { CircuitParameters } from './circuit-simulator/types/parameters';
 import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/workerManager';
-import { useComputationState } from './circuit-simulator/hooks/useComputationState';
+import { 
+  useComputationState, 
+  useClientSide, 
+  useIdGeneration, 
+  useProfileManagement 
+} from './circuit-simulator/hooks';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
@@ -22,19 +27,23 @@ import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-sim
 import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
 import { SavedProfiles } from './circuit-simulator/controls/SavedProfiles';
 import { StaticRenderSettings, defaultStaticRenderSettings } from './circuit-simulator/controls/StaticRenderControls';
-import { SavedProfile, SavedProfilesState } from './circuit-simulator/types/savedProfiles';
-import { CenterParameterPanel } from './circuit-simulator/controls/CenterParameterPanel';
+import { ToolboxSidebar } from './circuit-simulator/controls';
+import { SavedProfile } from './circuit-simulator/types/savedProfiles';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;
 
 export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
+  // Client-side hydration guard
+  const isClient = useClientSide();
+  const { generateDeterministicNoise } = useIdGeneration();
+
   // Initialize worker manager for parallel computation
   const { computeGridParallel, cancelComputation } = useWorkerManager();
   
-  // Add frequency control state - extended range for full Nyquist closure
-  const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz for full low-frequency closure
-  const [maxFreq, setMaxFreq] = useState<number>(100000); // 100 kHz for high-frequency closure
+  // Add frequency control state
+  const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz
+  const [maxFreq, setMaxFreq] = useState<number>(10000); // 10 kHz
   const [numPoints, setNumPoints] = useState<number>(100); // Default number of frequency points
   const [frequencyPoints, setFrequencyPoints] = useState<number[]>([]);
   
@@ -52,12 +61,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     actualComputedPoints, setActualComputedPoints,
     memoryLimitedPoints, setMemoryLimitedPoints,
     estimatedMemoryUsage, setEstimatedMemoryUsage,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars  
-    userVisualizationPercentage,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    maxVisualizationPoints,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    isUserControlledLimits,
+    userVisualizationPercentage, setUserVisualizationPercentage: _setUserVisualizationPercentage, // eslint-disable-line @typescript-eslint/no-unused-vars
+    maxVisualizationPoints: _maxVisualizationPoints, setMaxVisualizationPoints: _setMaxVisualizationPoints, // eslint-disable-line @typescript-eslint/no-unused-vars
+    isUserControlledLimits: _isUserControlledLimits, setIsUserControlledLimits: _setIsUserControlledLimits, // eslint-disable-line @typescript-eslint/no-unused-vars
     calculateEffectiveVisualizationLimit,
     resnormGroups, setResnormGroups,
     hiddenGroups, setHiddenGroups,
@@ -108,7 +114,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     , completedPhases[0]);
 
     // Calculate efficiency metrics
-    const cpuCores = navigator.hardwareConcurrency || 4;
+    const cpuCores = typeof window !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4;
     const parallelization = Math.min(1, (totalPoints / totalDuration) / (cpuCores * 1000)); // rough estimate
     const throughput = totalPoints / (totalDuration / 1000); // points per second
     const memoryUsage = (totalPoints * 800) / (1024 * 1024); // estimated MB
@@ -137,23 +143,20 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   }, []);
 
   const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
+  const [parameterChanged, setParameterChanged] = useState<boolean>(false); // eslint-disable-line @typescript-eslint/no-unused-vars
   // Track if reference model was manually hidden
   const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
-  // Configuration name for saving profiles
-  const [configurationName, setConfigurationName] = useState<string>('');
   
   // Static rendering state
   const [staticRenderSettings, setStaticRenderSettings] = useState<StaticRenderSettings>(defaultStaticRenderSettings);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [_isStaticRendering, _setIsStaticRendering] = useState<boolean>(false);
+  const [isStaticRendering, setIsStaticRendering] = useState<boolean>(false); // eslint-disable-line @typescript-eslint/no-unused-vars
+  
+  // Create stable callback to prevent infinite loops in VisualizerTab
+  const handleStaticRenderSettingsChange = useCallback((newSettings: StaticRenderSettings) => {
+    setStaticRenderSettings(newSettings);
+  }, []);
 
-  // Saved profiles state - start with empty state to avoid hydration mismatch
-  const [savedProfilesState, setSavedProfilesState] = useState<SavedProfilesState>({
-    profiles: [],
-    selectedProfile: null
-  });
+  // Profile management hook will be defined after groundTruthParams
 
   
   // Visualization settings - these are now passed to child components but setters not used
@@ -164,25 +167,18 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Add opacity exponent state for spider plot and data table
   const [opacityExponent, setOpacityExponent] = useState<number>(5);
   
-  // Visualization settings state
-  const [visualizationSettings] = useState<{
-    groupPortion: number;
-    selectedOpacityGroups: number[];
-    visualizationType: 'spider' | 'nyquist';
-    view3D: boolean;
-  }>({
-    groupPortion: 0.5,
-    selectedOpacityGroups: [0],
-    visualizationType: 'spider',
-    view3D: false
-  });
-
+  // Visualization settings are now managed through staticRenderSettings
 
   // Apply visualization settings filtering to computed results
   const applyVisualizationFiltering = useCallback((
     results: ModelSnapshot[], 
     groups: ResnormGroup[], 
-    settings: typeof visualizationSettings
+    settings: {
+      groupPortion: number;
+      selectedOpacityGroups: number[];
+      visualizationType: 'spider' | 'nyquist';
+      view3D: boolean;
+    }
   ): ModelSnapshot[] => {
     if (!results.length || !groups.length) return results;
     
@@ -240,7 +236,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   }, [updateStatusMessage]);
   
   const [referenceParams, setReferenceParams] = useState<CircuitParameters>({
-    Rsh: 24,
+    Rs: 24,
     Ra: 500,
     Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
     Rb: 500,
@@ -258,22 +254,38 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // Ground truth parameters state
   const [groundTruthParams, setGroundTruthParams] = useState<CircuitParameters>({
-    Rsh: 50,      // Higher shunt resistance for better curve shape
-    Ra: 1000,     // Higher apical resistance for clearer semicircles
-    Ca: 1.0e-6,   // 1.0 microfarads for appropriate time constants
-    Rb: 800,      // Slightly different basal resistance for asymmetric semicircles
-    Cb: 0.8e-6,   // 0.8 microfarads for better frequency response
+    Rs: 24,
+    Ra: 500,
+    Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
+    Rb: 500,
+    Cb: 0.5e-6, // 0.5 microfarads (converted to farads)
     frequency_range: [minFreq, maxFreq]
+  });
+  
+  // Profile management using custom hook (defined after groundTruthParams)
+  const {
+    savedProfilesState,
+    setSavedProfilesState,
+    hasLoadedFromStorage,
+    handleSaveProfile,
+    handleCopyParams
+  } = useProfileManagement({
+    gridSize,
+    minFreq,
+    maxFreq,
+    numPoints,
+    groundTruthParams,
+    updateStatusMessage
   });
   
   // Use a single parameters state object
   const [parameters, setParameters] = useState<CircuitParameters>({
-    Rsh: 50,      // Match ground truth parameters
-    Ra: 1000,     // Match ground truth parameters
-    Ca: 1.0e-6,   // Match ground truth parameters
-    Rb: 800,      // Match ground truth parameters
-    Cb: 0.8e-6,   // Match ground truth parameters
-    frequency_range: [0.1, 100000]
+    Rs: 50,
+    Ra: 100,
+    Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
+    Rb: 100,
+    Cb: 0.5e-6, // 0.5 microfarads (converted to farads)
+    frequency_range: [0.1, 10000]
   });
   
   // Add state for grid parameter arrays
@@ -309,7 +321,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
     // Set default starting values at 50% of ranges
     setGroundTruthParams({
-      Rsh: rs50,
+      Rs: rs50,
       Ra: ra50,
       Ca: ca50,
       Rb: rb50,
@@ -324,7 +336,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Update reference parameters when slider values are initialized
   useEffect(() => {
     // Only create reference once on initial load
-    if (referenceParams.Rsh === 24 && 
+    if (referenceParams.Rs === 24 && 
         referenceParams.Ra === 500 && 
         referenceParams.Ca === 0.5e-6 && 
         referenceParams.Rb === 500 && 
@@ -334,7 +346,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         referenceParams.frequency_range[1] === maxFreq) {
       // Create the reference object directly without calling the function
       setReferenceParams({
-        Rsh: groundTruthParams.Rsh,
+        Rs: groundTruthParams.Rs,
         Ra: groundTruthParams.Ra,
         Ca: groundTruthParams.Ca,
         Rb: groundTruthParams.Rb,
@@ -372,7 +384,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
     
     // Use groundTruthParams instead of parameters for the reference model
-    const { Rsh, Ra, Ca, Rb, Cb } = groundTruthParams;
+    const { Rs, Ra, Ca, Rb, Cb } = groundTruthParams;
     
     // Compute impedance at each frequency
     const impedanceData: ImpedancePoint[] = [];
@@ -382,7 +394,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     for (const f of freqs) {
       // Calculate impedance for a single frequency
       const impedance = calculateCircuitImpedance(
-        { Rsh, Ra, Ca, Rb, Cb, frequency_range: [minFreq, maxFreq] }, 
+        { Rs, Ra, Ca, Rb, Cb, frequency_range: [minFreq, maxFreq] }, 
         f
       );
       
@@ -400,20 +412,20 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return {
       id: 'dynamic-reference',
       name: 'Reference',
-      parameters: { Rsh, Ra, Ca, Rb, Cb, frequency_range: [minFreq, maxFreq] },
+      parameters: { Rs, Ra, Ca, Rb, Cb, frequency_range: [minFreq, maxFreq] },
       data: impedanceData,
       color: '#FFFFFF',
       isVisible: true,
       opacity: 1,
       resnorm: 0,
       timestamp: Date.now(),
-      ter: Rsh + Ra + Rb
+      ter: Rs + Ra + Rb
     };
   }, [groundTruthParams, minFreq, maxFreq, numPoints, frequencyPoints]);
 
   // Function to calculate impedance at a single frequency
   const calculateCircuitImpedance = (params: CircuitParameters, frequency: number) => {
-    const { Rsh, Ra, Ca, Rb, Cb } = params;
+    const { Rs, Ra, Ca, Rb, Cb } = params;
     const omega = 2 * Math.PI * frequency;
     
     // Calculate impedance of apical membrane (Ra || Ca)
@@ -430,13 +442,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const Zab_real = Za_real + Zb_real;
     const Zab_imag = Za_imag + Zb_imag;
     
-    // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
-    // Numerator: Rsh * (Za + Zb)
-    const num_real = Rsh * Zab_real;
-    const num_imag = Rsh * Zab_imag;
+    // Calculate parallel combination: Z_total = (Rs * (Za + Zb)) / (Rs + Za + Zb)
+    // Numerator: Rs * (Za + Zb)
+    const num_real = Rs * Zab_real;
+    const num_imag = Rs * Zab_imag;
     
-    // Denominator: Rsh + Za + Zb
-    const denom_real = Rsh + Zab_real;
+    // Denominator: Rs + Za + Zb
+    const denom_real = Rs + Zab_real;
     const denom_imag = Zab_imag;
     
     // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
@@ -469,13 +481,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Create and show reference model by default
   useEffect(() => {
     // Create the reference model when groundTruthParams are initialized
-    if (groundTruthParams.Rsh && !referenceModelId && !manuallyHidden) {
+    if (groundTruthParams.Rs && !referenceModelId && !manuallyHidden) {
       const newReferenceModel = createReferenceModel();
       setReferenceModel(newReferenceModel);
       setReferenceModelId('dynamic-reference');
       updateStatusMessage('Reference model created with current parameters');
     }
-  }, [groundTruthParams.Rsh, referenceModelId, createReferenceModel, manuallyHidden, updateStatusMessage]);
+  }, [groundTruthParams.Rs, referenceModelId, createReferenceModel, manuallyHidden, updateStatusMessage]);
 
   // Update reference model when parameters change
   useEffect(() => {
@@ -561,7 +573,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Optimized helper function to map BackendMeshPoint to ModelSnapshot
   const mapBackendMeshToSnapshot = (meshPoint: BackendMeshPoint, index: number): ModelSnapshot => {
     // Extract parameters efficiently (they should already be in Farads)
-    const { Rsh, Ra, Ca, Rb, Cb, frequency_range } = meshPoint.parameters;
+    const { Rs, Ra, Ca, Rb, Cb, frequency_range } = meshPoint.parameters;
     
     // Pre-calculate TER (Total Extracellular Resistance)
     const ter = Ra + Rb;
@@ -575,7 +587,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       id: `mesh-${index}`,
       name: `Mesh Point ${index}`,
       parameters: {
-        Rsh,
+        Rs,
         Ra,
         Ca,
         Rb,
@@ -606,12 +618,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   }, []);
 
   // Calculate synthetic resnorm based on parameter values and profile characteristics
-  const calculateSyntheticResnorm = useCallback((Rsh: number, Ra: number, Ca: number, Rb: number, Cb: number, profile: SavedProfile): number => {
+  const calculateSyntheticResnorm = useCallback((Rs: number, Ra: number, Ca: number, Rb: number, Cb: number, profile: SavedProfile, index?: number): number => {
     // Use a realistic model that correlates with actual circuit behavior
     // Lower resistance and higher capacitance generally lead to better fits (lower resnorm)
     
     // Normalize parameters to 0-1 range
-    const rsNorm = Math.log10(Rsh / 10) / Math.log10(1000);
+    const rsNorm = Math.log10(Rs / 10) / Math.log10(1000);
     const raNorm = Math.log10(Ra / 10) / Math.log10(1000);
     const rbNorm = Math.log10(Rb / 10) / Math.log10(1000);
     const caNorm = Math.log10(Ca / 0.1e-6) / Math.log10(500);
@@ -633,11 +645,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     if (Ra < 50 || Rb < 50) baseResnorm += 0.02; // Very low resistance penalty
     if (Ca < 1e-6 || Cb < 1e-6) baseResnorm += 0.03; // Very low capacitance penalty
     
-    // Add some noise to create realistic distribution
-    const noise = 1 + (Math.random() - 0.5) * 0.3; // ±15% noise
+    // Add deterministic noise for realistic distribution
+    const seed = (Rs * 1000 + Ra * 100 + Rb * 10 + Ca * 1e9 + Cb * 1e8 + (index || 0)) % 1000;
+    const deterministicNoise = generateDeterministicNoise(seed, 0.15);
     
-    return Math.max(0.001, Math.min(0.5, baseResnorm * noise));
-  }, []);
+    return Math.max(0.001, Math.min(0.5, baseResnorm * deterministicNoise));
+  }, [generateDeterministicNoise]);
 
   // Generate synthetic profile data for profiles that exceed worker limits
   const generateSyntheticProfileData = useCallback((profile: SavedProfile, sampleSize: number): ModelSnapshot[] => {
@@ -645,7 +658,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     
     const syntheticData: ModelSnapshot[] = [];
     const paramRanges = {
-      Rsh: { min: 10, max: 10000 },
+      Rs: { min: 10, max: 10000 },
       Ra: { min: 10, max: 10000 },
       Rb: { min: 10, max: 10000 },
       Ca: { min: 0.1e-6, max: 50e-6 },
@@ -662,17 +675,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       const haltonBase11 = haltonSequence(i, 11);
       
       // Map to parameter ranges using logarithmic scaling
-      const Rsh = paramRanges.Rsh.min * Math.pow(paramRanges.Rsh.max / paramRanges.Rsh.min, haltonBase2);
+      const Rs = paramRanges.Rs.min * Math.pow(paramRanges.Rs.max / paramRanges.Rs.min, haltonBase2);
       const Ra = paramRanges.Ra.min * Math.pow(paramRanges.Ra.max / paramRanges.Ra.min, haltonBase3);
       const Rb = paramRanges.Rb.min * Math.pow(paramRanges.Rb.max / paramRanges.Rb.min, haltonBase5);
       const Ca = paramRanges.Ca.min * Math.pow(paramRanges.Ca.max / paramRanges.Ca.min, haltonBase7);
       const Cb = paramRanges.Cb.min * Math.pow(paramRanges.Cb.max / paramRanges.Cb.min, haltonBase11);
       
       // Calculate synthetic resnorm using realistic circuit behavior model
-      const resnorm = calculateSyntheticResnorm(Rsh, Ra, Ca, Rb, Cb, profile);
+      const resnorm = calculateSyntheticResnorm(Rs, Ra, Ca, Rb, Cb, profile, i);
       
       // Calculate TER for the synthetic model
-      const ter = (Rsh * (Ra + Rb)) / (Rsh + Ra + Rb);
+      const ter = (Rs * (Ra + Rb)) / (Rs + Ra + Rb);
       
       // Generate minimal impedance spectrum for compatibility
       const spectrum: ImpedancePoint[] = [];
@@ -690,7 +703,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         const Zb_real = Rb / (1 + Math.pow(omega * Rb * Cb, 2));
         const Zb_imag = -omega * Rb * Rb * Cb / (1 + Math.pow(omega * Rb * Cb, 2));
         
-        const real = Rsh + Za_real + Zb_real;
+        const real = Rs + Za_real + Zb_real;
         const imaginary = Za_imag + Zb_imag;
         const magnitude = Math.sqrt(real * real + imaginary * imaginary);
         const phase = Math.atan2(imaginary, real) * (180 / Math.PI);
@@ -709,7 +722,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         name: `Synthetic ${profile.name} - Model ${i + 1}`,
         timestamp: Date.now(),
         parameters: {
-          Rsh,
+          Rs,
           Ra,
           Rb,
           Ca,
@@ -817,8 +830,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       // Convert BackendMeshPoint to ModelSnapshot format and sample if needed
       const modelSnapshots: ModelSnapshot[] = gridResults.map((result, index) => {
-        const ter = (result.parameters.Rsh * (result.parameters.Ra + result.parameters.Rb)) / 
-                   (result.parameters.Rsh + result.parameters.Ra + result.parameters.Rb);
+        const ter = (result.parameters.Rs * (result.parameters.Ra + result.parameters.Rb)) / 
+                   (result.parameters.Rs + result.parameters.Ra + result.parameters.Rb);
         
         // Convert spectrum to ImpedancePoint format
         const data: ImpedancePoint[] = result.spectrum.map(spec => ({
@@ -882,7 +895,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     
     // Add warning for very large grids that might affect performance
     if (gridSize > 20) {
-      const proceed = window.confirm(
+      const proceed = typeof window !== 'undefined' && window.confirm(
         `⚠️ Warning: You're about to compute ${totalPointsToCompute.toLocaleString()} parameter combinations.\n\n` +
         `This will take several minutes and may make the page temporarily less responsive.\n\n` +
         `Consider using a smaller grid size (15-20) for faster results.\n\n` +
@@ -915,9 +928,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     
     const totalPoints = totalPointsToCompute;
     updateStatusMessage(`Starting parallel grid computation with ${gridSize} points per dimension...`);
-    updateStatusMessage(`MATH: Computing all ${totalPoints.toLocaleString()} parameter combinations using ${navigator.hardwareConcurrency || 4} CPU cores`);
-    updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rsh shunt resistance with parallel RC elements)`);
-    updateStatusMessage(`MATH: Z(ω) = Rsh + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`);
+    updateStatusMessage(`MATH: Computing all ${totalPoints.toLocaleString()} parameter combinations using ${typeof window !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4} CPU cores`);
+    updateStatusMessage(`MATH: Circuit model: Randles equivalent circuit (Rs shunt resistance with parallel RC elements)`);
+    updateStatusMessage(`MATH: Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`);
     updateStatusMessage(`MATH: Using frequency range ${minFreq.toFixed(1)}-${maxFreq.toFixed(1)} Hz with ${numPoints} points`);
 
     try {
@@ -998,7 +1011,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       completePhase('impedance-computation', {
         pointsProcessed: results.length,
         computationTime: computationTime + 's',
-        parallelCores: navigator.hardwareConcurrency || 4
+        parallelCores: typeof window !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4
       });
       startPhase('resnorm-analysis', 'Analyzing residual norms and grouping results');
 
@@ -1036,7 +1049,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       const MAX_VISUALIZATION_MODELS = calculateEffectiveVisualizationLimit(sortedResults.length);
       
       // Log memory management strategy
-      if (isUserControlledLimits) {
+      if (_isUserControlledLimits) {
         updateStatusMessage(`User-controlled limits: Displaying ${MAX_VISUALIZATION_MODELS.toLocaleString()}/${sortedResults.length.toLocaleString()} points (${userVisualizationPercentage}%)`);
       } else {
         if (estimatedMemory > 500) {
@@ -1118,14 +1131,20 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         memoryOptimized: models.length < sortedResults.length
       });
       
-      // Apply visualization filtering before setting results
-      const filteredModels = applyVisualizationFiltering(models, groups, visualizationSettings);
+      // Apply visualization filtering before setting results using staticRenderSettings
+      const filteringSettings = {
+        groupPortion: staticRenderSettings.groupPortion,
+        selectedOpacityGroups: staticRenderSettings.selectedOpacityGroups,
+        visualizationType: staticRenderSettings.visualizationType as 'spider' | 'nyquist',
+        view3D: staticRenderSettings.view3D
+      };
+      const filteredModels = applyVisualizationFiltering(models, groups, filteringSettings);
       
       // Convert filtered models back to BackendMeshPoint format for consistency
       const filteredResults = filteredModels.map(model => {
         // Find the original BackendMeshPoint for this model
         const originalResult = sortedResults.find(result => 
-          result.parameters.Rsh === model.parameters.Rsh &&
+          result.parameters.Rs === model.parameters.Rs &&
           result.parameters.Ra === model.parameters.Ra &&
           result.parameters.Ca === model.parameters.Ca &&
           result.parameters.Rb === model.parameters.Rb &&
@@ -1189,7 +1208,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         totalPoints,
         validPoints: sortedResults.length,
         groups: groups.length,
-        cores: navigator.hardwareConcurrency || 4,
+        cores: typeof window !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4,
         throughput: totalPoints / parseFloat(totalTimeSec),
         type: 'success',
         duration: 8000
@@ -1226,24 +1245,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
       setIsComputingGrid(false);
       setComputationProgress(null);
-      
-      // Auto-collapse sidebar and auto-save configuration when computation completes
-      setLeftNavCollapsed(true);
-      
-      // Always auto-save the configuration after successful computation
-      const autoSaveName = configurationName.trim() || `Auto-saved ${new Date().toLocaleString('en-US', { 
-        month: 'short', 
-        day: 'numeric', 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      })}`;
-      
-      handleSaveProfile(autoSaveName, `Automatically saved after successful computation - ${sortedResults.length} models computed`);
-      updateStatusMessage(`Configuration auto-saved as "${autoSaveName}" and sidebar collapsed`);
-      
-      // Clear the configuration name after saving
-      setConfigurationName('');
 
     } catch (error) {
       console.error("Error in parallel computation:", error);
@@ -1267,7 +1268,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         totalPoints,
         validPoints: 0,
         groups: 0,
-        cores: navigator.hardwareConcurrency || 4,
+        cores: typeof window !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 4,
         throughput: 0,
         type: 'error',
         duration: 10000 // Show error longer
@@ -1278,7 +1279,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, groundTruthParams, isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, setSavedProfilesState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, staticRenderSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, groundTruthParams, _isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, setSavedProfilesState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1419,110 +1420,25 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     updateStatusMessage('Computation cancelled');
   }, [cancelComputation, updateStatusMessage]);
 
-  // Handler for saving a profile
-  const handleSaveProfile = useCallback((name: string, description?: string) => {
-    // Generate timestamp and ID only when actually saving (client-side)
-    const now = Date.now();
-    const randomId = Math.random().toString(36).substr(2, 9);
-    
-    const newProfile: SavedProfile = {
-      id: `profile_${now}_${randomId}`,
-      name,
-      description,
-      created: now,
-      lastModified: now,
-      
-      // Grid computation settings
-      gridSize,
-      minFreq,
-      maxFreq,
-      numPoints,
-      
-      // Circuit parameters
-      groundTruthParams: { ...groundTruthParams },
-      
-      // Computation status
-      isComputed: false,
-    };
-
-    setSavedProfilesState(prev => ({
-      ...prev,
-      profiles: [...prev.profiles, newProfile],
-      selectedProfile: newProfile.id
-    }));
-
-    updateStatusMessage(`Profile "${name}" saved with current settings`);
-  }, [gridSize, minFreq, maxFreq, numPoints, groundTruthParams, updateStatusMessage]);
+  // Profile management now handled by useProfileManagement hook
 
 
 
   // Note: Grid generation and spectrum calculation now handled by Web Workers
 
-  // State for collapsible sidebar
   const [leftNavCollapsed, setLeftNavCollapsed] = useState(false);
 
-  // Track if we've loaded from localStorage to avoid hydration issues
-  const [hasLoadedFromStorage, setHasLoadedFromStorage] = useState(false);
+  // localStorage loading now handled by useProfileManagement hook
   
   // Track profile loading for computation
   const [pendingComputeProfile, setPendingComputeProfile] = useState<string | null>(null);
   
 
-  // Handler for copying profile parameters
-  const handleCopyParams = useCallback((profileId: string) => {
-    const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-    if (profile) {
-      const paramsData = {
-        profileName: profile.name,
-        gridSettings: {
-          gridSize: profile.gridSize,
-          minFreq: profile.minFreq,
-          maxFreq: profile.maxFreq,
-          numPoints: profile.numPoints
-        },
-        circuitParameters: {
-          Rsh: profile.groundTruthParams.Rsh,
-          Ra: profile.groundTruthParams.Ra,
-          Ca: profile.groundTruthParams.Ca,
-          Rb: profile.groundTruthParams.Rb,
-          Cb: profile.groundTruthParams.Cb,
-          frequency_range: profile.groundTruthParams.frequency_range
-        }
-      };
-
-      // Copy to clipboard as formatted JSON
-      const jsonString = JSON.stringify(paramsData, null, 2);
-      
-      if (navigator.clipboard && window.isSecureContext) {
-        // Use the Clipboard API when available (HTTPS/localhost)
-        navigator.clipboard.writeText(jsonString).then(() => {
-          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
-        }).catch(() => {
-          updateStatusMessage(`Failed to copy parameters to clipboard`);
-        });
-      } else {
-        // Fallback for non-secure contexts
-        try {
-          const textArea = document.createElement('textarea');
-          textArea.value = jsonString;
-          textArea.style.position = 'fixed';
-          textArea.style.opacity = '0';
-          document.body.appendChild(textArea);
-          textArea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textArea);
-          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
-        } catch {
-          updateStatusMessage(`Failed to copy parameters to clipboard`);
-        }
-      }
-    }
-  }, [savedProfilesState.profiles, updateStatusMessage]);
+  // Parameter copying now handled by useProfileManagement hook
 
   // Handle static render job creation
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _handleCreateRenderJob = useCallback(async (settings: StaticRenderSettings, meshData: ModelSnapshot[]) => {
-    _setIsStaticRendering(true);
+  const handleCreateRenderJob = useCallback(async (settings: StaticRenderSettings, meshData: ModelSnapshot[]) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    setIsStaticRendering(true);
     updateStatusMessage(`Starting high-quality export (${meshData.length.toLocaleString()} models)...`);
     
     try {
@@ -1531,80 +1447,23 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Create a simple export for now using the existing SpiderPlot export
-      const link = document.createElement('a');
-      link.download = `spideyplot-export-${Date.now()}.${settings.format}`;
-      
-      // TODO: Replace with actual high-quality rendering
-      updateStatusMessage(`Export completed (simulated) - ${settings.format.toUpperCase()} format`);
+      if (typeof document !== 'undefined') {
+        const link = document.createElement('a');
+        link.download = `spideyplot-export-${Date.now()}.${settings.format}`;
+        
+        // TODO: Replace with actual high-quality rendering
+        updateStatusMessage(`Export completed (simulated) - ${settings.format.toUpperCase()} format`);
+      }
       
     } catch (error) {
       console.error('Static render error:', error);
       updateStatusMessage(`Export failed: ${error}`);
     } finally {
-      _setIsStaticRendering(false);
+      setIsStaticRendering(false);
     }
   }, [updateStatusMessage]);
 
-  // Load from localStorage after hydration
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !hasLoadedFromStorage) {
-      try {
-        const saved = localStorage.getItem('nei-viz-saved-profiles');
-        if (saved) {
-          const parsedState = JSON.parse(saved);
-          setSavedProfilesState(parsedState);
-        }
-      } catch (error) {
-        console.warn('Failed to load saved profiles from localStorage:', error);
-      }
-      setHasLoadedFromStorage(true);
-    }
-  }, [hasLoadedFromStorage]);
-
-  // Persist profiles to localStorage whenever they change (but only after initial load)
-  useEffect(() => {
-    if (typeof window !== 'undefined' && hasLoadedFromStorage) {
-      try {
-        localStorage.setItem('nei-viz-saved-profiles', JSON.stringify(savedProfilesState));
-      } catch (error) {
-        console.warn('Failed to save profiles to localStorage:', error);
-      }
-    }
-  }, [savedProfilesState, hasLoadedFromStorage]);
-
-  // Add a sample profile on first load (only after localStorage has been loaded)
-  useEffect(() => {
-    if (hasLoadedFromStorage && savedProfilesState.profiles.length === 0 && groundTruthParams.Rsh > 0) {
-      const now = Date.now();
-      const sampleProfile: SavedProfile = {
-        id: 'sample_profile_default',
-        name: 'Sample Configuration',
-        description: 'Example profile showing a typical bioimpedance measurement setup',
-        created: now,
-        lastModified: now,
-        gridSize: 5,
-        minFreq: 1,
-        maxFreq: 1000,
-        numPoints: 20,
-        groundTruthParams: {
-          Rsh: 50,
-          Ra: 1000,
-          Ca: 1.0e-6,
-          Rb: 800,
-          Cb: 0.8e-6,
-          frequency_range: [1, 1000]
-        },
-        isComputed: false,
-      };
-
-      setSavedProfilesState(prev => ({
-        ...prev,
-        profiles: [sampleProfile]
-      }));
-      
-      updateStatusMessage('Welcome! A sample profile has been created to get you started.');
-    }
-  }, [hasLoadedFromStorage, groundTruthParams.Rsh, savedProfilesState.profiles.length, updateStatusMessage]);
+  // localStorage operations and sample profile creation now handled by useProfileManagement hook
 
   // Handle pending profile computation after parameters are loaded
   useEffect(() => {
@@ -1617,7 +1476,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           minFreq === profile.minFreq &&
           maxFreq === profile.maxFreq &&
           numPoints === profile.numPoints &&
-          Math.abs(groundTruthParams.Rsh - profile.groundTruthParams.Rsh) < 0.1 &&
+          Math.abs(groundTruthParams.Rs - profile.groundTruthParams.Rs) < 0.1 &&
           Math.abs(groundTruthParams.Ra - profile.groundTruthParams.Ra) < 0.1;
         
         if (paramsMatch) {
@@ -1630,15 +1489,19 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         setPendingComputeProfile(null);
       }
     }
-  }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, groundTruthParams.Rsh, groundTruthParams.Ra, handleComputeRegressionMesh, updateStatusMessage]);
+  }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, groundTruthParams.Rs, groundTruthParams.Ra, handleComputeRegressionMesh, updateStatusMessage]);
 
+
+
+  // Remove conditional render to fix hydration mismatch
+  // Components will handle client-side logic internally
 
   // Modify the main content area to show the correct tab content
   return (
     <div className="h-screen bg-black text-white flex overflow-hidden">
       {/* Left Navigation Sidebar - Full Height like ChatGPT */}
       <div 
-        className={`${leftNavCollapsed ? 'w-16' : 'w-64'} bg-neutral-900 flex flex-col transition-all duration-300 ease-in-out h-full relative group`}
+        className={`${leftNavCollapsed ? 'w-16' : 'w-64'} bg-neutral-900 flex flex-col transition-all duration-300 ease-in-out overflow-hidden relative group`}
       >
         {/* Header with logo and collapse functionality */}
         <div className="p-4 flex-shrink-0 relative">
@@ -1647,7 +1510,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             <button
               onClick={() => {
                 if (!leftNavCollapsed) {
-                  window.location.reload();
+                  if (typeof window !== 'undefined') {
+                    window.location.reload();
+                  }
                 }
               }}
               className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-neutral-700 transition-all duration-200"
@@ -1704,7 +1569,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         </div>
 
         {/* Navigation content - show when expanded */}
-        <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'} flex flex-col overflow-hidden`}>
+        <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'} flex flex-col`}>
           {/* Navigation Tabs - Extended */}
           <div className="p-3 space-y-1 flex-shrink-0">
             <button 
@@ -1770,7 +1635,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             {/* Orchestrator tab removed - functionality integrated into Playground */}
           </div>
           
-          {/* Saved Profiles Section - Scrollable */}
+          {/* Saved Profiles Section */}
           {hasLoadedFromStorage && (
             <SavedProfiles
               profiles={savedProfilesState.profiles}
@@ -1835,34 +1700,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               }));
               updateStatusMessage(`Profile "${name}" updated`);
             }}
-            onEditParameters={(profileId) => {
-              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-              if (profile) {
-                // Expand the sidebar
-                setLeftNavCollapsed(false);
-                
-                // Clear existing grid results
-                clearGridResults();
-                
-                // Load profile settings into center panel for editing
-                setGridSize(profile.gridSize);
-                setMinFreq(profile.minFreq);
-                setMaxFreq(profile.maxFreq);
-                setNumPoints(profile.numPoints);
-                setGroundTruthParams(profile.groundTruthParams);
-                
-                // Update frequencies
-                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
-                
-                // Select this profile
-                setSavedProfilesState(prev => ({ ...prev, selectedProfile: profileId }));
-                
-                // Mark parameters as changed to enable editing mode
-                setParameterChanged(true);
-                
-                updateStatusMessage(`Editing parameters for "${profile.name}" - make changes in center panel`);
-              }
-            }}
             onComputeProfile={(profileId) => {
               const profile = savedProfilesState.profiles.find(p => p.id === profileId);
               if (profile) {
@@ -1889,8 +1726,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               }
             }}
             isCollapsed={leftNavCollapsed}
-                />
-            )}
+          />
+          )}
         </div>
         
         {/* Collapsed state icons overlay - only show when collapsed */}
@@ -1957,6 +1794,23 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         </div>
       </div>
 
+      {/* Integrated Toolbox Sidebar - Always Visible */}
+      <ToolboxSidebar
+        gridSize={gridSize}
+        setGridSize={setGridSize}
+        minFreq={minFreq}
+        setMinFreq={setMinFreq}
+        maxFreq={maxFreq}
+        setMaxFreq={setMaxFreq}
+        numPoints={numPoints}
+        setNumPoints={setNumPoints}
+        staticRenderSettings={staticRenderSettings}
+        onStaticRenderSettingsChange={handleStaticRenderSettingsChange}
+        effectiveGroundTruthParams={groundTruthParams}
+        handleComputeRegressionMesh={handleComputeRegressionMesh}
+        isComputingGrid={isComputingGrid}
+      />
+
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Clean Header with integrated status */}
@@ -1973,7 +1827,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             )}
           </div>
 
-          {/* Right side: Tab-specific info and toolbox button */}
+          {/* Right side: Tab-specific info */}
           <div className="flex items-center gap-3">
             {/* Tab-specific status info */}
             {visualizationTab === 'visualizer' && (
@@ -2182,70 +2036,34 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 </div>
               </div>
             ) : visualizationTab === 'visualizer' ? (
-              // Show visualization if we have results, otherwise show configuration panel
-              (resnormGroups && resnormGroups.length > 0) ? (
-                <div className="h-full">
-                  <VisualizerTab 
-                    resnormGroups={resnormGroups}
-                    hiddenGroups={hiddenGroups}
-                    opacityLevel={opacityLevel}
-                    referenceModelId={referenceModelId}
-                    gridSize={gridSize}
-                    onGridValuesGenerated={handleGridValuesGenerated}
-                    opacityExponent={opacityExponent}
-                    onOpacityExponentChange={setOpacityExponent}
-                    userReferenceParams={groundTruthParams}
-                    staticRenderSettings={staticRenderSettings}
-                    onStaticRenderSettingsChange={setStaticRenderSettings}
-                    setGridSize={setGridSize}
-                    minFreq={minFreq}
-                    setMinFreq={setMinFreq}
-                    maxFreq={maxFreq}
-                    setMaxFreq={setMaxFreq}
-                    numPoints={numPoints}
-                    setNumPoints={setNumPoints}
-                    updateFrequencies={updateFrequencies}
-                    updateStatusMessage={updateStatusMessage}
-                    parameterChanged={_parameterChanged}
-                    setParameterChanged={setParameterChanged}
-                    handleComputeRegressionMesh={handleComputeRegressionMesh}
-                    isComputingGrid={isComputingGrid}
-                    onClearResults={clearGridResults}
-                    hasGridResults={gridResults.length > 0}
-                    groundTruthParams={groundTruthParams}
-                    setGroundTruthParams={setGroundTruthParams}
-                    createReferenceModel={createReferenceModel}
-                    setReferenceModel={setReferenceModel}
-                    onSaveProfile={handleSaveProfile}
-                    performanceSettings={performanceSettings}
-                    setPerformanceSettings={setPerformanceSettings}
-                  />
-                </div>
-              ) : (
-                <div className="h-full flex items-start justify-center p-4 overflow-y-auto">
-                  <div className="w-full max-w-4xl">
-                    <CenterParameterPanel
-                      circuitParams={groundTruthParams}
-                      onCircuitParamsChange={setGroundTruthParams}
-                      gridSize={gridSize}
-                      onGridSizeChange={setGridSize}
-                      staticRenderSettings={staticRenderSettings}
-                      onStaticRenderSettingsChange={setStaticRenderSettings}
-                      minFreq={minFreq}
-                      maxFreq={maxFreq}
-                      onMinFreqChange={setMinFreq}
-                      onMaxFreqChange={setMaxFreq}
-                      numPoints={numPoints}
-                      onNumPointsChange={setNumPoints}
-                      onCompute={handleComputeRegressionMesh}
-                      onSaveProfile={handleSaveProfile}
-                      isComputing={isComputingGrid}
-                      configurationName={configurationName}
-                      onConfigurationNameChange={setConfigurationName}
-                    />
-                  </div>
-                </div>
-              )
+              <div className="h-full">
+                <VisualizerTab 
+                  resnormGroups={resnormGroups}
+                  hiddenGroups={hiddenGroups}
+                  opacityLevel={opacityLevel}
+                  referenceModelId={referenceModelId}
+                  gridSize={gridSize}
+                  onGridValuesGenerated={handleGridValuesGenerated}
+                  opacityExponent={opacityExponent}
+                  onOpacityExponentChange={setOpacityExponent}
+                  userReferenceParams={groundTruthParams}
+                  onZoomIn={() => {/* handled by visualization */}}
+                  onZoomOut={() => {/* handled by visualization */}}
+                  onResetZoom={() => {/* handled by visualization */}}
+                  onToggleLabels={() => {/* handled by visualization */}}
+                  zoomLevel={1.0}
+                  showLabels={true}
+                  staticRenderSettings={staticRenderSettings}
+                  onStaticRenderSettingsChange={handleStaticRenderSettingsChange}
+                  groundTruthParams={groundTruthParams}
+                  setGroundTruthParams={setGroundTruthParams}
+                  createReferenceModel={createReferenceModel}
+                  setReferenceModel={setReferenceModel}
+                  onSaveProfile={handleSaveProfile}
+                  performanceSettings={performanceSettings}
+                  setPerformanceSettings={setPerformanceSettings}
+                />
+              </div>
             ) : (
               <div className="h-full p-8 text-center text-neutral-400">
                 <p>Invalid tab selection</p>

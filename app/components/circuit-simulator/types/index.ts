@@ -146,7 +146,7 @@ export interface BackendMeshPoint {
 }
 
 export interface GridParameterArrays {
-  Rs: number[];
+  Rsh: number[];
   Ra: number[];
   Rb: number[];
   Ca: number[];

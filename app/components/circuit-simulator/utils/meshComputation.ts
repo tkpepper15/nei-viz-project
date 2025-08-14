@@ -88,7 +88,7 @@ export const computeRegressionMesh = async (
       },
       body: JSON.stringify({
         reference_cell: {
-          Rs: activeSnapshot.parameters.Rs,
+          Rsh: activeSnapshot.parameters.Rsh,
           Ra: activeSnapshot.parameters.Ra,
           Ca: activeSnapshot.parameters.Ca,
           Rb: activeSnapshot.parameters.Rb,
@@ -166,8 +166,8 @@ export const computeRegressionMesh = async (
           const zb_real = point.parameters.Rb / (1 + Math.pow(2 * Math.PI * f * point.parameters.Rb * point.parameters.Cb, 2));
           const zb_imag = -2 * Math.PI * f * Math.pow(point.parameters.Rb, 2) * point.parameters.Cb / (1 + Math.pow(2 * Math.PI * f * point.parameters.Rb * point.parameters.Cb, 2));
           
-          // Add Za and Zb (in series) and then add Rs
-          const real = point.parameters.Rs + za_real + zb_real;
+          // Add Za and Zb (in series) and then add Rsh
+          const real = point.parameters.Rsh + za_real + zb_real;
           const imaginary = za_imag + zb_imag;
           
           return {
@@ -187,7 +187,7 @@ export const computeRegressionMesh = async (
           name: `Mesh Fit ${index + 1}`,
           timestamp: Date.now(),
           parameters: {
-            Rs: point.parameters.Rs,
+            Rsh: point.parameters.Rsh,
             Ra: point.parameters.Ra,
             Ca: point.parameters.Ca,
             Rb: point.parameters.Rb,
@@ -195,7 +195,7 @@ export const computeRegressionMesh = async (
             R_blank: 10, // Default value
             frequency_range: frequencyRange
           },
-          ter: point.parameters.Ra + point.parameters.Rb, // TER doesn't include Rs
+          ter: point.parameters.Ra + point.parameters.Rb, // TER doesn't include Rsh
           data,
           color: `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${point.alpha.toFixed(2)})`,
           isVisible: true,
