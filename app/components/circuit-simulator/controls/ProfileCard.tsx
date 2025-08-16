@@ -9,6 +9,11 @@ interface ProfileCardProps {
   onEdit: () => void;
   onEditParameters?: () => void;
   onCopyParams?: () => void;
+  // Multi-select functionality
+  isMultiSelectMode?: boolean;
+  isSelectedForDelete?: boolean;
+  onToggleSelect?: () => void;
+  onClick?: () => void;
 }
 
 export const ProfileCard: React.FC<ProfileCardProps> = ({
@@ -18,7 +23,11 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
   onCompute,
   onEdit,
   onEditParameters,
-  onCopyParams
+  onCopyParams,
+  isMultiSelectMode = false,
+  isSelectedForDelete = false,
+  onToggleSelect,
+  onClick
 }) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -43,9 +52,30 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
     <div
       className={`group relative rounded-lg transition-all duration-200 hover:bg-neutral-800/50 ${
         isSelected ? 'bg-neutral-700 border border-neutral-600' : ''
+      } ${
+        isSelectedForDelete ? 'ring-2 ring-blue-500 bg-blue-900/20' : ''
+      } ${
+        isMultiSelectMode ? 'cursor-pointer' : ''
       }`}
+      onClick={isMultiSelectMode ? onToggleSelect : onClick}
     >
       <div className="flex items-center p-3 gap-3">
+        {/* Multi-select checkbox */}
+        {isMultiSelectMode && (
+          <div className="flex-shrink-0">
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+              isSelectedForDelete 
+                ? 'bg-blue-600 border-blue-600' 
+                : 'border-neutral-500 hover:border-neutral-400'
+            }`}>
+              {isSelectedForDelete && (
+                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+          </div>
+        )}
         {/* Main Content - Non-clickable */}
         <div className="flex-1 min-w-0">
           {/* Profile Name */}

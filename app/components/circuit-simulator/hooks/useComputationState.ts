@@ -7,7 +7,7 @@ export const useComputationState = () => {
   // Grid computation state
   const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
   const [gridResultsWithIds, setGridResultsWithIds] = useState<(BackendMeshPoint & { id: number })[]>([]);
-  const [gridSize, setGridSize] = useState<number>(5);
+  const [gridSize, setGridSize] = useState<number>(9);
   const [gridError, setGridError] = useState<string | null>(null);
   const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
   const [gridParameterArrays, setGridParameterArrays] = useState<GridParameterArrays | null>(null);

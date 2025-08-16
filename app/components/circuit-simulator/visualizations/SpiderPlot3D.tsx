@@ -83,6 +83,26 @@ interface InteractionState {
   isCtrlPressed: boolean;
 }
 
+// Dynamic parameter configuration based on CircuitParameters type
+const getCircuitParameters = () => {
+  const parameterKeys = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'] as const;
+  return parameterKeys.map(key => {
+    const range = PARAMETER_RANGES[key];
+    const isCapacitance = key === 'Ca' || key === 'Cb';
+    return {
+      key,
+      name: isCapacitance ? `${key} (µF)` : `${key} (Ω)`,
+      desc: key === 'Rsh' ? 'Shunt' : 
+            key === 'Ra' ? 'Apical R' :
+            key === 'Ca' ? 'Apical C' :
+            key === 'Rb' ? 'Basal R' : 'Basal C',
+      range: isCapacitance ? 
+        { min: faradToMicroFarad(range.min), max: faradToMicroFarad(range.max) } : 
+        range
+    };
+  });
+};
+
 export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   models,
   referenceModel,
@@ -90,12 +110,17 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   width = 800,
   height = 600,
   showControls = true,
-  showAdvancedControls = false,
+  showAdvancedControls: _showAdvancedControls = false, // eslint-disable-line @typescript-eslint/no-unused-vars
   resnormScale = 1.0,
   gridSize = DEFAULT_GRID_SIZE,
   onRotationChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Get dynamic circuit parameters configuration
+  const circuitParams = React.useMemo(() => getCircuitParameters(), []);
+  const paramKeys = React.useMemo(() => circuitParams.map(p => p.key), [circuitParams]);
+  
   const [rotation, setRotation] = useState<Rotation3D>({ x: -30, y: 45, z: 0 });
   const [camera, setCamera] = useState<Camera3D>({
     distance: 12,
@@ -161,7 +186,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (!filteredModels.length) return [];
 
     // Parameter definitions for radar chart (shared with reference model)
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
+    const params = paramKeys;
     const paramRanges = {
       Rsh: PARAMETER_RANGES.Rsh,
       Ra: PARAMETER_RANGES.Ra,
@@ -247,7 +272,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         zHeight
       };
     });
-  }, [filteredModels, chromaEnabled, resnormScale]);
+  }, [filteredModels, chromaEnabled, resnormScale, paramKeys]);
 
   // Restored original projection with navigation improvements
   const project3D = React.useCallback((point: Point3D): { x: number; y: number; visible: boolean; depth: number } => {
@@ -309,7 +334,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
   // Draw 3D radar grid with dynamic scaling
   const draw3DRadarGrid = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
+    const params = paramKeys;
     
     ctx.save();
     ctx.strokeStyle = camera.scale > 0.5 ? '#505050' : '#707070'; // Adapt grid visibility to scale
@@ -364,7 +389,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
 
     ctx.restore();
-  }, [project3D, camera.scale]);
+  }, [project3D, camera.scale, paramKeys]);
 
   // Draw 3D polygon wireframe with depth lines and adaptive styling
   const draw3DPolygon = React.useCallback((ctx: CanvasRenderingContext2D, polygon: Polygon3D) => {
@@ -424,19 +449,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.restore();
   }, [project3D, camera.scale]);
 
-  // Draw enhanced 3D radar labels with value markers
+  // Draw enhanced 3D radar labels with intelligent value markers (min/max/median only)
   const draw3DRadarLabels = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const params = [
-      { name: 'Rsh (Ω)', desc: 'Shunt', range: PARAMETER_RANGES.Rsh },
-      { name: 'Ra (Ω)', desc: 'Apical R', range: PARAMETER_RANGES.Ra },
-      { name: 'Ca (µF)', desc: 'Apical C', range: { min: faradToMicroFarad(PARAMETER_RANGES.Ca.min), max: faradToMicroFarad(PARAMETER_RANGES.Ca.max) } },
-      { name: 'Rb (Ω)', desc: 'Basal R', range: PARAMETER_RANGES.Rb },
-      { name: 'Cb (µF)', desc: 'Basal C', range: { min: faradToMicroFarad(PARAMETER_RANGES.Cb.min), max: faradToMicroFarad(PARAMETER_RANGES.Cb.max) } }
-    ];
+    const params = circuitParams;
     
     ctx.save();
     
-    // Draw all parameter labels with enhanced styling and value markers
+    // Draw all parameter labels with enhanced styling and intelligent value markers
     params.forEach((param, i) => {
       const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
       
@@ -471,42 +490,55 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.textBaseline = 'middle';
       ctx.fillText(param.name, labelX, labelY - 6 * camera.scale);
       
-      // Draw value markers at intervals
-      const numMarkers = gridSize || 5;
-      const markerTexts = [];
+      // Draw intelligent value markers (min/max/median only)
+      let minValue: number, maxValue: number, medianValue: number;
       
-      for (let j = 0; j < numMarkers; j++) {
-        const ratio = j / (numMarkers - 1);
-        let value: number;
-        
-        if (param.name.includes('Ω')) {
-          // Logarithmic scale for resistance
-          const logMin = Math.log10(param.range.min);
-          const logMax = Math.log10(param.range.max);
-          value = Math.pow(10, logMin + ratio * (logMax - logMin));
-          markerTexts.push(value >= 1000 ? `${(value/1000).toFixed(1)}k` : value.toFixed(0));
-        } else {
-          // Linear scale for capacitance
-          value = param.range.min + ratio * (param.range.max - param.range.min);
-          markerTexts.push(value < 1 ? value.toFixed(1) : value.toFixed(0));
-        }
+      if (param.name.includes('Ω')) {
+        // Logarithmic scale for resistance
+        const logMin = Math.log10(param.range.min);
+        const logMax = Math.log10(param.range.max);
+        minValue = param.range.min;
+        maxValue = param.range.max;
+        medianValue = Math.pow(10, (logMin + logMax) / 2);
+      } else {
+        // Linear scale for capacitance
+        minValue = param.range.min;
+        maxValue = param.range.max;
+        medianValue = (param.range.min + param.range.max) / 2;
       }
       
-      // Draw value markers
+      // Format values intelligently
+      const formatValue = (value: number, isResistance: boolean) => {
+        if (isResistance) {
+          return value >= 1000 ? `${(value/1000).toFixed(1)}k` : value.toFixed(0);
+        } else {
+          return value < 1 ? value.toFixed(1) : value.toFixed(0);
+        }
+      };
+      
+      const isResistance = param.name.includes('Ω');
+      const minText = formatValue(minValue, isResistance);
+      const medianText = formatValue(medianValue, isResistance);
+      const maxText = formatValue(maxValue, isResistance);
+      
+      // Draw compact value markers (min/median/max)
       ctx.fillStyle = '#CCCCCC';
       ctx.font = '9px Arial';
-      const markerText = markerTexts.join(' | ');
+      const markerText = `${minText} | ${medianText} | ${maxText}`;
       ctx.fillText(markerText, labelX, labelY + 10);
     });
     
     ctx.restore();
-  }, [project3D, camera.scale]);
+  }, [project3D, camera.scale, circuitParams]);
 
-  // Draw modern 3D orientation cube with better visibility
+  // Draw modern 3D orientation cube with dynamic positioning
   const drawOrientationCube = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const cubeSize = Math.max(50, 70 * camera.scale);
-    const cubeX = width - cubeSize - 20;
-    const cubeY = height - cubeSize - 80; // Move to bottom-right
+    const cubeSize = Math.max(60, 80 * camera.scale); // Increased size
+    const margin = 0; // Remove margin for alignment to edge
+    const minimapHeight = 140; // Height of minimap above
+    const spacing = 10; // Small spacing between minimap and cube
+    const cubeX = width - cubeSize - margin;
+    const cubeY = minimapHeight + spacing; // Position below minimap at top-right
     
     ctx.save();
     
@@ -640,9 +672,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.fillText('Z', xStart.x + 15, xStart.y + 20);
     
     ctx.restore();
-  }, [width, height, rotation, camera.scale]);
+  }, [width, rotation, camera.scale]);
 
-  // Draw dynamic resnorm Z-axis that scales with 3D transformations
+  // Draw dynamic resnorm Z-axis with responsive positioning
   const drawResnormAxis = React.useCallback((ctx: CanvasRenderingContext2D) => {
     if (!models.length) return;
     
@@ -653,10 +685,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     
     ctx.save();
     
-    // Dynamic axis positioning relative to camera and scale
-    const axisOffset = 5.0 / camera.scale; // Scale-aware positioning
-    const axisX = axisOffset;
-    const axisY = axisOffset;
+    // Smart axis positioning that ensures visibility
+    const minOffset = 3.0; // Minimum offset to ensure visibility
+    const maxOffset = 8.0; // Maximum offset to prevent being too far
+    const screenBasedOffset = Math.min(width, height) * 0.08; // Reduced responsive factor
+    const baseOffset = Math.max(minOffset, Math.min(maxOffset, screenBasedOffset / camera.scale));
+    const axisX = baseOffset;
+    const axisY = baseOffset;
     const zAxisHeight = 5.0 * resnormScale; // Respect resnormScale prop
     
     // Draw Z-axis line with improved scaling
@@ -673,19 +708,19 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.lineTo(axisEnd.x, axisEnd.y);
       ctx.stroke();
       
-      // Draw axis ticks and labels with scale-aware formatting
-      const fontSize = Math.max(9, 11 * camera.scale);
+      // Draw axis ticks and labels with enhanced visibility
+      const fontSize = Math.max(10, Math.min(16, 12 * camera.scale)); // Better font size range
       ctx.font = `bold ${fontSize}px Arial`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       
-      const numTicks = Math.max(4, Math.min(8, Math.floor(6 * camera.scale))); // Adaptive tick count
+      const numTicks = Math.max(3, Math.min(6, 5)); // Fixed optimal tick count for readability
       for (let i = 0; i < numTicks; i++) {
         const z = (i / (numTicks - 1)) * zAxisHeight;
         const normalizedZ = i / (numTicks - 1);
         const resnormValue = minResnorm + (normalizedZ * (maxResnorm - minResnorm));
         
-        const tickSize = 0.2 / camera.scale; // Scale-aware tick size
+        const tickSize = Math.max(0.15, 0.3 / camera.scale); // Ensure minimum tick size for visibility
         const tickPoint = project3D({ x: axisX, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
         const tickEndPoint = project3D({ x: axisX + tickSize, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
         
@@ -708,52 +743,100 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             labelText = resnormValue.toExponential(2);
           }
           
-          // Draw label with scale-aware background
+          // Draw label with enhanced visibility and smart positioning
           const labelWidth = ctx.measureText(labelText).width;
-          const labelOffset = 8 * camera.scale;
-          const labelHeight = fontSize + 4;
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-          ctx.fillRect(tickEndPoint.x + labelOffset, tickEndPoint.y - labelHeight/2, labelWidth + 6, labelHeight);
+          const labelOffset = Math.max(8, 12 * camera.scale);
+          const labelHeight = fontSize + 6;
           
+          // Ensure label stays within screen bounds
+          let labelX = tickEndPoint.x + labelOffset;
+          let labelY = tickEndPoint.y;
+          
+          // Adjust if label would go off screen
+          if (labelX + labelWidth + 10 > width) {
+            labelX = tickEndPoint.x - labelOffset - labelWidth - 6; // Position to the left
+          }
+          if (labelY - labelHeight/2 < 0) {
+            labelY = labelHeight/2 + 5;
+          }
+          if (labelY + labelHeight/2 > height) {
+            labelY = height - labelHeight/2 - 5;
+          }
+          
+          // Draw enhanced background
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+          ctx.fillRect(labelX, labelY - labelHeight/2, labelWidth + 8, labelHeight);
+          ctx.strokeStyle = '#555555';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(labelX, labelY - labelHeight/2, labelWidth + 8, labelHeight);
+          
+          // Draw text with better contrast
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillText(labelText, tickEndPoint.x + labelOffset + 3, tickEndPoint.y);
+          ctx.fillText(labelText, labelX + 4, labelY);
         }
       }
       
-      // Draw scale-aware axis title
-      const titleOffset = 0.6 / camera.scale;
+      // Draw enhanced axis title with guaranteed visibility
+      const titleOffset = Math.max(0.4, 0.8 / camera.scale);
       const titlePoint = project3D({ x: axisX + titleOffset, y: axisY, z: zAxisHeight / 2, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (titlePoint.visible) {
-        ctx.save();
-        ctx.translate(titlePoint.x, titlePoint.y);
-        ctx.rotate(-Math.PI / 2);
-        
-        const titleFontSize = Math.max(12, 14 * camera.scale);
-        const titleWidth = 60 * camera.scale;
-        const titleHeight = titleFontSize + 8;
-        
-        // Title background
+      
+      // Always show title, even if projected point is not visible
+      const titleX = titlePoint.visible ? titlePoint.x : Math.min(width * 0.8, 100);
+      const titleY = titlePoint.visible ? titlePoint.y : height * 0.3;
+      
+      ctx.save();
+      ctx.translate(titleX, titleY);
+      ctx.rotate(-Math.PI / 2);
+      
+      const titleFontSize = Math.max(14, Math.min(18, 16 * camera.scale));
+      const titleWidth = Math.max(70, 80 * camera.scale);
+      const titleHeight = titleFontSize + 10;
+      
+      // Enhanced title background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+      ctx.fillRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
+      ctx.strokeStyle = '#666666';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
+      
+      // Enhanced title text
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `bold ${titleFontSize}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Resnorm', 0, 0);
+      ctx.restore();
+      
+      // Add fallback axis info in bottom-left if main axis is not clearly visible
+      if (!axisStart.visible || !axisEnd.visible || camera.scale < 0.5) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
+        ctx.fillRect(5, height - 80, 120, 60);
+        ctx.strokeStyle = '#555555';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(5, height - 80, 120, 60);
         
-        // Title text
         ctx.fillStyle = '#FFFFFF';
-        ctx.font = `bold ${titleFontSize}px Arial`;
-        ctx.textAlign = 'center';
-        ctx.fillText('Resnorm', 0, 0);
-        ctx.restore();
+        ctx.font = 'bold 11px Arial';
+        ctx.textAlign = 'left';
+        ctx.fillText('Z-Axis: Resnorm', 10, height - 65);
+        ctx.font = '9px Arial';
+        ctx.fillStyle = '#CCCCCC';
+        ctx.fillText(`Min: ${minResnorm.toExponential(2)}`, 10, height - 50);
+        ctx.fillText(`Max: ${maxResnorm.toExponential(2)}`, 10, height - 37);
+        ctx.fillText(`Scale: ${resnormScale.toFixed(1)}x`, 10, height - 24);
       }
     }
     
     ctx.restore();
-  }, [models, project3D, camera.scale, resnormScale]);
+  }, [width, models, project3D, camera.scale, resnormScale]);
 
-  // Draw resnorm spectrum mini-map
+  // Draw resnorm spectrum mini-map with dynamic positioning
   const drawResnormMinimap = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const mapWidth = 180;
-    const mapHeight = 120;
-    const mapX = width - mapWidth - 15;
-    const mapY = 15;
+    const mapWidth = 220; // Increased from 180
+    const mapHeight = 140; // Increased from 120
+    const margin = 0; // Remove margin for complete alignment
+    const mapX = width - mapWidth - margin; // Position at top-right edge completely
+    const mapY = margin;
     
     ctx.save();
     
@@ -815,62 +898,109 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.fillText(`Models: ${models.length}`, mapX + mapWidth - 5, mapY + 15);
     
     ctx.restore();
-  }, [width, models.length, minimapState]);
+  }, [width, height, models.length, minimapState]);
 
-  // Draw procedural rendering status and context
-  const drawProceduralContext = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const statusWidth = 250;
-    const statusHeight = 40;
-    const statusX = 15;
-    const statusY = height - statusHeight - 15;
+  // Draw parameter values list with dynamic positioning
+  const drawParameterValuesList = React.useCallback((ctx: CanvasRenderingContext2D) => {
+    const params = circuitParams;
+    const listWidth = 400; // Increased from 280
+    const listHeight = 220; // Increased from 160
+    const margin = 0; // Remove margin for complete alignment
+    const listX = margin; // Position at bottom-left edge completely
+    const listY = height - listHeight - margin;
     
     ctx.save();
     
-    // Draw status background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-    ctx.fillRect(statusX, statusY, statusWidth, statusHeight);
+    // Draw background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(listX, listY, listWidth, listHeight);
     ctx.strokeStyle = '#555555';
     ctx.lineWidth = 1;
-    ctx.strokeRect(statusX, statusY, statusWidth, statusHeight);
+    ctx.strokeRect(listX, listY, listWidth, listHeight);
     
-    // Determine rendering status
-    const totalPossibleModels = 100000; // Theoretical maximum
-    const renderingMode = models.length > 10000 ? 'Procedural' : 'Direct';
-    const renderPercentage = Math.min(100, (models.length / totalPossibleModels) * 100);
-    
-    // Draw status text
+    // Draw title
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '11px Arial';
+    ctx.font = 'bold 16px Arial'; // Increased font size
     ctx.textAlign = 'left';
-    ctx.fillText(`Rendering: ${renderingMode} Mode | ${models.length.toLocaleString()} models (${renderPercentage.toFixed(1)}%)`, statusX + 8, statusY + 15);
+    ctx.fillText('Parameter Values', listX + 12, listY + 20);
     
-    // Draw performance indicator
-    const perfColor = models.length > 50000 ? '#FF6B35' : models.length > 10000 ? '#FFB84D' : '#4CAF50';
-    const perfText = models.length > 50000 ? 'High Load' : models.length > 10000 ? 'Medium Load' : 'Optimal';
-    
-    ctx.fillStyle = perfColor;
-    ctx.fillText(`Performance: ${perfText}`, statusX + 8, statusY + 30);
-    
-    // Draw data quality indicator
-    const dataQuality = minimapState.visibleRange.max - minimapState.visibleRange.min;
-    const qualityText = dataQuality > (minimapState.totalRange.max - minimapState.totalRange.min) * 0.5 ? 'Full Range' : 'Partial Range';
-    
+    // Draw grid size info
+    const numPoints = gridSize || 5;
     ctx.fillStyle = '#CCCCCC';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Data: ${qualityText}`, statusX + statusWidth - 8, statusY + 30);
+    ctx.font = '12px Arial'; // Increased font size
+    ctx.fillText(`${numPoints} points per parameter`, listX + 12, listY + 40);
+    
+    // Draw parameter values for each parameter
+    params.forEach((param, i) => {
+      const startY = listY + 55 + (i * 30); // Increased spacing
+      
+      // Parameter name
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = 'bold 13px Arial'; // Increased font size
+      ctx.fillText(param.name, listX + 12, startY);
+      
+      // Generate all values for this parameter
+      const values: string[] = [];
+      
+      for (let j = 0; j < numPoints; j++) {
+        const ratio = j / (numPoints - 1);
+        let value: number;
+        
+        if (param.name.includes('Ω')) {
+          // Logarithmic scale for resistance
+          const logMin = Math.log10(param.range.min);
+          const logMax = Math.log10(param.range.max);
+          value = Math.pow(10, logMin + ratio * (logMax - logMin));
+          values.push(value >= 1000 ? `${(value/1000).toFixed(1)}kΩ` : `${value.toFixed(0)}Ω`);
+        } else {
+          // Linear scale for capacitance  
+          value = param.range.min + ratio * (param.range.max - param.range.min);
+          values.push(value < 1 ? `${value.toFixed(1)}µF` : `${value.toFixed(0)}µF`);
+        }
+      }
+      
+      // Draw values
+      ctx.fillStyle = '#AAAAAA';
+      ctx.font = '11px Arial'; // Increased font size
+      const valuesText = values.join(', ');
+      
+      // Handle text wrapping if too long
+      const maxWidth = listWidth - 30; // More padding for larger text
+      if (ctx.measureText(valuesText).width > maxWidth) {
+        // Split into two lines if needed
+        const midPoint = Math.ceil(values.length / 2);
+        const line1 = values.slice(0, midPoint).join(', ');
+        const line2 = values.slice(midPoint).join(', ');
+        
+        ctx.fillText(line1, listX + 12, startY + 15);
+        ctx.fillText(line2, listX + 12, startY + 28);
+      } else {
+        ctx.fillText(valuesText, listX + 12, startY + 15);
+      }
+    });
     
     ctx.restore();
-  }, [height, models.length, minimapState]);
+  }, [width, circuitParams, gridSize]);
 
-  // Render 3D visualization
+  // Render 3D visualization with enhanced smoothness
   const render3D = React.useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { 
+      alpha: true, 
+      desynchronized: true,
+      willReadFrequently: false
+    }) as CanvasRenderingContext2D | null;
     if (!ctx) return;
 
-    // Clear canvas
+    // Enable smoothing for better rendering quality
+    if ('imageSmoothingEnabled' in ctx) {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    }
+    
+    // Clear canvas with anti-aliasing
     ctx.clearRect(0, 0, width, height);
 
     // Set canvas background
@@ -893,7 +1023,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
     // Render reference model if provided
     if (referenceModel) {
-      const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
+      const params = paramKeys;
       const paramRanges = {
         Rsh: PARAMETER_RANGES.Rsh,
         Ra: PARAMETER_RANGES.Ra,
@@ -967,13 +1097,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw minimap overlay
     drawResnormMinimap(ctx);
     
-    // Draw procedural rendering context
-    drawProceduralContext(ctx);
+    // Draw parameter values list
+    drawParameterValuesList(ctx);
     
     // Draw orientation cube
     drawOrientationCube(ctx);
 
-  }, [convert3DPolygons, project3D, referenceModel, width, height, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawResnormMinimap, drawProceduralContext, drawOrientationCube]);
+  }, [convert3DPolygons, project3D, referenceModel, width, height, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawResnormMinimap, drawParameterValuesList, drawOrientationCube, paramKeys]);
 
   // Professional 3D navigation handlers (Blender/Onshape-style)
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -999,13 +1129,15 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
     const deltaX = e.clientX - interaction.lastMousePos.x;
     const deltaY = e.clientY - interaction.lastMousePos.y;
-    const sensitivity = 0.5;
+    const sensitivity = 0.3; // Reduced for smoother interaction
 
     if (interaction.dragMode === 'orbit') {
-      // Orbit around target
+      // Orbit around target with smooth interpolation
+      const smoothedDeltaX = deltaX * sensitivity;
+      const smoothedDeltaY = deltaY * sensitivity;
       const newRotation = {
-        x: Math.max(-89, Math.min(89, rotation.x + deltaY * sensitivity)),
-        y: (rotation.y + deltaX * sensitivity) % 360,
+        x: Math.max(-89, Math.min(89, rotation.x + smoothedDeltaY)),
+        y: (rotation.y + smoothedDeltaX) % 360,
         z: rotation.z
       };
       setRotation(newRotation);
@@ -1013,8 +1145,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         onRotationChange(newRotation);
       }
     } else if (interaction.dragMode === 'pan') {
-      // Pan the target (world space movement)
-      const panSensitivity = 0.005 * camera.distance;
+      // Pan the target with smooth movement
+      const panSensitivity = 0.003 * camera.distance; // Reduced for smoother panning
       setCamera(prev => ({
         ...prev,
         target: {
@@ -1024,8 +1156,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         }
       }));
     } else if (interaction.dragMode === 'zoom') {
-      // Zoom by dragging
-      const zoomSensitivity = 0.01;
+      // Zoom by dragging with smooth scaling
+      const zoomSensitivity = 0.008; // Reduced for smoother zooming
       const zoomDelta = 1 + (deltaY * zoomSensitivity);
       setCamera(prev => ({
         ...prev,
@@ -1045,17 +1177,17 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const zoomSpeed = 0.1;
+    const zoomSpeed = 0.05; // Reduced for smoother zooming
     const zoomFactor = e.deltaY > 0 ? (1 + zoomSpeed) : (1 - zoomSpeed);
     
     if (e.shiftKey) {
-      // Shift+scroll for scale adjustment
+      // Shift+scroll for smooth scale adjustment
       setCamera(prev => ({
         ...prev,
         scale: Math.max(0.1, Math.min(10, prev.scale * zoomFactor))
       }));
     } else {
-      // Normal scroll for distance zoom
+      // Normal scroll for smooth distance zoom
       setCamera(prev => ({
         ...prev,
         distance: Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomFactor))
@@ -1128,18 +1260,19 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   }, [render3D]);
 
   return (
-    <div className="relative bg-black rounded-lg overflow-hidden border border-neutral-700">
+    <div className="relative bg-black overflow-hidden w-full h-full">
       <canvas
         ref={canvasRef}
         width={width}
         height={height}
-        className={`${
+        className={`w-full h-full object-contain ${
           interaction.isDragging 
             ? interaction.dragMode === 'pan' ? 'cursor-move' 
               : interaction.dragMode === 'zoom' ? 'cursor-ns-resize'
               : 'cursor-grabbing'
             : 'cursor-grab'
         } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50`}
+        style={{ maxWidth: '100%', maxHeight: '100%' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1149,8 +1282,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         onFocus={() => canvasRef.current?.focus()}
       />
       
-      {/* Navigation Toolbar */}
-      <div className="absolute top-4 left-4 bg-gray-900 bg-opacity-80 rounded p-2">
+      {/* Navigation Toolbar - Dynamic positioning */}
+      <div className="absolute top-4 left-4 bg-gray-900 bg-opacity-80 rounded p-2 z-10">
         <div className="flex flex-col space-y-2">
           {/* View Controls */}
           <div className="flex space-x-1">
@@ -1247,22 +1380,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       {showControls && (
         <div className="absolute bottom-4 right-4">
           <div className="bg-black bg-opacity-80 p-3 rounded text-white text-xs">
-            <div className="space-y-2">
+            <div className="space-y-1">
               <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
-              {showAdvancedControls && (
-                <>
-                  <div className="border-t border-gray-600 pt-2 space-y-1">
-                    <div>Pitch: {rotation.x.toFixed(1)}° • Yaw: {rotation.y.toFixed(1)}°</div>
-                    <div>Distance: {camera.distance.toFixed(1)} • Scale: {camera.scale.toFixed(2)}x</div>
-                  </div>
-                </>
-              )}
-              <button
-                onClick={() => {/* Toggle advanced controls via parent component */}}
-                className="text-xs text-blue-400 hover:text-blue-300 underline"
-              >
-                {showAdvancedControls ? 'Hide' : 'Show'} Details
-              </button>
+              <div className="text-xs text-gray-400">WASD/Arrows: Navigate • R: Reset • F: Focus</div>
             </div>
           </div>
         </div>

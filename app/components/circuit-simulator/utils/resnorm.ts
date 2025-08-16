@@ -128,13 +128,15 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
 
 /**
  * Calculate residual norm (resnorm) between reference and test data.
- * Uses the simplified formula: (1/n) * sqrt(sum(ri^2))
- * With optional range amplification.
+ * Uses the formula: (1/n) * sqrt(sum(wi * ri^2)) with optional frequency weighting.
+ * With optional range amplification and frequency weighting.
  * 
  * @param testData Array of impedance points to compare against reference
  * @param referenceData Array of reference impedance points
  * @param logFunction Optional logging function for debugging
+ * @param frequency Optional frequency for single point comparison
  * @param useRangeAmplification Optional toggle for range amplification
+ * @param useFrequencyWeighting Optional toggle for frequency weighting (w = f^-0.5)
  * @returns The calculated resnorm value
  */
 export const calculateResnorm = (
@@ -142,7 +144,8 @@ export const calculateResnorm = (
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
   frequency?: number,
-  useRangeAmplification: boolean = false
+  useRangeAmplification: boolean = false,
+  useFrequencyWeighting: boolean = false
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
@@ -167,7 +170,7 @@ export const calculateResnorm = (
     };
     
     // Convert to arrays and call the main implementation
-    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification);
+    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification, useFrequencyWeighting);
   }
   
   // Handle arrays case (main implementation)
@@ -210,8 +213,9 @@ export const calculateResnorm = (
 
   if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
-  // Calculate sum of squared residuals using formula: (1/n) * sqrt(sum(ri^2))
-  let sumSquaredResiduals = 0;
+  // Calculate sum of squared residuals using formula: (1/n) * sqrt(sum(wi * ri^2))
+  let sumWeightedSquaredResiduals = 0;
+  let sumWeights = 0;
   const n = matchedData.length;
 
   for (const point of matchedData) {
@@ -222,15 +226,31 @@ export const calculateResnorm = (
     // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    sumSquaredResiduals += squaredResidual;
+    // Apply frequency weighting if enabled
+    let weight = 1.0;
+    if (useFrequencyWeighting && point.frequency > 0) {
+      // Frequency weighting: w = f^(-0.5) emphasizes low frequencies
+      weight = Math.pow(point.frequency, -0.5);
+    }
+    
+    sumWeightedSquaredResiduals += weight * squaredResidual;
+    sumWeights += weight;
     
     if (logger) {
-      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}`);
+      const weightStr = useFrequencyWeighting ? ` (weight: ${weight.toFixed(4)})` : '';
+      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}${weightStr}`);
     }
   }
 
-  // Calculate base resnorm: (1/n) * sqrt(sum(ri^2))
-  const baseResnorm = (1 / n) * Math.sqrt(sumSquaredResiduals);
+  // Calculate base resnorm with or without weighting
+  let baseResnorm: number;
+  if (useFrequencyWeighting && sumWeights > 0) {
+    // Weighted resnorm: sqrt(sum(wi * ri^2) / sum(wi))
+    baseResnorm = Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
+  } else {
+    // Standard resnorm: (1/n) * sqrt(sum(ri^2))
+    baseResnorm = (1 / n) * Math.sqrt(sumWeightedSquaredResiduals);
+  }
   
   // Apply range amplification if enabled
   let finalResnorm = baseResnorm;
