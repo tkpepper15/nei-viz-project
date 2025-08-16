@@ -252,6 +252,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           data: { 
             gridSize,
             useSymmetricGrid: performanceSettings.useSymmetricGrid,
+            useFrequencyWeighting: performanceSettings.useFrequencyWeighting,
             groundTruthParams
           }
         });
@@ -352,7 +353,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
               frequencyArray: frequencies,
               chunkIndex,
               totalChunks: chunks.length,
-              referenceSpectrum
+              referenceSpectrum,
+              useFrequencyWeighting: performanceSettings.useFrequencyWeighting
             }
           });
         });
@@ -508,6 +510,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         data: {
           gridSize,
           useSymmetricGrid: performanceSettings.useSymmetricGrid,
+          useFrequencyWeighting: performanceSettings.useFrequencyWeighting,
           chunkSize: Math.min(chunkSize, 5000), // Smaller chunks for streaming
           groundTruthParams
         }
@@ -561,7 +564,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     frequencyArray: frequencies,
                     chunkIndex: totalProcessed,
                     totalChunks: -1, // Unknown for streaming
-                    referenceSpectrum
+                    referenceSpectrum,
+                    useFrequencyWeighting: performanceSettings.useFrequencyWeighting
                   }
                 });
               });

@@ -139,6 +139,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
+  
+  // Multi-select state for circuits
+  const [selectedCircuits, setSelectedCircuits] = useState<string[]>([]);
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState<boolean>(false);
   // Track if reference model was manually hidden
   const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
   // Configuration name for saving profiles
@@ -240,11 +244,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   }, [updateStatusMessage]);
   
   const [referenceParams, setReferenceParams] = useState<CircuitParameters>({
-    Rsh: 24,
-    Ra: 500,
-    Ca: 0.5e-6, // 0.5 microfarads (converted to farads)
-    Rb: 500,
-    Cb: 0.5e-6, // 0.5 microfarads (converted to farads)
+    Rsh: 100,
+    Ra: 1000,
+    Ca: 1.0e-6, // 1.0 microfarads (converted to farads)
+    Rb: 800,
+    Cb: 0.8e-6, // 0.8 microfarads (converted to farads)
     frequency_range: [minFreq, maxFreq]
   });
   
@@ -256,30 +260,128 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [currentPhases, setCurrentPhases] = useState<PipelinePhase[]>([]);
   const [referenceModel, setReferenceModel] = useState<ModelSnapshot | null>(null);
   
-  // Ground truth parameters state
-  const [groundTruthParams, setGroundTruthParams] = useState<CircuitParameters>({
-    Rsh: 50,      // Higher shunt resistance for better curve shape
-    Ra: 1000,     // Higher apical resistance for clearer semicircles
-    Ca: 1.0e-6,   // 1.0 microfarads for appropriate time constants
-    Rb: 800,      // Slightly different basal resistance for asymmetric semicircles
-    Cb: 0.8e-6,   // 0.8 microfarads for better frequency response
-    frequency_range: [minFreq, maxFreq]
-  });
+  // Ground truth parameters now use the user-controlled parameters directly
   
-  // Use a single parameters state object
+  // Use a single parameters state object with new standard starting configuration
   const [parameters, setParameters] = useState<CircuitParameters>({
-    Rsh: 50,      // Match ground truth parameters
-    Ra: 1000,     // Match ground truth parameters
-    Ca: 1.0e-6,   // Match ground truth parameters
-    Rb: 800,      // Match ground truth parameters
-    Cb: 0.8e-6,   // Match ground truth parameters
+    Rsh: 100,     // Standard shunt resistance
+    Ra: 1000,     // Standard apical resistance
+    Ca: 1.0e-6,   // Standard apical capacitance (1.0 µF)
+    Rb: 800,      // Standard basal resistance
+    Cb: 0.8e-6,   // Standard basal capacitance (0.8 µF)
     frequency_range: [0.1, 100000]
   });
+  
+  // Function to create a new circuit with standard configuration
+  const handleNewCircuit = useCallback(() => {
+    // Clear any existing results
+    resetComputationState();
+    
+    // Reset to standard starting configuration
+    setParameters({
+      Rsh: 100,
+      Ra: 1000,
+      Ca: 1.0e-6,
+      Rb: 800,
+      Cb: 0.8e-6,
+      frequency_range: [0.1, 100000]
+    });
+    
+    // Reset frequency settings
+    setMinFreq(0.1);
+    setMaxFreq(100000);
+    setNumPoints(100);
+    
+    // Reset grid size
+    setGridSize(5);
+    
+    // Reset configuration name
+    setConfigurationName('');
+    
+    // Update status
+    updateStatusMessage('New circuit created with standard configuration');
+  }, [resetComputationState, updateStatusMessage, setGridSize]);
+  
+  // Multi-select functions
+  const handleToggleMultiSelect = useCallback(() => {
+    setIsMultiSelectMode(!isMultiSelectMode);
+    setSelectedCircuits([]);
+  }, [isMultiSelectMode]);
+  
+  const handleSelectCircuit = useCallback((profileId: string) => {
+    if (isMultiSelectMode) {
+      setSelectedCircuits(prev => 
+        prev.includes(profileId) 
+          ? prev.filter(id => id !== profileId)
+          : [...prev, profileId]
+      );
+    } else {
+      // Normal single selection behavior
+      // Clear any pending computation
+      setPendingComputeProfile(null);
+      
+      // Clear existing grid results when switching profiles
+      resetComputationState();
+      
+      // Mark all profiles as not computed since we cleared the results
+      setSavedProfilesState(prev => ({
+        ...prev,
+        selectedProfile: profileId,
+        profiles: prev.profiles.map(p => ({ ...p, isComputed: false }))
+      }));
+      
+      const profile = savedProfilesState.profiles.find(p => p.id === profileId);
+      if (profile) {
+        // Load profile settings into current state
+        setGridSize(profile.gridSize);
+        setMinFreq(profile.minFreq);
+        setMaxFreq(profile.maxFreq);
+        setNumPoints(profile.numPoints);
+        setParameters(profile.groundTruthParams);
+        
+        // Update frequencies based on loaded settings
+        updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+        
+        // Mark parameters as changed to enable recompute
+        setParameterChanged(true);
+        
+        updateStatusMessage(`Loaded profile: ${profile.name} - Previous grid data cleared, ready to compute`);
+      }
+    }
+  }, [isMultiSelectMode, resetComputationState, setSavedProfilesState, savedProfilesState.profiles, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage]);
+  
+  const handleBulkDelete = useCallback(() => {
+    if (selectedCircuits.length === 0) return;
+    
+    // Check if currently selected profile is being deleted
+    const wasCurrentlySelectedDeleted = selectedCircuits.includes(savedProfilesState.selectedProfile || '');
+    if (wasCurrentlySelectedDeleted) {
+      resetComputationState();
+    }
+    
+    // Remove selected profiles
+    setSavedProfilesState(prev => ({
+      ...prev,
+      profiles: prev.profiles.filter(p => !selectedCircuits.includes(p.id)),
+      selectedProfile: wasCurrentlySelectedDeleted ? null : prev.selectedProfile
+    }));
+    
+    const deletedCount = selectedCircuits.length;
+    setSelectedCircuits([]);
+    setIsMultiSelectMode(false);
+    
+    updateStatusMessage(
+      wasCurrentlySelectedDeleted 
+        ? `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted and grid data cleared`
+        : `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted`
+    );
+  }, [selectedCircuits, savedProfilesState.selectedProfile, resetComputationState, setSavedProfilesState, updateStatusMessage]);
   
   // Add state for grid parameter arrays
   const [gridParameterArrays, setGridParameterArrays] = useState<GridParameterArrays | null>(null);
   
   // Performance settings state
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [performanceSettings, setPerformanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
   
   // Current memory usage for performance monitoring
@@ -308,7 +410,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const cb50 = cbRange.min + (cbRange.max - cbRange.min) * 0.5;
 
     // Set default starting values at 50% of ranges
-    setGroundTruthParams({
+    setParameters({
       Rsh: rs50,
       Ra: ra50,
       Ca: ca50,
@@ -334,12 +436,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         referenceParams.frequency_range[1] === maxFreq) {
       // Create the reference object directly without calling the function
       setReferenceParams({
-        Rsh: groundTruthParams.Rsh,
-        Ra: groundTruthParams.Ra,
-        Ca: groundTruthParams.Ca,
-        Rb: groundTruthParams.Rb,
-        Cb: groundTruthParams.Cb,
-        frequency_range: groundTruthParams.frequency_range
+        Rsh: parameters.Rsh,
+        Ra: parameters.Ra,
+        Ca: parameters.Ca,
+        Rb: parameters.Rb,
+        Cb: parameters.Cb,
+        frequency_range: parameters.frequency_range
       });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -371,8 +473,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       // Instead, just use the locally calculated frequencies
     }
     
-    // Use groundTruthParams instead of parameters for the reference model
-    const { Rsh, Ra, Ca, Rb, Cb } = groundTruthParams;
+    // Use user-controlled parameters for the reference model (ground truth)
+    const { Rsh, Ra, Ca, Rb, Cb } = parameters;
     
     // Compute impedance at each frequency
     const impedanceData: ImpedancePoint[] = [];
@@ -409,7 +511,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       timestamp: Date.now(),
       ter: Rsh + Ra + Rb
     };
-  }, [groundTruthParams, minFreq, maxFreq, numPoints, frequencyPoints]);
+  }, [parameters, minFreq, maxFreq, numPoints, frequencyPoints]);
 
   // Function to calculate impedance at a single frequency
   const calculateCircuitImpedance = (params: CircuitParameters, frequency: number) => {
@@ -468,14 +570,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Create and show reference model by default
   useEffect(() => {
-    // Create the reference model when groundTruthParams are initialized
-    if (groundTruthParams.Rsh && !referenceModelId && !manuallyHidden) {
+    // Create the reference model when parameters are initialized
+    if (parameters.Rsh && !referenceModelId && !manuallyHidden) {
       const newReferenceModel = createReferenceModel();
       setReferenceModel(newReferenceModel);
       setReferenceModelId('dynamic-reference');
       updateStatusMessage('Reference model created with current parameters');
     }
-  }, [groundTruthParams.Rsh, referenceModelId, createReferenceModel, manuallyHidden, updateStatusMessage]);
+  }, [parameters.Rsh, referenceModelId, createReferenceModel, manuallyHidden, updateStatusMessage]);
 
   // Update reference model when parameters change
   useEffect(() => {
@@ -484,7 +586,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setReferenceModel(updatedModel);
       updateStatusMessage('Reference model updated with current parameters');
     }
-  }, [groundTruthParams, createReferenceModel, referenceModelId, manuallyHidden, updateStatusMessage]);
+  }, [parameters, createReferenceModel, referenceModelId, manuallyHidden, updateStatusMessage]);
   
   // Add event listeners for custom events from VisualizerTab
   useEffect(() => {
@@ -978,7 +1080,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
       // Run the parallel computation
       const results = await computeGridParallel(
-        groundTruthParams,
+        parameters,
         gridSize,
         minFreq,
         maxFreq,
@@ -1278,14 +1380,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, groundTruthParams, isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, setSavedProfilesState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, parameters, isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, setSavedProfilesState]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [currentPage, setCurrentPage] = useState(1);
   
   // Update frequency array when range changes - called internally
-  const updateFrequencies = (min: number, max: number, points: number) => {
+  const updateFrequencies = useCallback((min: number, max: number, points: number) => {
     // Validate frequency range
     if (min <= 0) {
       console.warn("Minimum frequency must be positive, setting to 0.01 Hz");
@@ -1326,7 +1428,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     
     // Mark parameters as changed - will require recomputing the grid
     setParameterChanged(true);
-  };
+  }, [setMinFreq, setMaxFreq, setNumPoints, setParameters, setFrequencyPoints, updateStatusMessage, setParameterChanged]);
   
 
 
@@ -1401,16 +1503,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     });
   }, []);
 
-  // Handler for clearing grid results from memory
-  const clearGridResults = useCallback(() => {
-    setGridResults([]);
-    setGridResultsWithIds([]);
-    setResnormGroups([]);
-    setGridParameterArrays(null);
-    setComputationSummary(null);
-    setParameterChanged(false);
-    updateStatusMessage('Grid results cleared from memory');
-  }, [updateStatusMessage, setComputationSummary, setGridResults, setGridResultsWithIds, setResnormGroups]);
+  // Note: Grid clearing functionality is now handled by resetComputationState from useComputationState hook
 
   // Wrapper for cancel computation that also clears pending profile
   const handleCancelComputation = useCallback(() => {
@@ -1439,7 +1532,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       numPoints,
       
       // Circuit parameters
-      groundTruthParams: { ...groundTruthParams },
+      groundTruthParams: { ...parameters },
       
       // Computation status
       isComputed: false,
@@ -1452,7 +1545,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }));
 
     updateStatusMessage(`Profile "${name}" saved with current settings`);
-  }, [gridSize, minFreq, maxFreq, numPoints, groundTruthParams, updateStatusMessage]);
+  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage]);
 
 
 
@@ -1574,7 +1667,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Add a sample profile on first load (only after localStorage has been loaded)
   useEffect(() => {
-    if (hasLoadedFromStorage && savedProfilesState.profiles.length === 0 && groundTruthParams.Rsh > 0) {
+    if (hasLoadedFromStorage && savedProfilesState.profiles.length === 0 && parameters.Rsh > 0) {
       const now = Date.now();
       const sampleProfile: SavedProfile = {
         id: 'sample_profile_default',
@@ -1604,7 +1697,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       updateStatusMessage('Welcome! A sample profile has been created to get you started.');
     }
-  }, [hasLoadedFromStorage, groundTruthParams.Rsh, savedProfilesState.profiles.length, updateStatusMessage]);
+  }, [hasLoadedFromStorage, parameters.Rsh, savedProfilesState.profiles.length, updateStatusMessage]);
 
   // Handle pending profile computation after parameters are loaded
   useEffect(() => {
@@ -1617,8 +1710,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           minFreq === profile.minFreq &&
           maxFreq === profile.maxFreq &&
           numPoints === profile.numPoints &&
-          Math.abs(groundTruthParams.Rsh - profile.groundTruthParams.Rsh) < 0.1 &&
-          Math.abs(groundTruthParams.Ra - profile.groundTruthParams.Ra) < 0.1;
+          Math.abs(parameters.Rsh - profile.groundTruthParams.Rsh) < 0.1 &&
+          Math.abs(parameters.Ra - profile.groundTruthParams.Ra) < 0.1;
         
         if (paramsMatch) {
           updateStatusMessage(`Starting computation for profile "${profile.name}"...`);
@@ -1630,7 +1723,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         setPendingComputeProfile(null);
       }
     }
-  }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, groundTruthParams.Rsh, groundTruthParams.Ra, handleComputeRegressionMesh, updateStatusMessage]);
+  }, [pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, parameters.Rsh, parameters.Ra, handleComputeRegressionMesh, updateStatusMessage]);
 
 
   // Modify the main content area to show the correct tab content
@@ -1705,8 +1798,21 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
         {/* Navigation content - show when expanded */}
         <div className={`flex-1 transition-all duration-300 ${leftNavCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'} flex flex-col overflow-hidden`}>
+          {/* New Circuit Button - Expanded */}
+          <div className="p-3 pb-2 flex-shrink-0">
+            <button
+              onClick={handleNewCircuit}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Circuit
+            </button>
+          </div>
+          
           {/* Navigation Tabs - Extended */}
-          <div className="p-3 space-y-1 flex-shrink-0">
+          <div className="px-3 pb-3 space-y-1 flex-shrink-0">
             <button 
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
                 visualizationTab === 'visualizer' 
@@ -1776,12 +1882,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               profiles={savedProfilesState.profiles}
               selectedProfile={savedProfilesState.selectedProfile}
               onCopyParams={handleCopyParams}
-            onSelectProfile={(profileId) => {
+              selectedCircuits={selectedCircuits}
+              isMultiSelectMode={isMultiSelectMode}
+              onToggleMultiSelect={handleToggleMultiSelect}
+              onBulkDelete={handleBulkDelete}
+            onSelectProfile={handleSelectCircuit}
+            onSelectProfileOriginal={(profileId) => {
               // Clear any pending computation
               setPendingComputeProfile(null);
               
               // Clear existing grid results when switching profiles
-              clearGridResults();
+              resetComputationState();
               
               // Mark all profiles as not computed since we cleared the results
               setSavedProfilesState(prev => ({
@@ -1797,7 +1908,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 setMinFreq(profile.minFreq);
                 setMaxFreq(profile.maxFreq);
                 setNumPoints(profile.numPoints);
-                setGroundTruthParams(profile.groundTruthParams);
+                setParameters(profile.groundTruthParams);
                 
                 // Update frequencies based on loaded settings
                 updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
@@ -1812,7 +1923,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               // Clear grid results if we're deleting the currently selected profile
               const wasSelected = savedProfilesState.selectedProfile === profileId;
               if (wasSelected) {
-                clearGridResults();
+                resetComputationState();
               }
               
               setSavedProfilesState(prev => ({
@@ -1842,14 +1953,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 setLeftNavCollapsed(false);
                 
                 // Clear existing grid results
-                clearGridResults();
+                resetComputationState();
                 
                 // Load profile settings into center panel for editing
                 setGridSize(profile.gridSize);
                 setMinFreq(profile.minFreq);
                 setMaxFreq(profile.maxFreq);
                 setNumPoints(profile.numPoints);
-                setGroundTruthParams(profile.groundTruthParams);
+                setParameters(profile.groundTruthParams);
                 
                 // Update frequencies
                 updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
@@ -1867,14 +1978,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               const profile = savedProfilesState.profiles.find(p => p.id === profileId);
               if (profile) {
                 // Clear existing grid results first
-                clearGridResults();
+                resetComputationState();
                 
                 // Load profile settings
                 setGridSize(profile.gridSize);
                 setMinFreq(profile.minFreq);
                 setMaxFreq(profile.maxFreq);
                 setNumPoints(profile.numPoints);
-                setGroundTruthParams(profile.groundTruthParams);
+                setParameters(profile.groundTruthParams);
                 
                 // Update frequencies
                 updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
@@ -1897,6 +2008,19 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         <div className={`absolute inset-0 flex flex-col transition-all duration-300 ${leftNavCollapsed ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
           {/* Skip header area - updated for wider collapsed bar */}
           <div className="h-20 flex-shrink-0"></div>
+          
+          {/* New Circuit Button - Collapsed */}
+          <div className="flex-shrink-0 px-2 pb-2">
+            <button
+              onClick={handleNewCircuit}
+              className="w-10 h-10 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-200"
+              title="New Circuit"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            </button>
+          </div>
           
           {/* Vertical tab icons */}
           <div className="flex-1 flex flex-col items-center py-2 space-y-1">
@@ -2121,9 +2245,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     maxGridPoints={Math.pow(gridSize, 5)}
                     gridSize={gridSize}
                     parameters={parameters}
-                    groundTruthParams={groundTruthParams}
                     gridParameterArrays={gridParameterArrays}
                     opacityExponent={opacityExponent}
+                    groundTruthParams={parameters}
                   />
                 </div>
               ) : (
@@ -2194,39 +2318,20 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     onGridValuesGenerated={handleGridValuesGenerated}
                     opacityExponent={opacityExponent}
                     onOpacityExponentChange={setOpacityExponent}
-                    userReferenceParams={groundTruthParams}
+                    userReferenceParams={parameters}
                     staticRenderSettings={staticRenderSettings}
                     onStaticRenderSettingsChange={setStaticRenderSettings}
-                    setGridSize={setGridSize}
-                    minFreq={minFreq}
-                    setMinFreq={setMinFreq}
-                    maxFreq={maxFreq}
-                    setMaxFreq={setMaxFreq}
-                    numPoints={numPoints}
-                    setNumPoints={setNumPoints}
-                    updateFrequencies={updateFrequencies}
-                    updateStatusMessage={updateStatusMessage}
-                    parameterChanged={_parameterChanged}
-                    setParameterChanged={setParameterChanged}
-                    handleComputeRegressionMesh={handleComputeRegressionMesh}
-                    isComputingGrid={isComputingGrid}
-                    onClearResults={clearGridResults}
-                    hasGridResults={gridResults.length > 0}
-                    groundTruthParams={groundTruthParams}
-                    setGroundTruthParams={setGroundTruthParams}
-                    createReferenceModel={createReferenceModel}
-                    setReferenceModel={setReferenceModel}
-                    onSaveProfile={handleSaveProfile}
+                    groundTruthParams={parameters}
                     performanceSettings={performanceSettings}
-                    setPerformanceSettings={setPerformanceSettings}
+                    numPoints={numPoints}
                   />
                 </div>
               ) : (
                 <div className="h-full flex items-start justify-center p-4 overflow-y-auto">
                   <div className="w-full max-w-4xl">
                     <CenterParameterPanel
-                      circuitParams={groundTruthParams}
-                      onCircuitParamsChange={setGroundTruthParams}
+                      circuitParams={parameters}
+                      onCircuitParamsChange={setParameters}
                       gridSize={gridSize}
                       onGridSizeChange={setGridSize}
                       staticRenderSettings={staticRenderSettings}

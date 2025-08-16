@@ -79,11 +79,12 @@ function calculateImpedanceSpectrum(params, freqs) {
   });
 }
 
-// Calculate resnorm between two spectra using formula: (1/n) * sqrt(sum(ri^2))
-function calculateResnorm(referenceSpectrum, testSpectrum) {
+// Calculate resnorm between two spectra using formula: (1/n) * sqrt(sum(wi * ri^2))
+function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting = false) {
   if (!referenceSpectrum.length || !testSpectrum.length) return Infinity;
   
-  let sumSquaredResiduals = 0;
+  let sumWeightedSquaredResiduals = 0;
+  let sumWeights = 0;
   const n = Math.min(referenceSpectrum.length, testSpectrum.length);
   
   for (let i = 0; i < n; i++) {
@@ -102,11 +103,27 @@ function calculateResnorm(referenceSpectrum, testSpectrum) {
     // Calculate squared residual (ri^2)
     const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
     
-    sumSquaredResiduals += squaredResidual;
+    // Apply frequency weighting if enabled
+    let weight = 1.0;
+    if (useFrequencyWeighting && refPoint.freq > 0) {
+      // Frequency weighting: w = f^(-0.5) emphasizes low frequencies
+      weight = Math.pow(refPoint.freq, -0.5);
+    }
+    
+    sumWeightedSquaredResiduals += weight * squaredResidual;
+    sumWeights += weight;
   }
   
-  // Calculate final resnorm: (1/n) * sqrt(sum(ri^2))
-  return (1 / n) * Math.sqrt(sumSquaredResiduals);
+  // Calculate final resnorm with weighting
+  if (sumWeights === 0) return Infinity;
+  
+  if (useFrequencyWeighting) {
+    // Weighted resnorm: sqrt(sum(wi * ri^2) / sum(wi))
+    return Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
+  } else {
+    // Standard resnorm: (1/n) * sqrt(sum(ri^2))
+    return (1 / n) * Math.sqrt(sumWeightedSquaredResiduals);
+  }
 }
 
 // Generate logarithmic space
@@ -157,7 +174,7 @@ function generateLogSpaceWithReference(min, max, num, referenceValue) {
 }
 
 // Stream grid points in chunks to prevent memory overflow
-function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth) {
+function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting = false) {
   const totalPoints = Math.pow(gridSize, 5);
   
   // Ground truth parameters (reference values to ensure are included)
@@ -258,7 +275,8 @@ self.onmessage = async function(e) {
           frequencyArray, 
           chunkIndex, 
           totalChunks,
-          referenceSpectrum 
+          referenceSpectrum,
+          useFrequencyWeighting = false
         } = data;
         
         // Process chunk with aggressive memory management for large datasets
@@ -339,7 +357,7 @@ self.onmessage = async function(e) {
               const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
               
               // Calculate resnorm
-              const resnorm = calculateResnorm(referenceSpectrum, spectrum);
+              const resnorm = calculateResnorm(referenceSpectrum, spectrum, useFrequencyWeighting);
               
               // Skip infinite or NaN resnorms
               if (!isFinite(resnorm) || isNaN(resnorm)) {
@@ -398,7 +416,7 @@ self.onmessage = async function(e) {
       }
       
       case 'GENERATE_GRID_POINTS': {
-        const { gridSize, useSymmetricGrid, groundTruthParams: inputGroundTruth } = data;
+        const { gridSize, useSymmetricGrid, useFrequencyWeighting = false, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size to prevent memory issues
         if (gridSize > 20) {
@@ -412,7 +430,7 @@ self.onmessage = async function(e) {
         
         // Use streaming approach to prevent memory overflow
         const gridPoints = [];
-        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting);
         let lastProgressReport = 0;
         
         for (const { point, progress } of stream) {
@@ -448,7 +466,7 @@ self.onmessage = async function(e) {
       }
       
       case 'GENERATE_GRID_STREAM': {
-        const { gridSize, useSymmetricGrid, chunkSize = 1000, groundTruthParams: inputGroundTruth } = data;
+        const { gridSize, useSymmetricGrid, useFrequencyWeighting = false, chunkSize = 1000, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size
         if (gridSize > 20) {
@@ -461,7 +479,7 @@ self.onmessage = async function(e) {
         }
         
         // Stream grid points in chunks to prevent memory overflow
-        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting);
         let currentChunk = [];
         let totalGenerated = 0;
         

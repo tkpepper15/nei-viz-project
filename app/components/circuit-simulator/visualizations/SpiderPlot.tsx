@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ModelSnapshot } from '../types';
-import { CircuitParameters, PARAMETER_RANGES, DEFAULT_GRID_SIZE } from '../types/parameters';
+import { CircuitParameters, PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad } from '../types/parameters';
 
 interface SpiderPlotProps {
   meshItems: ModelSnapshot[];
@@ -16,6 +16,29 @@ interface SpiderPlotProps {
   backgroundColor?: 'transparent' | 'white' | 'black';
   groundTruthParams?: CircuitParameters;
   showGroundTruth?: boolean;
+}
+
+/**
+ * Get dynamic circuit parameter configuration
+ * Returns paramKeys and circuitParams based on CircuitParameters interface
+ */
+function getCircuitParameters() {
+  const parameterKeys = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'] as const;
+  return parameterKeys.map(key => {
+    const range = PARAMETER_RANGES[key];
+    const isCapacitance = key === 'Ca' || key === 'Cb';
+    return {
+      key,
+      name: isCapacitance ? `${key} (µF)` : `${key} (Ω)`,
+      desc: key === 'Rsh' ? 'Shunt' : 
+            key === 'Ra' ? 'Apical R' :
+            key === 'Ca' ? 'Apical C' :
+            key === 'Rb' ? 'Basal R' : 'Basal C',
+      range: isCapacitance ? 
+        { min: faradToMicroFarad(range.min), max: faradToMicroFarad(range.max) } : 
+        range
+    };
+  });
 }
 
 // Ultra-high performance Canvas-based spider plot renderer
@@ -208,8 +231,9 @@ class OptimizedSpiderRenderer {
     // Increase radius for better space utilization - from 0.35 to 0.42
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
-    const angleStep = (2 * Math.PI) / params.length;
+    const circuitParams = getCircuitParameters();
+    const paramKeys = circuitParams.map(p => p.key);
+    const angleStep = (2 * Math.PI) / paramKeys.length;
 
     this.ctx.strokeStyle = '#4B5563';
     this.ctx.lineWidth = 1;
@@ -220,7 +244,7 @@ class OptimizedSpiderRenderer {
       const radius = (maxRadius * level) / gridSize;
       
       // Draw small tick marks on each axis instead of connecting pentagon
-      for (let i = 0; i < params.length; i++) {
+      for (let i = 0; i < paramKeys.length; i++) {
         const angle = i * angleStep - Math.PI / 2;
         const x = centerX + Math.cos(angle) * radius;
         const y = centerY + Math.sin(angle) * radius;
@@ -243,7 +267,7 @@ class OptimizedSpiderRenderer {
     // Draw radial axes
     this.ctx.globalAlpha = 1;
     this.ctx.lineWidth = 0.5;
-    for (let i = 0; i < params.length; i++) {
+    for (let i = 0; i < paramKeys.length; i++) {
       const angle = i * angleStep - Math.PI / 2;
       const endX = centerX + Math.cos(angle) * maxRadius;
       const endY = centerY + Math.sin(angle) * maxRadius;
@@ -263,8 +287,9 @@ class OptimizedSpiderRenderer {
     // Use same increased radius for consistency
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
     const gridSize = this.renderConfig.gridSize || 5;
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
-    const angleStep = (2 * Math.PI) / params.length;
+    const circuitParams = getCircuitParameters();
+    const paramKeys = circuitParams.map(p => p.key);
+    const angleStep = (2 * Math.PI) / paramKeys.length;
 
     // Centralized parameter ranges for consistency
     const paramRanges = {
@@ -285,8 +310,8 @@ class OptimizedSpiderRenderer {
     for (let level = 1; level <= gridSize; level++) {
       const radius = (maxRadius * level) / gridSize;
       
-      for (let i = 0; i < params.length; i++) {
-        const param = params[i];
+      for (let i = 0; i < paramKeys.length; i++) {
+        const param = paramKeys[i];
         const angle = i * angleStep - Math.PI / 2;
         const range = paramRanges[param as keyof typeof paramRanges];
         
@@ -350,8 +375,8 @@ class OptimizedSpiderRenderer {
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
 
-    for (let i = 0; i < params.length; i++) {
-      const param = params[i];
+    for (let i = 0; i < paramKeys.length; i++) {
+      const param = paramKeys[i];
       const angle = i * angleStep - Math.PI / 2;
       const labelDistance = maxRadius + 32; // Reduced from 40 to save space
       const labelX = centerX + Math.cos(angle) * labelDistance;
@@ -366,16 +391,11 @@ class OptimizedSpiderRenderer {
       this.ctx.font = '700 14px Inter, sans-serif';
       this.ctx.fillStyle = '#F3F4F6';
       
-      // Add units to parameter names
-      const paramWithUnits = {
-        Rsh: 'Rsh (Ω)',
-        Ra: 'Ra (Ω)', 
-        Rb: 'Rb (Ω)',
-        Ca: 'Ca (µF)',
-        Cb: 'Cb (µF)'
-      };
+      // Get parameter name with units from dynamic configuration
+      const paramConfig = circuitParams.find(p => p.key === param);
+      const paramName = paramConfig ? paramConfig.name : param;
       
-      this.ctx.fillText(paramWithUnits[param as keyof typeof paramWithUnits] || param, labelX, labelY);
+      this.ctx.fillText(paramName, labelX, labelY);
       this.ctx.restore();
     }
   }
@@ -386,8 +406,9 @@ class OptimizedSpiderRenderer {
     const centerX = this.canvas.width / 2;
     const centerY = this.canvas.height / 2;
     const maxRadius = Math.min(this.canvas.width, this.canvas.height) * 0.42;
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb'];
-    const angleStep = (2 * Math.PI) / params.length;
+    const circuitParams = getCircuitParameters();
+    const paramKeys = circuitParams.map(p => p.key);
+    const angleStep = (2 * Math.PI) / paramKeys.length;
 
     // Centralized parameter ranges for consistency
     const paramRanges = {
@@ -403,8 +424,8 @@ class OptimizedSpiderRenderer {
     // Calculate ground truth polygon points
     const groundTruthPoints: { x: number; y: number }[] = [];
     
-    for (let i = 0; i < params.length; i++) {
-      const param = params[i];
+    for (let i = 0; i < paramKeys.length; i++) {
+      const param = paramKeys[i];
       const angle = i * angleStep - Math.PI / 2;
       const range = paramRanges[param as keyof typeof paramRanges];
       
@@ -589,12 +610,13 @@ class OptimizedSpiderRenderer {
   ) {
     if (!model.parameters) return [];
 
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
+    const circuitParams = getCircuitParameters();
+    const paramKeys = circuitParams.map(p => p.key);
     const points = [];
     const gridSize = this.renderConfig.gridSize || 5;
 
-    for (let i = 0; i < params.length; i++) {
-      const param = params[i];
+    for (let i = 0; i < paramKeys.length; i++) {
+      const param = paramKeys[i];
       const value = model.parameters[param as keyof typeof model.parameters];
       
       if (typeof value !== 'number') continue;
@@ -612,7 +634,7 @@ class OptimizedSpiderRenderer {
       
       // Snap to exact grid level radius
       const radius = (maxRadius * clampedGridLevel) / gridSize;
-      const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
+      const angle = (i * 2 * Math.PI) / paramKeys.length - Math.PI / 2;
 
       points.push({
         x: centerX + Math.cos(angle) * radius,
@@ -783,8 +805,9 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.min(width, height) * 0.42;
-    const params = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']; // Grouped: Rsh (shunt), apical (Ra, Ca), basal (Rb, Cb)
-    const angleStep = (2 * Math.PI) / params.length;
+    const circuitParams = getCircuitParameters();
+    const paramKeys = circuitParams.map(p => p.key);
+    const angleStep = (2 * Math.PI) / paramKeys.length;
     
     // Fixed parameter ranges
     const paramRanges = {
@@ -816,7 +839,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
           {/* Grid tick marks on axes (no connecting lines) */}
           {Array.from({ length: gridSize }, (_, level) => {
             const radius = (maxRadius * (level + 1)) / gridSize;
-            return params.map((_, i) => {
+            return paramKeys.map((_, i) => {
               const angle = i * angleStep - Math.PI / 2;
               const x = centerX + Math.cos(angle) * radius;
               const y = centerY + Math.sin(angle) * radius;
@@ -842,7 +865,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
           }).flat()}
           
           {/* Radial axes */}
-          {params.map((_, i) => {
+          {paramKeys.map((_, i) => {
             const angle = i * angleStep - Math.PI / 2;
             const endX = centerX + Math.cos(angle) * maxRadius;
             const endY = centerY + Math.sin(angle) * maxRadius;
@@ -860,20 +883,15 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
         </g>
         
         {/* Parameter labels */}
-        {includeLabels && params.map((param, i) => {
+        {includeLabels && paramKeys.map((param, i) => {
           const angle = i * angleStep - Math.PI / 2;
           const labelDistance = maxRadius + 32;
           const labelX = centerX + Math.cos(angle) * labelDistance;
           const labelY = centerY + Math.sin(angle) * labelDistance;
           
-          // Add units to parameter names
-          const paramWithUnits = {
-            Rsh: 'Rsh (Ω)',
-            Ra: 'Ra (Ω)', 
-            Rb: 'Rb (Ω)',
-            Ca: 'Ca (µF)',
-            Cb: 'Cb (µF)'
-          };
+          // Get parameter name with units from dynamic configuration
+          const paramConfig = circuitParams.find(p => p.key === param);
+          const paramName = paramConfig ? paramConfig.name : param;
           
           return (
             <g key={param}>
@@ -886,7 +904,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
                 fontWeight="700"
                 fontFamily="Inter, sans-serif"
               >
-                {paramWithUnits[param as keyof typeof paramWithUnits] || param}
+                {paramName}
               </text>
             </g>
           );
@@ -908,7 +926,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
             return modelsToRender.map((model, index) => {
               if (!model.parameters) return null;
               
-              const points = params.map((param, i) => {
+              const points = paramKeys.map((param, i) => {
                 const value = model.parameters[param as keyof typeof model.parameters];
                 if (typeof value !== 'number') return null;
                 
@@ -961,7 +979,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
         {showGroundTruth && groundTruthParams && (
           <g>
             {(() => {
-              const groundTruthPoints = params.map((param, i) => {
+              const groundTruthPoints = paramKeys.map((param, i) => {
                 const angle = i * angleStep - Math.PI / 2;
                 const range = paramRanges[param as keyof typeof paramRanges];
                 
