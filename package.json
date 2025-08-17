@@ -15,9 +15,14 @@
     "@heroicons/react": "^2.2.0",
     "@mui/icons-material": "^7.0.2",
     "@mui/material": "^7.0.2",
+    "@react-spring/three": "^10.0.1",
+    "@react-three/drei": "^10.7.2",
+    "@react-three/fiber": "^9.3.0",
     "@types/katex": "^0.16.7",
     "@types/plotly.js": "^3.0.0",
     "@types/recharts": "^1.8.29",
+    "@types/three": "^0.179.0",
+    "@use-gesture/react": "^10.3.1",
     "autoprefixer": "^10.4.20",
     "d3": "^7.9.0",
     "d3-scale": "^4.0.2",
@@ -30,7 +35,8 @@
     "react-katex": "^3.0.1",
     "react-plotly.js": "^2.6.0",
     "react-resizable-panels": "^2.1.7",
-    "recharts": "^2.15.0"
+    "recharts": "^2.15.0",
+    "three": "^0.179.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { SavedProfile } from '../types/savedProfiles';
 import { ProfileCard } from './ProfileCard';
 import { EditProfileModal } from './EditProfileModal';
@@ -22,6 +22,9 @@ interface SavedProfilesProps {
   onBulkDelete?: () => void;
 }
 
+type SortOption = 'recent' | 'name' | 'created' | 'computed';
+type FilterOption = 'all' | 'computed' | 'uncomputed';
+
 export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   profiles,
   selectedProfile,
@@ -40,13 +43,59 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   onBulkDelete
 }) => {
   const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(null);
+  const [sortBy, setSortBy] = useState<SortOption>('recent');
+  const [filterBy, setFilterBy] = useState<FilterOption>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Sorted and filtered profiles
+  const processedProfiles = useMemo(() => {
+    let filtered = profiles;
+
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(profile => 
+        profile.name.toLowerCase().includes(term) ||
+        (profile.description && profile.description.toLowerCase().includes(term))
+      );
+    }
+
+    // Apply status filter
+    if (filterBy === 'computed') {
+      filtered = filtered.filter(profile => profile.isComputed);
+    } else if (filterBy === 'uncomputed') {
+      filtered = filtered.filter(profile => !profile.isComputed);
+    }
+
+    // Apply sorting
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortBy) {
+        case 'recent':
+          return b.lastModified - a.lastModified; // Most recent first
+        case 'name':
+          return a.name.localeCompare(b.name);
+        case 'created':
+          return b.created - a.created; // Most recently created first
+        case 'computed':
+          // Computed profiles first, then by recent within each group
+          if (a.isComputed !== b.isComputed) {
+            return a.isComputed ? -1 : 1;
+          }
+          return b.lastModified - a.lastModified;
+        default:
+          return 0;
+      }
+    });
+
+    return sorted;
+  }, [profiles, sortBy, filterBy, searchTerm]);
 
 
 
   if (isCollapsed) {
     return (
       <div className="flex flex-col items-center py-2 space-y-1">
-        {profiles.slice(0, 3).map((profile) => (
+        {processedProfiles.slice(0, 3).map((profile) => (
           <button
             key={profile.id}
             onClick={() => onSelectProfile(profile.id)}
@@ -70,9 +119,9 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
             </svg>
           </button>
         ))}
-        {profiles.length > 3 && (
+        {processedProfiles.length > 3 && (
           <div className="text-xs text-neutral-500 mt-1">
-            +{profiles.length - 3}
+            +{processedProfiles.length - 3}
           </div>
         )}
       </div>
@@ -89,7 +138,7 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
             <p className="text-xs text-neutral-400">
               {isMultiSelectMode && selectedCircuits.length > 0 
                 ? `${selectedCircuits.length} selected`
-                : `${profiles.length} circuit${profiles.length !== 1 ? 's' : ''}`
+                : `${processedProfiles.length} of ${profiles.length} circuit${profiles.length !== 1 ? 's' : ''}`
               }
             </p>
           </div>
@@ -141,6 +190,46 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
         </div>
       </div>
       
+      {/* Filtering and Sorting Controls */}
+      {profiles.length > 0 && (
+        <div className="px-3 py-2 bg-neutral-800/50 border-b border-neutral-700">
+          {/* Search */}
+          <div className="mb-2">
+            <input
+              type="text"
+              placeholder="Search circuits..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+          
+          {/* Sort and Filter */}
+          <div className="flex gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+              className="flex-1 px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="recent">Recent</option>
+              <option value="name">Name</option>
+              <option value="created">Created</option>
+              <option value="computed">Computed</option>
+            </select>
+            
+            <select
+              value={filterBy}
+              onChange={(e) => setFilterBy(e.target.value as FilterOption)}
+              className="flex-1 px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">All</option>
+              <option value="computed">Computed</option>
+              <option value="uncomputed">Uncomputed</option>
+            </select>
+          </div>
+        </div>
+      )}
+      
       {/* Scrollable Profiles List */}
       <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-neutral-900 scrollbar-thumb-neutral-700 hover:scrollbar-thumb-neutral-600">
         {profiles.length === 0 ? (
@@ -155,7 +244,7 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
           </div>
         ) : (
           <div className="space-y-1 p-2">
-            {profiles.map((profile) => (
+            {processedProfiles.map((profile) => (
               <ProfileCard
                 key={profile.id}
                 profile={profile}
