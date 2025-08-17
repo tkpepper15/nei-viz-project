@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import 'katex/dist/katex.min.css';
 import { 
@@ -64,8 +64,16 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     logMessages,
     statusMessage,
     updateStatusMessage,
-    resetComputationState
+    resetComputationState,
+    saveComputationState,
+    restoreComputationState,
+    clearAllComputationData, // eslint-disable-line @typescript-eslint/no-unused-vars
+    lastComputedResults
   } = useComputationState();
+
+  // Enhanced UI coordination refs for large dataset processing
+  const progressUpdateQueueRef = useRef<WorkerProgress[]>([]);
+  const isProcessingUpdatesRef = useRef(false);
 
   // Performance tracking helper functions
   const startPhase = useCallback((name: string, description: string) => {
@@ -139,6 +147,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
+  
+  // Auto-restore computation state when switching to visualizer tab
+  useEffect(() => {
+    if (visualizationTab === 'visualizer' && resnormGroups.length === 0 && (lastComputedResults?.resnormGroups?.length || 0) > 0) {
+      // Only restore if we're on visualizer tab, have no current data, but have saved data
+      const restored = restoreComputationState();
+      if (restored) {
+        console.log('Auto-restored computation state when switching to visualizer tab');
+      }
+    }
+  }, [visualizationTab, resnormGroups.length, lastComputedResults, restoreComputationState]);
   
   // Multi-select state for circuits
   const [selectedCircuits, setSelectedCircuits] = useState<string[]>([]);
@@ -1004,6 +1023,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
     // Reset state and start performance tracking
     setIsComputingGrid(true);
+    
+    // Save current state before starting new computation
+    saveComputationState();
     resetComputationState();
     setParameterChanged(false);
     setManuallyHidden(false);
@@ -1023,9 +1045,75 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     updateStatusMessage(`MATH: Using frequency range ${minFreq.toFixed(1)}-${maxFreq.toFixed(1)} Hz with ${numPoints} points`);
 
     try {
-      // Progress callback for worker updates
+      // Enhanced progress callback with UI coordination for large datasets
       const handleProgress = (progress: WorkerProgress) => {
-        setComputationProgress(progress);
+        // For high-load operations, queue updates and process with requestAnimationFrame
+        if (progress.mainThreadLoad === 'high' || progress.total > 100000) {
+          // Queue the update
+          progressUpdateQueueRef.current.push(progress);
+          
+          // Process queue if not already processing
+          if (!isProcessingUpdatesRef.current) {
+            isProcessingUpdatesRef.current = true;
+            
+            requestAnimationFrame(() => {
+              // Process latest update from queue
+              const latestProgress = progressUpdateQueueRef.current.pop();
+              if (latestProgress) {
+                setComputationProgress(latestProgress);
+              }
+              
+              // Clear queue and reset flag
+              progressUpdateQueueRef.current = [];
+              isProcessingUpdatesRef.current = false;
+            });
+          }
+        } else {
+          // Direct update for smaller datasets
+          setComputationProgress(progress);
+        }
+        
+        // Enhanced progress handling with detailed logging for large datasets
+        if (progress.type === 'STREAMING_UPDATE' || progress.type === 'THROTTLE_UPDATE') {
+          // Use requestAnimationFrame for smooth UI updates
+          requestAnimationFrame(() => {
+            setComputationProgress(progress);
+          });
+          
+          // Enhanced logging for large dataset computations
+          if (progress.mainThreadLoad === 'high') {
+            if (progress.streamingBatch && progress.streamingBatch % 2 === 0) {
+              updateStatusMessage(`🔄 [BATCH ${progress.streamingBatch}] ${progress.message || 'Processing large dataset...'}`);
+            }
+          } else {
+            // Throttle status message updates for better performance
+            if (progress.streamingBatch && progress.streamingBatch % 3 === 0) {
+              updateStatusMessage(progress.message || 'Processing...');
+            }
+          }
+        } else {
+          // Regular progress updates with enhanced detail
+          if (progress.message) {
+            // Add visual indicators for different progress types
+            const icon = progress.type === 'MATHEMATICAL_OPERATION' ? '📊' : 
+                        progress.type === 'WORKER_STATUS' ? '⚙️' : 
+                        progress.type === 'GENERATION_PROGRESS' ? '🧮' : '🔄';
+            updateStatusMessage(`${icon} ${progress.message}`);
+          }
+          
+          if (progress.operation) {
+            updateStatusMessage(`[${progress.operation.toUpperCase()}] ${progress.message || 'Processing...'}`);
+          }
+        }
+        
+        // Handle memory pressure with user feedback
+        if (progress.memoryPressure && progress.type === 'THROTTLE_UPDATE') {
+          updateStatusMessage(`⚠️ High memory usage - throttling computation to maintain responsiveness`);
+        }
+        
+        if (progress.equation) {
+          updateStatusMessage(`[EQUATION] ${progress.equation}`);
+        }
         
         if (progress.type === 'GENERATION_PROGRESS') {
           if (generationStartTime === 0) {
@@ -1507,45 +1595,107 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Wrapper for cancel computation that also clears pending profile
   const handleCancelComputation = useCallback(() => {
-    cancelComputation();
-    setPendingComputeProfile(null);
-    updateStatusMessage('Computation cancelled');
-  }, [cancelComputation, updateStatusMessage]);
+    updateStatusMessage('⚠️ Cancelling computation...');
+    
+    try {
+      cancelComputation();
+      setIsComputingGrid(false);
+      resetComputationState();
+      setPendingComputeProfile(null);
+      updateStatusMessage('✅ Computation cancelled successfully');
+    } catch (error) {
+      console.error('Error cancelling computation:', error);
+      updateStatusMessage('❌ Error cancelling computation');
+    }
+  }, [cancelComputation, setIsComputingGrid, resetComputationState, updateStatusMessage]);
 
   // Handler for saving a profile
+  // Helper function to check if two circuit parameter sets are identical
+  const areParametersIdentical = useCallback((params1: CircuitParameters, params2: CircuitParameters) => {
+    return params1.Rsh === params2.Rsh &&
+           params1.Ra === params2.Ra &&
+           params1.Rb === params2.Rb &&
+           params1.Ca === params2.Ca &&
+           params1.Cb === params2.Cb &&
+           params1.frequency_range[0] === params2.frequency_range[0] &&
+           params1.frequency_range[1] === params2.frequency_range[1];
+  }, []);
+
+  // Helper function to check if computation settings are identical
+  const areSettingsIdentical = useCallback((
+    profile: SavedProfile, 
+    currentGridSize: number, 
+    currentMinFreq: number, 
+    currentMaxFreq: number, 
+    currentNumPoints: number
+  ) => {
+    return profile.gridSize === currentGridSize &&
+           profile.minFreq === currentMinFreq &&
+           profile.maxFreq === currentMaxFreq &&
+           profile.numPoints === currentNumPoints;
+  }, []);
+
   const handleSaveProfile = useCallback((name: string, description?: string) => {
-    // Generate timestamp and ID only when actually saving (client-side)
+    // Check if a profile with identical parameters and settings already exists
+    const existingProfile = savedProfilesState.profiles.find(profile => 
+      areParametersIdentical(profile.groundTruthParams, parameters) &&
+      areSettingsIdentical(profile, gridSize, minFreq, maxFreq, numPoints)
+    );
+
     const now = Date.now();
-    const randomId = Math.random().toString(36).substr(2, 9);
-    
-    const newProfile: SavedProfile = {
-      id: `profile_${now}_${randomId}`,
-      name,
-      description,
-      created: now,
-      lastModified: now,
-      
-      // Grid computation settings
-      gridSize,
-      minFreq,
-      maxFreq,
-      numPoints,
-      
-      // Circuit parameters
-      groundTruthParams: { ...parameters },
-      
-      // Computation status
-      isComputed: false,
-    };
 
-    setSavedProfilesState(prev => ({
-      ...prev,
-      profiles: [...prev.profiles, newProfile],
-      selectedProfile: newProfile.id
-    }));
+    if (existingProfile) {
+      // Update existing profile instead of creating a duplicate
+      const updatedProfile: SavedProfile = {
+        ...existingProfile,
+        name: name || existingProfile.name, // Keep existing name if no new name provided
+        description: description || existingProfile.description,
+        lastModified: now,
+        // Keep existing computed status and results
+      };
 
-    updateStatusMessage(`Profile "${name}" saved with current settings`);
-  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage]);
+      setSavedProfilesState(prev => ({
+        ...prev,
+        profiles: prev.profiles.map(p => p.id === existingProfile.id ? updatedProfile : p),
+        selectedProfile: existingProfile.id
+      }));
+
+      updateStatusMessage(`Updated existing profile "${updatedProfile.name}" - identical parameters detected`);
+      return existingProfile.id; // Return the ID of the updated profile
+    } else {
+      // Create new profile if no identical one exists
+      const randomId = Math.random().toString(36).substr(2, 9);
+      
+      const newProfile: SavedProfile = {
+        id: `profile_${now}_${randomId}`,
+        name,
+        description,
+        created: now,
+        lastModified: now,
+        
+        // Grid computation settings
+        gridSize,
+        minFreq,
+        maxFreq,
+        numPoints,
+        
+        // Circuit parameters
+        groundTruthParams: { ...parameters },
+        
+        // Computation status
+        isComputed: false,
+      };
+
+      setSavedProfilesState(prev => ({
+        ...prev,
+        profiles: [...prev.profiles, newProfile],
+        selectedProfile: newProfile.id
+      }));
+
+      updateStatusMessage(`Profile "${name}" saved with current settings`);
+      return newProfile.id; // Return the ID of the new profile
+    }
+  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, savedProfilesState.profiles, areParametersIdentical, areSettingsIdentical]);
 
 
 
@@ -2010,7 +2160,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           <div className="h-20 flex-shrink-0"></div>
           
           {/* New Circuit Button - Collapsed */}
-          <div className="flex-shrink-0 px-2 pb-2">
+          <div className="flex-shrink-0 px-3 pb-2">
             <button
               onClick={handleNewCircuit}
               className="w-10 h-10 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-200"
@@ -2175,42 +2325,142 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         <div className="flex-1 flex overflow-hidden">
           <div className="flex-1 p-4 bg-neutral-950 overflow-hidden">
             {isComputingGrid ? (
-              <div className="flex flex-col items-center justify-center p-6 h-40 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md">
-                <div className="flex items-center mb-4">
-                  <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-neutral-400 mr-3"></div>
-                  <div>
-                    <p className="text-sm text-neutral-300 font-medium">
-                      {computationProgress?.type === 'GENERATION_PROGRESS' 
-                        ? 'Generating grid points...' 
-                        : 'Computing in parallel...'}
-                    </p>
-                    <p className="text-xs text-neutral-400 mt-1">
-                      {computationProgress ? 
-                        `${computationProgress.overallProgress.toFixed(1)}% complete` : 
-                        'Using multiple CPU cores for faster computation'}
-                    </p>
+              <div className="flex flex-col h-full bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md overflow-hidden">
+                {/* Header with Progress */}
+                <div className="flex-shrink-0 p-4 border-b border-neutral-700">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-400 mr-3"></div>
+                      <div>
+                        <p className="text-lg text-neutral-200 font-medium">
+                          Mathematical Circuit Analysis
+                        </p>
+                        <p className="text-sm text-neutral-400">
+                          {computationProgress ? 
+                            `${computationProgress.overallProgress.toFixed(1)}% complete` : 
+                            'Initializing computational pipeline...'}
+                        </p>
+                      </div>
+                    </div>
+                    {/* Cancel button */}
+                    <button
+                      onClick={handleCancelComputation}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors duration-200 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                      Cancel
+                    </button>
                   </div>
+                  
+                  {/* Progress bar */}
+                  {computationProgress && (
+                    <div className="w-full">
+                      <div className="w-full bg-neutral-700 rounded-full h-2">
+                        <div 
+                          className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
+                          style={{ width: `${computationProgress.overallProgress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
-                {/* Progress bar */}
-                {computationProgress && (
-                  <div className="w-full max-w-md">
-                    <div className="w-full bg-neutral-700 rounded-full h-2">
-                      <div 
-                        className="bg-neutral-400 h-2 rounded-full transition-all duration-300" 
-                        style={{ width: `${computationProgress.overallProgress}%` }}
-                      ></div>
+                {/* Mathematical Process Details Panel */}
+                <div className="flex-1 p-4 overflow-y-auto">
+                  <div className="space-y-4">
+                    {/* Current Operation */}
+                    <div className="bg-neutral-800 rounded-lg p-4">
+                      <div className="flex items-center mb-3">
+                        <div className="w-2 h-2 bg-blue-400 rounded-full mr-2 animate-pulse"></div>
+                        <h3 className="text-sm font-semibold text-neutral-200">
+                          {computationProgress?.phase === 'initialization' && 'Initialization Phase'}
+                          {computationProgress?.phase === 'grid_generation' && 'Parameter Grid Generation'}
+                          {computationProgress?.phase === 'impedance_calculation' && 'Impedance Calculations'}
+                          {computationProgress?.phase === 'resnorm_analysis' && 'Residual Norm Analysis'}
+                          {computationProgress?.phase === 'data_aggregation' && 'Data Aggregation'}
+                          {computationProgress?.phase === 'completion' && 'Finalizing Results'}
+                          {!computationProgress?.phase && 'Setting up computation'}
+                        </h3>
+                      </div>
+                      <p className="text-xs text-neutral-400 mb-3">
+                        {computationProgress?.message || 'Preparing mathematical models...'}
+                      </p>
+                      
+                      {/* Current equation being processed */}
+                      {computationProgress?.equation && (
+                        <div className="bg-neutral-900 rounded p-3 mb-3">
+                          <h4 className="text-xs font-semibold text-neutral-300 mb-2">Current Equation:</h4>
+                          <div className="font-mono text-xs text-green-300 overflow-x-auto">
+                            {computationProgress.equation}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Computation details */}
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        {computationProgress?.workerCount && (
+                          <div className="flex justify-between">
+                            <span className="text-neutral-400">Workers:</span>
+                            <span className="text-green-400 font-mono">{computationProgress.workerCount}</span>
+                          </div>
+                        )}
+                        {computationProgress?.processed && computationProgress?.total && (
+                          <div className="flex justify-between">
+                            <span className="text-neutral-400">Progress:</span>
+                            <span className="text-blue-400 font-mono">{Math.round((computationProgress.processed / computationProgress.total) * 100)}%</span>
+                          </div>
+                        )}
+                        {computationProgress?.chunkIndex && computationProgress?.totalChunks && (
+                          <div className="flex justify-between">
+                            <span className="text-neutral-400">Chunk:</span>
+                            <span className="text-purple-400 font-mono">{computationProgress.chunkIndex}/{computationProgress.totalChunks}</span>
+                          </div>
+                        )}
+                        {computationProgress?.memoryPressure && (
+                          <div className="flex justify-between">
+                            <span className="text-neutral-400">Memory:</span>
+                            <span className="text-yellow-400 font-mono">High usage</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Recent Activity Log */}
+                    <div className="bg-neutral-800 rounded-lg p-4">
+                      <h3 className="text-sm font-semibold text-neutral-200 mb-3 flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Recent Activity
+                      </h3>
+                      <div className="bg-neutral-900 rounded p-3 max-h-32 overflow-y-auto">
+                        <div className="space-y-1 font-mono text-xs">
+                          {logMessages.length > 0 ? (
+                            [...logMessages].reverse().slice(0, 8).map((log, index) => (
+                              <div key={index} className="flex">
+                                <span className="text-neutral-500 mr-2 flex-shrink-0">{log.time}</span>
+                                <span className="text-neutral-300 truncate">{log.message}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-neutral-500 text-center py-2">
+                              Activity log will appear here...
+                            </div>
+                          )}
+                          {/* Current status at top */}
+                          {statusMessage && (
+                            <div className="flex border-t border-neutral-700 pt-2 mt-2">
+                              <span className="text-blue-400 mr-2 flex-shrink-0">NOW</span>
+                              <span className="text-blue-300 font-medium truncate">{statusMessage}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                )}
-                
-                {/* Cancel button */}
-                <button
-                  onClick={handleCancelComputation}
-                  className="mt-4 px-4 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition-colors"
-                >
-                  Cancel Computation
-                </button>
+                </div>
               </div>
             ) : gridError ? (
               <div className="p-4 bg-danger-light border border-danger rounded-lg text-sm text-danger">
@@ -2306,11 +2556,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 </div>
               </div>
             ) : visualizationTab === 'visualizer' ? (
-              // Show visualization if we have results, otherwise show configuration panel
-              (resnormGroups && resnormGroups.length > 0) ? (
+              // Show visualization if we have current or previous results, otherwise show configuration panel
+              (resnormGroups && resnormGroups.length > 0) || (lastComputedResults && (lastComputedResults.resnormGroups?.length || 0) > 0) ? (
                 <div className="h-full">
                   <VisualizerTab 
-                    resnormGroups={resnormGroups}
+                    resnormGroups={resnormGroups.length > 0 ? resnormGroups : (lastComputedResults?.resnormGroups || [])}
                     hiddenGroups={hiddenGroups}
                     opacityLevel={opacityLevel}
                     referenceModelId={referenceModelId}

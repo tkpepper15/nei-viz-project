@@ -33,6 +33,14 @@ export const useComputationState = () => {
   // Resnorm groups for analysis
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
   const [hiddenGroups, setHiddenGroups] = useState<number[]>([]);
+  
+  // Preserve last computed results for tab switching
+  const [lastComputedResults, setLastComputedResults] = useState<{
+    resnormGroups: ResnormGroup[];
+    gridResults: BackendMeshPoint[];
+    gridResultsWithIds: (BackendMeshPoint & { id: number })[];
+    computationSummary: ComputationSummary | null;
+  } | null>(null);
 
   // Activity log state
   const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>([]);
@@ -54,6 +62,33 @@ export const useComputationState = () => {
     setStatusMessage('');
   }, []);
 
+  // Save current computed results before clearing
+  const saveComputationState = useCallback(() => {
+    if (resnormGroups.length > 0 || gridResults.length > 0) {
+      setLastComputedResults({
+        resnormGroups,
+        gridResults,
+        gridResultsWithIds,
+        computationSummary
+      });
+    }
+  }, [resnormGroups, gridResults, gridResultsWithIds, computationSummary]);
+
+  // Restore previously computed results
+  const restoreComputationState = useCallback(() => {
+    if (lastComputedResults) {
+      setResnormGroups(lastComputedResults.resnormGroups);
+      setGridResults(lastComputedResults.gridResults);
+      setGridResultsWithIds(lastComputedResults.gridResultsWithIds);
+      setComputationSummary(lastComputedResults.computationSummary);
+      setGridError(null);
+      updateStatusMessage('Restored previous computation results');
+      return true;
+    }
+    return false;
+  }, [lastComputedResults, updateStatusMessage]);
+
+  // Reset only when starting a new computation
   const resetComputationState = useCallback(() => {
     setGridResults([]);
     setGridResultsWithIds([]);
@@ -68,6 +103,12 @@ export const useComputationState = () => {
     setMemoryLimitedPoints(0);
     setEstimatedMemoryUsage(0);
   }, []);
+
+  // Clear all computation data including saved state
+  const clearAllComputationData = useCallback(() => {
+    resetComputationState();
+    setLastComputedResults(null);
+  }, [resetComputationState]);
 
   // Calculate effective visualization limit based on user preferences
   const calculateEffectiveVisualizationLimit = useCallback((totalComputed: number) => {
@@ -145,6 +186,12 @@ export const useComputationState = () => {
     addLogMessage,
     updateStatusMessage,
     clearLogs,
+    
+    // State management
     resetComputationState,
+    saveComputationState,
+    restoreComputationState,
+    clearAllComputationData,
+    lastComputedResults,
   };
 };

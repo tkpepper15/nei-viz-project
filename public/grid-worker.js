@@ -1,5 +1,10 @@
-// Web Worker for efficient grid computation
+// Enhanced Web Worker for efficient grid computation with optimized data transfer
 // This runs on a separate thread to avoid blocking the UI
+
+// Shared data cache to minimize transfer overhead
+let sharedFrequencies = null;
+let sharedReferenceSpectrum = null;
+let workerId = null;
 
 // Complex number operations
 const complex = {
@@ -263,12 +268,211 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFreq
   }
 }
 
+// Optimized chunk processing function with minimal data transfer
+async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, useFrequencyWeighting, taskId) {
+  const results = [];
+  
+  // Enhanced adaptive batch sizing based on chunk size
+  let batchSize = 25;
+  let memoryThreshold = 100 * 1024 * 1024;
+  
+  if (chunkParams.length > 80000) {
+    batchSize = 2; // Ultra micro-batches for massive chunks
+    memoryThreshold = 30 * 1024 * 1024;
+  } else if (chunkParams.length > 50000) {
+    batchSize = 3;
+    memoryThreshold = 40 * 1024 * 1024;
+  } else if (chunkParams.length > 25000) {
+    batchSize = 5;
+  } else if (chunkParams.length > 10000) {
+    batchSize = 10;
+  }
+  
+  let estimatedMemoryUsage = 0;
+  const bytesPerResult = 800;
+  
+  for (let i = 0; i < chunkParams.length; i += batchSize) {
+    const batch = chunkParams.slice(i, i + batchSize);
+    
+    // Enhanced memory pressure monitoring
+    estimatedMemoryUsage = results.length * bytesPerResult;
+    if (estimatedMemoryUsage > memoryThreshold) {
+      self.postMessage({
+        type: 'MEMORY_PRESSURE',
+        data: {
+          chunkIndex,
+          taskId,
+          estimatedMemory: Math.round(estimatedMemoryUsage / 1024 / 1024) + 'MB',
+          resultsCount: results.length,
+          message: 'High memory usage detected in optimized worker'
+        }
+      });
+      
+      // Aggressive memory management for large datasets
+      if (results.length > 3000) {
+        const partialResults = results.splice(0, 2000);
+        self.postMessage({
+          type: 'PARTIAL_RESULTS',
+          data: {
+            chunkIndex,
+            taskId,
+            partialResults: partialResults.slice(0, 500),
+            totalPartialCount: partialResults.length
+          }
+        });
+        partialResults.length = 0;
+        estimatedMemoryUsage = results.length * bytesPerResult;
+      }
+      
+      // Yield more frequently for large datasets
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    // Enhanced yielding for very large datasets
+    if (chunkParams.length > 100000 && i % (batchSize * 3) === 0) {
+      await new Promise(resolve => setTimeout(resolve, 30));
+    } else if (chunkParams.length > 80000 && i % (batchSize * 5) === 0) {
+      await new Promise(resolve => setTimeout(resolve, 25));
+    } else if (chunkParams.length > 50000 && i % (batchSize * 8) === 0) {
+      await new Promise(resolve => setTimeout(resolve, 15));
+    }
+    
+    for (const params of batch) {
+      try {
+        if (!params || typeof params.Rsh !== 'number') continue;
+        
+        const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
+        const resnorm = calculateResnorm(referenceSpectrum, spectrum, useFrequencyWeighting);
+        
+        if (isFinite(resnorm)) {
+          results.push({
+            parameters: params,
+            spectrum: results.length < 1000 ? spectrum : [], // Only keep spectrum for top results
+            resnorm
+          });
+        }
+      } catch (error) {
+        console.warn('Parameter processing error:', error);
+      }
+    }
+    
+    // Throttled progress reporting for better performance
+    const progress = (i + batchSize) / chunkParams.length;
+    if (i % (batchSize * 10) === 0 || progress >= 1) {
+      self.postMessage({
+        type: 'CHUNK_PROGRESS',
+        data: {
+          chunkIndex,
+          taskId,
+          totalChunks,
+          chunkProgress: progress,
+          processed: Math.min(i + batchSize, chunkParams.length),
+          total: chunkParams.length
+        }
+      });
+    }
+  }
+  
+  // Optimized result processing
+  results.sort((a, b) => a.resnorm - b.resnorm);
+  
+  const topResults = results.slice(0, 800); // Slightly reduced to save memory
+  const otherResults = results.slice(800).map(r => ({
+    parameters: r.parameters,
+    resnorm: r.resnorm
+  }));
+  
+  self.postMessage({
+    type: 'CHUNK_COMPLETE',
+    data: {
+      chunkIndex,
+      taskId,
+      topResults,
+      otherResults,
+      totalProcessed: results.length
+    }
+  });
+}
+
 // Main worker message handler
 self.onmessage = async function(e) {
   const { type, data } = e.data;
   
   try {
     switch (type) {
+      case 'INITIALIZE_SHARED_DATA_TRANSFERABLE': {
+        const { frequencyBuffer, spectrumBuffer, spectrumLength, workerId: id } = data;
+        
+        console.log(`Worker ${id}: Received transferable data - frequencies: ${frequencyBuffer.length}, spectrum: ${spectrumBuffer.length}`);
+        
+        // Convert transferred buffers back to usable format
+        sharedFrequencies = Array.from(frequencyBuffer);
+        
+        // Reconstruct reference spectrum from packed buffer
+        sharedReferenceSpectrum = [];
+        for (let i = 0; i < spectrumLength; i++) {
+          const offset = i * 5;
+          sharedReferenceSpectrum.push({
+            freq: spectrumBuffer[offset],
+            real: spectrumBuffer[offset + 1],
+            imag: spectrumBuffer[offset + 2],
+            mag: spectrumBuffer[offset + 3],
+            phase: spectrumBuffer[offset + 4]
+          });
+        }
+        
+        workerId = id;
+        
+        console.log(`Worker ${id}: Successfully initialized with ${sharedFrequencies.length} frequencies and ${sharedReferenceSpectrum.length} spectrum points`);
+        
+        self.postMessage({
+          type: 'SHARED_DATA_INITIALIZED',
+          data: { workerId: id }
+        });
+        break;
+      }
+
+      case 'INITIALIZE_SHARED_DATA': {
+        const { frequencies, referenceSpectrum, workerId: id } = data;
+        
+        // Fallback for non-transferable initialization
+        sharedFrequencies = frequencies;
+        sharedReferenceSpectrum = referenceSpectrum;
+        workerId = id;
+        
+        self.postMessage({
+          type: 'SHARED_DATA_INITIALIZED',
+          data: { workerId: id }
+        });
+        break;
+      }
+
+      case 'COMPUTE_GRID_CHUNK_OPTIMIZED': {
+        const { 
+          chunkParams, 
+          chunkIndex, 
+          totalChunks, 
+          useFrequencyWeighting = false,
+          taskId
+        } = data;
+        
+        // Use cached shared data instead of transferring it each time
+        if (!sharedFrequencies || !sharedReferenceSpectrum) {
+          throw new Error('Shared data not initialized. Call INITIALIZE_SHARED_DATA first.');
+        }
+        
+        await processChunkOptimized(
+          chunkParams, 
+          sharedFrequencies, 
+          chunkIndex, 
+          totalChunks, 
+          sharedReferenceSpectrum, 
+          useFrequencyWeighting,
+          taskId
+        );
+        break;
+      }
+
       case 'COMPUTE_GRID_CHUNK': {
         const { 
           chunkParams, 
@@ -282,14 +486,19 @@ self.onmessage = async function(e) {
         // Process chunk with aggressive memory management for large datasets
         const results = [];
         
-        // Ultra-aggressive adaptive batch sizing with memory pressure monitoring
+        // Ultra-aggressive adaptive batch sizing with enhanced memory pressure monitoring
         let batchSize = 25; // Start conservative
-        const memoryThreshold = 100 * 1024 * 1024; // 100MB memory limit per worker
+        let memoryThreshold = 100 * 1024 * 1024; // 100MB default memory limit per worker
         
-        if (chunkParams.length > 50000) {
-          batchSize = 5; // Micro-batches for huge chunks
+        // Adaptive thresholds based on dataset size to prevent UI blocking at 80k points
+        if (chunkParams.length > 80000) {
+          batchSize = 3; // Micro-batches for massive chunks (unresponsive at 80k)
+          memoryThreshold = 40 * 1024 * 1024; // Stricter memory limit for large datasets
+        } else if (chunkParams.length > 50000) {
+          batchSize = 5; // Very small batches for huge chunks
+          memoryThreshold = 60 * 1024 * 1024; // Reduced memory threshold
         } else if (chunkParams.length > 25000) {
-          batchSize = 10; // Very small batches for very large chunks
+          batchSize = 8; // Smaller batches for very large chunks
         } else if (chunkParams.length > 10000) {
           batchSize = 15; // Small batches for large chunks
         } else if (chunkParams.length < 1000) {
@@ -338,8 +547,14 @@ self.onmessage = async function(e) {
             }
           }
           
-          // Add staggered processing with small delays for very large batches
-          if (chunkParams.length > 25000 && i % (batchSize * 20) === 0) {
+          // Enhanced staggered processing with adaptive delays for UI responsiveness
+          if (chunkParams.length > 80000 && i % (batchSize * 5) === 0) {
+            // More frequent delays for datasets > 80k to prevent UI freezing
+            await new Promise(resolve => setTimeout(resolve, 20));
+          } else if (chunkParams.length > 50000 && i % (batchSize * 10) === 0) {
+            // Medium frequency delays for large datasets
+            await new Promise(resolve => setTimeout(resolve, 10));
+          } else if (chunkParams.length > 25000 && i % (batchSize * 20) === 0) {
             // Small delay every 20 batches for very large chunks to prevent blocking
             await new Promise(resolve => setTimeout(resolve, 5));
           }
