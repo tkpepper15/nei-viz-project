@@ -1,0 +1,3 @@
+-- 3. Enable Row Level Security
+ALTER TABLE user_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tagged_models ENABLE ROW LEVEL SECURITY;

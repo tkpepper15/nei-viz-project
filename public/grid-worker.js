@@ -84,11 +84,11 @@ function calculateImpedanceSpectrum(params, freqs) {
   });
 }
 
-// Calculate resnorm between two spectra using formula: (1/n) * sqrt(sum(wi * ri^2))
-function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting = false) {
+// Calculate resnorm using configurable methods
+function calculateResnorm(referenceSpectrum, testSpectrum, resnormConfig = { method: 'mae' }) {
   if (!referenceSpectrum.length || !testSpectrum.length) return Infinity;
   
-  let sumWeightedSquaredResiduals = 0;
+  let totalError = 0;
   let sumWeights = 0;
   const n = Math.min(referenceSpectrum.length, testSpectrum.length);
   
@@ -101,33 +101,67 @@ function calculateResnorm(referenceSpectrum, testSpectrum, useFrequencyWeighting
       continue;
     }
     
-    // Calculate residuals for real and imaginary components
-    const realResidual = testPoint.real - refPoint.real;
-    const imagResidual = testPoint.imag - refPoint.imag;
+    // Calculate magnitudes
+    const testMag = Math.sqrt(testPoint.real * testPoint.real + testPoint.imag * testPoint.imag);
+    const refMag = Math.sqrt(refPoint.real * refPoint.real + refPoint.imag * refPoint.imag);
     
-    // Calculate squared residual (ri^2)
-    const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
+    // Skip points with zero reference magnitude to avoid division by zero
+    if (refMag === 0) {
+      continue;
+    }
+    
+    // Calculate normalized residual (relative error) - EIS standard practice
+    const normalizedResidual = (testMag - refMag) / refMag;
+    
+    let error;
+    
+    // Calculate error based on selected method
+    switch (resnormConfig.method) {
+      case 'ssr':
+        // Sum of Squared Residuals: sqrt((real_diff)² + (imag_diff)²)
+        const realDiff = testPoint.real - refPoint.real;
+        const imagDiff = testPoint.imag - refPoint.imag;
+        error = Math.sqrt(realDiff * realDiff + imagDiff * imagDiff);
+        break;
+        
+      case 'mae':
+        error = Math.abs(normalizedResidual);
+        break;
+        
+      case 'rmse':
+        error = normalizedResidual * normalizedResidual; // Will take sqrt later
+        break;
+        
+        
+      default:
+        error = Math.abs(normalizedResidual); // Default to normalized MAE
+    }
     
     // Apply frequency weighting if enabled
     let weight = 1.0;
-    if (useFrequencyWeighting && refPoint.freq > 0) {
-      // Frequency weighting: w = f^(-0.5) emphasizes low frequencies
+    if (resnormConfig.useFrequencyWeighting && refPoint.freq > 0) {
       weight = Math.pow(refPoint.freq, -0.5);
     }
     
-    sumWeightedSquaredResiduals += weight * squaredResidual;
+    totalError += weight * error;
     sumWeights += weight;
   }
   
-  // Calculate final resnorm with weighting
+  // Calculate final result based on method
   if (sumWeights === 0) return Infinity;
   
-  if (useFrequencyWeighting) {
-    // Weighted resnorm: sqrt(sum(wi * ri^2) / sum(wi))
-    return Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
-  } else {
-    // Standard resnorm: (1/n) * sqrt(sum(ri^2))
-    return (1 / n) * Math.sqrt(sumWeightedSquaredResiduals);
+  switch (resnormConfig.method) {
+    case 'ssr':
+      return totalError / sumWeights;  // Mean of squared residuals
+      
+    case 'mae':
+      return totalError / sumWeights;  // Simple average
+      
+    case 'rmse':
+      return Math.sqrt(totalError / sumWeights);  // Root mean squared error
+      
+    default:
+      return totalError / sumWeights;
   }
 }
 
@@ -179,7 +213,7 @@ function generateLogSpaceWithReference(min, max, num, referenceValue) {
 }
 
 // Stream grid points in chunks to prevent memory overflow
-function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting = false) {
+function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnormConfig = { method: 'mae' }) {
   const totalPoints = Math.pow(gridSize, 5);
   
   // Ground truth parameters (reference values to ensure are included)
@@ -269,7 +303,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFreq
 }
 
 // Optimized chunk processing function with minimal data transfer
-async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, useFrequencyWeighting, taskId) {
+async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId) {
   const results = [];
   
   // Enhanced adaptive batch sizing based on chunk size
@@ -342,7 +376,7 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
         if (!params || typeof params.Rsh !== 'number') continue;
         
         const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
-        const resnorm = calculateResnorm(referenceSpectrum, spectrum, useFrequencyWeighting);
+        const resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
         
         if (isFinite(resnorm)) {
           results.push({
@@ -452,7 +486,7 @@ self.onmessage = async function(e) {
           chunkParams, 
           chunkIndex, 
           totalChunks, 
-          useFrequencyWeighting = false,
+          resnormConfig = { method: 'mae' },
           taskId
         } = data;
         
@@ -467,7 +501,7 @@ self.onmessage = async function(e) {
           chunkIndex, 
           totalChunks, 
           sharedReferenceSpectrum, 
-          useFrequencyWeighting,
+          resnormConfig,
           taskId
         );
         break;
@@ -480,7 +514,7 @@ self.onmessage = async function(e) {
           chunkIndex, 
           totalChunks,
           referenceSpectrum,
-          useFrequencyWeighting = false
+          resnormConfig = { method: 'mae' }
         } = data;
         
         // Process chunk with aggressive memory management for large datasets
@@ -572,7 +606,7 @@ self.onmessage = async function(e) {
               const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
               
               // Calculate resnorm
-              const resnorm = calculateResnorm(referenceSpectrum, spectrum, useFrequencyWeighting);
+              const resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
               
               // Skip infinite or NaN resnorms
               if (!isFinite(resnorm) || isNaN(resnorm)) {
@@ -631,7 +665,7 @@ self.onmessage = async function(e) {
       }
       
       case 'GENERATE_GRID_POINTS': {
-        const { gridSize, useSymmetricGrid, useFrequencyWeighting = false, groundTruthParams: inputGroundTruth } = data;
+        const { gridSize, useSymmetricGrid, resnormConfig = { method: 'mae' }, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size to prevent memory issues
         if (gridSize > 20) {
@@ -645,7 +679,7 @@ self.onmessage = async function(e) {
         
         // Use streaming approach to prevent memory overflow
         const gridPoints = [];
-        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnormConfig);
         let lastProgressReport = 0;
         
         for (const { point, progress } of stream) {
@@ -681,7 +715,7 @@ self.onmessage = async function(e) {
       }
       
       case 'GENERATE_GRID_STREAM': {
-        const { gridSize, useSymmetricGrid, useFrequencyWeighting = false, chunkSize = 1000, groundTruthParams: inputGroundTruth } = data;
+        const { gridSize, useSymmetricGrid, resnormConfig = { method: 'mae' }, chunkSize = 1000, groundTruthParams: inputGroundTruth } = data;
         
         // Safety check for grid size
         if (gridSize > 20) {
@@ -694,7 +728,7 @@ self.onmessage = async function(e) {
         }
         
         // Stream grid points in chunks to prevent memory overflow
-        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, useFrequencyWeighting);
+        const stream = streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnormConfig);
         let currentChunk = [];
         let totalGenerated = 0;
         

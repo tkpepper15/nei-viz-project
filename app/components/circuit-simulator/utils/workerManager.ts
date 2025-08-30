@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect } from 'react';
 import { BackendMeshPoint } from '../types';
 import { CircuitParameters } from '../types/parameters';
 import { PerformanceSettings } from '../controls/PerformanceControls';
+import { ResnormConfig } from './resnorm';
 
 export interface WorkerProgress {
   type: 'CHUNK_PROGRESS' | 'GENERATION_PROGRESS' | 'COMPUTATION_START' | 'MATHEMATICAL_OPERATION' | 'MEMORY_STATUS' | 'WORKER_STATUS' | 'STREAMING_UPDATE' | 'THROTTLE_UPDATE';
@@ -51,6 +52,7 @@ export interface UseWorkerManagerReturn {
     maxFreq: number,
     numPoints: number,
     performanceSettings: PerformanceSettings,
+    resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void
   ) => Promise<BackendMeshPoint[]>;
@@ -352,6 +354,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     maxFreq: number,
     numPoints: number,
     performanceSettings: PerformanceSettings,
+    resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void
   ): Promise<BackendMeshPoint[]> => {
@@ -477,6 +480,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           workerCount,
           chunkSize,
           performanceSettings,
+          resnormConfig,
           onProgress,
           onError,
           groundTruthParams
@@ -538,7 +542,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           data: { 
             gridSize,
             useSymmetricGrid: performanceSettings.useSymmetricGrid,
-            useFrequencyWeighting: performanceSettings.useFrequencyWeighting,
+            resnormConfig,
             groundTruthParams
           }
         });
@@ -764,7 +768,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                   chunkParams: chunk,
                   chunkIndex,
                   totalChunks: chunks.length,
-                  useFrequencyWeighting: performanceSettings.useFrequencyWeighting,
+                  resnormConfig,
                   taskId
                 }
               });
@@ -840,7 +844,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     initializeSharedData,
     getIdleWorker,
     returnWorkerToPool
-  ]); // eslint-disable-line react-hooks/exhaustive-deps
+  ]);  
 
   // New streaming computation function for large grids
   const computeGridStreaming = useCallback(async (
@@ -852,6 +856,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     workerCount: number,
     chunkSize: number,
     performanceSettings: PerformanceSettings,
+    resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void,
     groundTruthParams: CircuitParameters
@@ -919,7 +924,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         data: {
           gridSize,
           useSymmetricGrid: performanceSettings.useSymmetricGrid,
-          useFrequencyWeighting: performanceSettings.useFrequencyWeighting,
+          resnormConfig,
           chunkSize: Math.min(chunkSize, 5000), // Smaller chunks for streaming
           groundTruthParams
         }
@@ -974,7 +979,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     chunkIndex: totalProcessed,
                     totalChunks: -1, // Unknown for streaming
                     referenceSpectrum,
-                    useFrequencyWeighting: performanceSettings.useFrequencyWeighting
+                    resnormConfig
                   }
                 });
               });

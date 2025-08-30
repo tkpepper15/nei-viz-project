@@ -104,7 +104,7 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
               min="1"
               max="100"
               step="1"
-              value={userVisualizationPercentage}
+              value={isNaN(userVisualizationPercentage) ? 100 : userVisualizationPercentage}
               onChange={(e) => setUserVisualizationPercentage(Number(e.target.value))}
               className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer slider"
             />

@@ -4,7 +4,6 @@ import { ModelSnapshot } from '../types';
 
 // Static render settings interface
 export interface StaticRenderSettings {
-  chromaEnabled: boolean;
   includeLabels: boolean;
   backgroundColor: 'transparent' | 'white' | 'black';
   opacityLevel: number;
@@ -13,7 +12,8 @@ export interface StaticRenderSettings {
   selectedOpacityGroups: number[];
   showGroundTruth: boolean;
   visualizationType: 'spider2d' | 'spider3d' | 'nyquist';
-  resnormScale: number;
+  resnormSpread: number;
+  useResnormCenter: boolean; // New: rotate around resnorm center instead of grid front
   liveRendering: boolean;
   resolution: string;
   format: 'png' | 'svg' | 'pdf' | 'webp' | 'jpg';
@@ -22,7 +22,6 @@ export interface StaticRenderSettings {
 
 // Default static render settings
 export const defaultStaticRenderSettings: StaticRenderSettings = {
-  chromaEnabled: true,
   includeLabels: true,
   backgroundColor: 'white',
   opacityLevel: 0.7,
@@ -31,7 +30,8 @@ export const defaultStaticRenderSettings: StaticRenderSettings = {
   selectedOpacityGroups: [0], // Default to excellent performance group only
   showGroundTruth: true,
   visualizationType: 'spider3d',
-  resnormScale: 1.0,
+  resnormSpread: 1.0,
+  useResnormCenter: false, // Default to grid front rotation
   liveRendering: true, // Default to live rendering
   resolution: '1920x1080',
   format: 'png',
@@ -163,15 +163,6 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
 
         {/* Basic Visualization Settings */}
         <div className="grid grid-cols-2 gap-4">
-          <label className="flex items-center space-x-2">
-            <input
-              type="checkbox"
-              checked={settings.chromaEnabled}
-              onChange={(e) => updateSetting('chromaEnabled', e.target.checked)}
-              className="rounded"
-            />
-            <span className="text-sm text-gray-700">Color Mode</span>
-          </label>
 
           <label className="flex items-center space-x-2">
             <input
@@ -200,21 +191,27 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
           </select>
         </div>
 
-        {/* Model Portion */}
+        {/* Group Portion */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-sm font-medium text-gray-700">Model Portion:</label>
+            <label className="text-sm font-medium text-gray-700">Group Portion:</label>
             <div className="flex items-center gap-2">
               <input
                 type="text"
-                value={Math.round(settings.groupPortion * 100)}
+                value={(() => {
+                  // Display the actual logarithmic percentage that matches the filtering
+                  const groupPortionPercent = settings.groupPortion * 100;
+                  return groupPortionPercent < 1 
+                    ? groupPortionPercent.toFixed(2) 
+                    : groupPortionPercent.toFixed(1);
+                })()}
                 onChange={(e) => {
-                  const value = parseFloat(e.target.value);
-                  if (!isNaN(value)) {
-                    updateSetting('groupPortion', value / 100);
+                  const displayValue = parseFloat(e.target.value);
+                  if (!isNaN(displayValue) && displayValue > 0 && displayValue <= 100) {
+                    updateSetting('groupPortion', displayValue / 100);
                   }
                 }}
-                className="w-12 bg-neutral-700 text-white text-xs px-1 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
+                className="w-16 bg-neutral-700 text-white text-xs px-1 py-1 rounded border border-neutral-600 focus:border-blue-500 focus:outline-none text-center"
               />
               <span className="text-xs text-gray-600">% of best fits</span>
             </div>
@@ -224,7 +221,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
             min="0.1"
             max="1.0"
             step="0.1"
-            value={settings.groupPortion}
+            value={isNaN(settings.groupPortion) ? 1.0 : settings.groupPortion}
             onChange={(e) => updateSetting('groupPortion', parseFloat(e.target.value))}
             className="w-full"
           />
@@ -253,7 +250,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                 min="0.1"
                 max="1.0"
                 step="0.1"
-                value={settings.opacityLevel}
+                value={isNaN(settings.opacityLevel) ? 0.5 : settings.opacityLevel}
                 onChange={(e) => updateSetting('opacityLevel', parseFloat(e.target.value))}
                 className="w-full"
               />
@@ -268,7 +265,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                 min="0.1"
                 max="5.0"
                 step="0.1"
-                value={settings.opacityExponent}
+                value={isNaN(settings.opacityExponent) ? 1.0 : settings.opacityExponent}
                 onChange={(e) => updateSetting('opacityExponent', parseFloat(e.target.value))}
                 className="w-full"
               />
@@ -293,7 +290,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                   <label className="block text-xs text-gray-600">R shunt (Ω)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Rsh}
+                    value={isNaN(groundTruthParams.Rsh) ? 100 : groundTruthParams.Rsh}
                     onChange={(e) => handleGroundTruthChange('Rsh', parseFloat(e.target.value))}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                   />
@@ -302,7 +299,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                   <label className="block text-xs text-gray-600">Ra (Ω)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Ra}
+                    value={isNaN(groundTruthParams.Ra) ? 1000 : groundTruthParams.Ra}
                     onChange={(e) => handleGroundTruthChange('Ra', parseFloat(e.target.value))}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                   />
@@ -311,7 +308,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                   <label className="block text-xs text-gray-600">Ca (µF)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Ca * 1e6}
+                    value={isNaN(groundTruthParams.Ca * 1e6) ? 0 : groundTruthParams.Ca * 1e6}
                     onChange={(e) => handleGroundTruthChange('Ca', parseFloat(e.target.value) / 1e6)}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                     step="0.1"
@@ -321,7 +318,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                   <label className="block text-xs text-gray-600">Rb (Ω)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Rb}
+                    value={isNaN(groundTruthParams.Rb) ? 5000 : groundTruthParams.Rb}
                     onChange={(e) => handleGroundTruthChange('Rb', parseFloat(e.target.value))}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                   />
@@ -330,7 +327,7 @@ export const StaticRenderControls: React.FC<StaticRenderControlsProps> = ({
                   <label className="block text-xs text-gray-600">Cb (µF)</label>
                   <input
                     type="number"
-                    value={groundTruthParams.Cb * 1e6}
+                    value={isNaN(groundTruthParams.Cb * 1e6) ? 0 : groundTruthParams.Cb * 1e6}
                     onChange={(e) => handleGroundTruthChange('Cb', parseFloat(e.target.value) / 1e6)}
                     className="w-full p-1 text-sm border border-gray-300 rounded"
                     step="0.1"

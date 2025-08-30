@@ -178,7 +178,7 @@
   appearance: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  margin-top: -7px;
+  margin-top: -7px; /* Centers the thumb on the track */
 }
 
 .dual-range-thumb::-webkit-slider-thumb:hover {
@@ -216,11 +216,33 @@
 }
 
 .dual-range-thumb-min {
-  z-index: 3;
+  z-index: 2;
 }
 
 .dual-range-thumb-max {
-  z-index: 2;
+  z-index: 3;
+}
+
+/* When min thumb is being dragged or focused, bring it to front */
+.dual-range-thumb-min:active,
+.dual-range-thumb-min:focus {
+  z-index: 4;
+}
+
+/* When max thumb is being dragged or focused, bring it to front */
+.dual-range-thumb-max:active,
+.dual-range-thumb-max:focus {
+  z-index: 4;
+}
+
+/* Enhanced focus states for better accessibility */
+.dual-range-thumb:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.dual-range-thumb:focus::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3), 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
 .dual-range-slider {

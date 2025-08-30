@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { ModelSnapshot, ResnormGroup, ImpedancePoint } from '../types';
 import { CircuitParameters } from '../types/parameters';
+import { calculateTimeConstants } from '../math/utils';
 
 interface NyquistPlotProps {
   groundTruthParams?: CircuitParameters | null;
@@ -15,6 +16,7 @@ interface NyquistPlotProps {
   numPoints?: number;
   hiddenGroups?: number[];
   selectedOpacityGroups?: number[];
+  groupPortion?: number;
 }
 
 // Calculate impedance for given parameters
@@ -24,18 +26,19 @@ const calculateImpedance = (
 ): ImpedancePoint[] => {
   const impedancePoints: ImpedancePoint[] = [];
   
+  // Calculate time constants once outside the loop for efficiency
+  const { tauA, tauB } = calculateTimeConstants(params);
+  
   for (const freq of frequencies) {
     const omega = 2 * Math.PI * freq;
     
     // Calculate individual membrane impedances: Z = R/(1 + jωRC)
     // Za (apical membrane)
-    const tauA = params.Ra * params.Ca;
     const denominatorA = 1 + Math.pow(omega * tauA, 2);
     const realA = params.Ra / denominatorA;
     const imagA = -params.Ra * omega * tauA / denominatorA;
     
     // Zb (basal membrane)  
-    const tauB = params.Rb * params.Cb;
     const denominatorB = 1 + Math.pow(omega * tauB, 2);
     const realB = params.Rb / denominatorB;
     const imagB = -params.Rb * omega * tauB / denominatorB;
@@ -86,63 +89,146 @@ const generateStandardFrequencies = (minFreq?: number, maxFreq?: number, numPoin
   return freqs;
 };
 
-// Calculate median impedance for resnorm groups using consistent frequency spacing
-const calculateGroupMedian = (group: ResnormGroup, standardFreqs?: number[]): ImpedancePoint[] => {
+// Calculate statistics based on impedance magnitude at each frequency point
+const calculateGroupStatisticsByImpedance = (group: ResnormGroup, standardFreqs?: number[]): {
+  median: ImpedancePoint[];
+  min: ImpedancePoint[];
+  max: ImpedancePoint[];
+} => {
   if (group.items.length === 0) {
-    return [];
+    return { median: [], min: [], max: [] };
   }
   
   // Use consistent logarithmic frequency spacing
   const frequencies = standardFreqs || generateStandardFrequencies();
   const median: ImpedancePoint[] = [];
+  const min: ImpedancePoint[] = [];
+  const max: ImpedancePoint[] = [];
   
   for (const freq of frequencies) {
-    // Recalculate impedance for each model at this exact frequency for consistency
-    const realValues: number[] = [];
-    const imagValues: number[] = [];
+    // Calculate impedance for all models at this exact frequency
+    const impedancePoints: ImpedancePoint[] = [];
     
     for (const model of group.items) {
-      // Directly calculate impedance for this frequency using model parameters
       if (model.parameters) {
         const impedancePoint = calculateImpedanceAtFrequency(model.parameters, freq);
-        realValues.push(impedancePoint.real);
-        imagValues.push(impedancePoint.imaginary);
+        impedancePoints.push(impedancePoint);
       }
     }
     
-    if (realValues.length > 0) {
-      realValues.sort((a, b) => a - b);
-      imagValues.sort((a, b) => a - b);
+    if (impedancePoints.length > 0) {
+      // Sort by magnitude to find coherent min/median/max impedance values
+      // This preserves the real/imaginary relationship for each impedance point
+      impedancePoints.sort((a, b) => a.magnitude - b.magnitude);
       
-      const realMedian = realValues[Math.floor(realValues.length / 2)];
-      const imagMedian = imagValues[Math.floor(imagValues.length / 2)];
+      const minIndex = 0;
+      const medianIndex = Math.floor(impedancePoints.length / 2);
+      const maxIndex = impedancePoints.length - 1;
+      
+      // Use the actual impedance points (preserves complex number relationships)
+      min.push({
+        frequency: freq,
+        real: impedancePoints[minIndex].real,
+        imaginary: impedancePoints[minIndex].imaginary,
+        magnitude: impedancePoints[minIndex].magnitude,
+        phase: impedancePoints[minIndex].phase
+      });
       
       median.push({
         frequency: freq,
-        real: realMedian,
-        imaginary: imagMedian,
-        magnitude: Math.sqrt(realMedian * realMedian + imagMedian * imagMedian),
-        phase: Math.atan2(imagMedian, realMedian) * (180 / Math.PI)
+        real: impedancePoints[medianIndex].real,
+        imaginary: impedancePoints[medianIndex].imaginary,
+        magnitude: impedancePoints[medianIndex].magnitude,
+        phase: impedancePoints[medianIndex].phase
+      });
+      
+      max.push({
+        frequency: freq,
+        real: impedancePoints[maxIndex].real,
+        imaginary: impedancePoints[maxIndex].imaginary,
+        magnitude: impedancePoints[maxIndex].magnitude,
+        phase: impedancePoints[maxIndex].phase
       });
     }
   }
   
-  return median;
+  return { median, min, max };
 };
+
+// Calculate statistics based on resnorm ranking (best/median/worst fitting models)
+const calculateGroupStatisticsByResnorm = (group: ResnormGroup, standardFreqs?: number[]): {
+  median: ImpedancePoint[];
+  min: ImpedancePoint[];
+  max: ImpedancePoint[];
+} => {
+  if (group.items.length === 0) {
+    return { median: [], min: [], max: [] };
+  }
+  
+  // Use consistent logarithmic frequency spacing
+  const frequencies = standardFreqs || generateStandardFrequencies();
+  
+  // Sort models by resnorm (best fit = lowest resnorm)
+  const sortedModels = [...group.items].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+  
+  const minIndex = 0; // Best fit (lowest resnorm)
+  const medianIndex = Math.floor(sortedModels.length / 2); // Median fit
+  const maxIndex = sortedModels.length - 1; // Worst fit (highest resnorm)
+  
+  // Calculate impedance curves for the selected models
+  const minModel = sortedModels[minIndex];
+  const medianModel = sortedModels[medianIndex];
+  const maxModel = sortedModels[maxIndex];
+  
+  const min: ImpedancePoint[] = [];
+  const median: ImpedancePoint[] = [];
+  const max: ImpedancePoint[] = [];
+  
+  for (const freq of frequencies) {
+    if (minModel.parameters) {
+      min.push(calculateImpedanceAtFrequency(minModel.parameters, freq));
+    }
+    if (medianModel.parameters) {
+      median.push(calculateImpedanceAtFrequency(medianModel.parameters, freq));
+    }
+    if (maxModel.parameters) {
+      max.push(calculateImpedanceAtFrequency(maxModel.parameters, freq));
+    }
+  }
+  
+  return { median, min, max };
+};
+
+// Wrapper function to choose calculation method
+const calculateGroupStatistics = (
+  group: ResnormGroup, 
+  standardFreqs: number[] | undefined, 
+  byResnorm: boolean
+): {
+  median: ImpedancePoint[];
+  min: ImpedancePoint[];
+  max: ImpedancePoint[];
+} => {
+  return byResnorm 
+    ? calculateGroupStatisticsByResnorm(group, standardFreqs)
+    : calculateGroupStatisticsByImpedance(group, standardFreqs);
+};
+
 
 // Calculate impedance at a single frequency for consistent spacing
 const calculateImpedanceAtFrequency = (params: CircuitParameters, freq: number): ImpedancePoint => {
   const omega = 2 * Math.PI * freq;
   
+  // Calculate time constants
+  const { tauA, tauB } = calculateTimeConstants(params);
+  
   // Calculate individual membrane impedances: Z = R/(1 + jωRC)
   // Za (apical membrane)
-  const tauA = params.Ra * params.Ca;
   const denominatorA = 1 + Math.pow(omega * tauA, 2);
   const realA = params.Ra / denominatorA;
   const imagA = -params.Ra * omega * tauA / denominatorA;
   
   // Zb (basal membrane)  
-  const tauB = params.Rb * params.Cb;
   const denominatorB = 1 + Math.pow(omega * tauB, 2);
   const realB = params.Rb / denominatorB;
   const imagB = -params.Rb * omega * tauB / denominatorB;
@@ -184,23 +270,40 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
   chromaEnabled = true,
   numPoints = 200,
   hiddenGroups = [],
-  selectedOpacityGroups = [0]
+  selectedOpacityGroups = [0],
+  groupPortion = 1.0
   // Equal step size enforced - no logarithmic scaling options
 }) => {
+  // Toggle between impedance-based and resnorm-based median calculation
+  const [medianByResnorm, setMedianByResnorm] = useState(false);
+  
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // Filter groups using both selectedOpacityGroups and hiddenGroups - same logic as spider plots
+  // Filter groups using both selectedOpacityGroups, hiddenGroups, and groupPortion
   const visibleResnormGroups = useMemo(() => {
     // If no groups are selected for opacity, show nothing
     if (selectedOpacityGroups.length === 0) {
       return [];
     }
     
-    // Apply both selectedOpacityGroups (performance tiles) and hiddenGroups (layer control) filtering
-    return resnormGroups.filter((_, index) => 
-      selectedOpacityGroups.includes(index) && !hiddenGroups.includes(index)
-    );
-  }, [resnormGroups, selectedOpacityGroups, hiddenGroups]);
+    // Apply filtering and groupPortion (same logic as VisualizerTab)
+    return resnormGroups
+      .filter((_, index) => 
+        selectedOpacityGroups.includes(index) && !hiddenGroups.includes(index)
+      )
+      .map(group => {
+        // Apply groupPortion to each selected group
+        const keepCount = Math.max(1, Math.floor(group.items.length * groupPortion));
+        // Sort by resnorm (ascending = best fits first) and take the top portion
+        const sortedItems = [...group.items].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+        const filteredItems = sortedItems.slice(0, keepCount);
+        
+        return {
+          ...group,
+          items: filteredItems
+        };
+      });
+  }, [resnormGroups, selectedOpacityGroups, hiddenGroups, groupPortion]);
   
   // Generate consistent frequency range for proper parametric representation
   const frequencies = useMemo(() => {
@@ -212,19 +315,19 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     return generateStandardFrequencies(minFreq, maxFreq, numPoints);
   }, [groundTruthParams, numPoints]);
   
-  // Calculate ground truth impedance
+  // Calculate ground truth impedance (represents current parameters)
   const groundTruthImpedance = useMemo(() => {
     if (!groundTruthParams || !showGroundTruth) return [];
     return calculateImpedance(groundTruthParams, frequencies);
   }, [groundTruthParams, frequencies, showGroundTruth]);
   
-  // Calculate group medians with consistent frequency spacing (only for visible groups)
-  const groupMedians = useMemo(() => {
+  // Calculate group statistics (median, min, max) with consistent frequency spacing (only for visible groups)
+  const groupStatistics = useMemo(() => {
     return visibleResnormGroups.map(group => ({
       group,
-      median: calculateGroupMedian(group, frequencies)
+      ...calculateGroupStatistics(group, frequencies, medianByResnorm)
     }));
-  }, [visibleResnormGroups, frequencies]);
+  }, [visibleResnormGroups, frequencies, medianByResnorm]);
   
   // Find plot bounds with better scaling logic
   const plotBounds = useMemo(() => {
@@ -241,9 +344,10 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
       });
     }
     
-    // Include group median bounds
-    groupMedians.forEach(({ median }) => {
-      median.forEach(point => {
+    
+    // Include group bounds (median, min, max)
+    groupStatistics.forEach(({ median, min, max }) => {
+      [...median, ...min, ...max].forEach(point => {
         minReal = Math.min(minReal, point.real);
         maxReal = Math.max(maxReal, point.real);
         minImag = Math.min(minImag, point.imaginary);
@@ -262,28 +366,69 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     // Ensure we show negative imaginary impedance (classic Nyquist plot style)
     if (maxImag > 0) maxImag = 0;
     
-    // Force equal step sizes for proper data interpretation
+    // Adjust bounds to align with integer grid system
+    // This ensures clean cropping and consistent axis stepping
     const realRange = maxReal - minReal;
-    const imagRange = maxImag - minImag;
-    const maxRange = Math.max(realRange, Math.abs(imagRange));
+    const imagRange = Math.abs(maxImag - minImag);
+    const maxRange = Math.max(realRange, imagRange);
     
-    // Expand smaller axis to match larger axis range (crop if needed)
-    if (realRange < maxRange) {
-      const realCenter = (minReal + maxReal) / 2;
-      minReal = realCenter - maxRange / 2;
-      maxReal = realCenter + maxRange / 2;
-      minReal = Math.max(0, minReal); // Keep real axis non-negative
+    // Calculate base step size that will be used for grid
+    let baseStep = 1;
+    if (maxRange > 100) {
+      baseStep = Math.ceil(maxRange / 10);
+      // Round to nice numbers
+      if (baseStep <= 5) baseStep = 5;
+      else if (baseStep <= 10) baseStep = 10;
+      else if (baseStep <= 25) baseStep = 25;
+      else if (baseStep <= 50) baseStep = 50;
+      else if (baseStep <= 100) baseStep = 100;
+      else if (baseStep <= 250) baseStep = 250;
+      else if (baseStep <= 500) baseStep = 500;
+      else baseStep = Math.ceil(baseStep / 1000) * 1000;
+    } else if (maxRange > 50) {
+      baseStep = 5;
+    } else if (maxRange > 20) {
+      baseStep = 2;
     }
     
-    if (Math.abs(imagRange) < maxRange) {
-      const imagCenter = (minImag + maxImag) / 2;
-      minImag = imagCenter - maxRange / 2;
-      maxImag = imagCenter + maxRange / 2;
-      maxImag = Math.min(0, maxImag); // Keep imaginary axis non-positive
+    // Align bounds to grid steps for clean axis labels
+    minReal = Math.floor(minReal / baseStep) * baseStep;
+    maxReal = Math.ceil(maxReal / baseStep) * baseStep;
+    minImag = Math.floor(minImag / baseStep) * baseStep;
+    maxImag = Math.ceil(maxImag / baseStep) * baseStep;
+    
+    // Ensure imaginary axis shows negative values (classic Nyquist convention)
+    if (maxImag > 0) maxImag = 0;
+    
+    // Maintain aspect ratio by expanding the smaller range if needed
+    const adjustedRealRange = maxReal - minReal;
+    const adjustedImagRange = Math.abs(maxImag - minImag);
+    const targetRange = Math.max(adjustedRealRange, adjustedImagRange);
+    
+    // Expand to square aspect ratio for consistent grid visualization
+    if (adjustedRealRange < targetRange) {
+      const center = (minReal + maxReal) / 2;
+      const halfRange = targetRange / 2;
+      minReal = center - halfRange;
+      maxReal = center + halfRange;
+      // Keep real axis non-negative for impedance plots
+      if (minReal < 0) {
+        maxReal += Math.abs(minReal);
+        minReal = 0;
+      }
     }
     
-    // No additional scaling - equal step sizes enforced above
-    // Remove all logarithmic scaling features as requested
+    if (adjustedImagRange < targetRange) {
+      const center = (minImag + maxImag) / 2;
+      const halfRange = targetRange / 2;
+      minImag = center - halfRange;
+      maxImag = center + halfRange;
+      // Keep imaginary axis non-positive for impedance plots
+      if (maxImag > 0) {
+        minImag -= maxImag;
+        maxImag = 0;
+      }
+    }
     
     return {
       minReal,
@@ -291,7 +436,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
       minImag,
       maxImag,
     };
-  }, [groundTruthImpedance, groupMedians]); // Removed logScale dependencies
+  }, [groundTruthImpedance, groupStatistics]);
   
   // Plotting area dimensions with better spacing
   const plotMargin = useMemo(() => ({ top: 50, right: 50, bottom: 70, left: 80 }), []);
@@ -333,33 +478,49 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     // Vertical grid lines
     const { minReal, maxReal, minImag, maxImag } = plotBounds;
     
-    // Generate orthogonal coordinate plane grid with identical step sizes
+    // Generate standardized integer grid system with consistent stepping
+    // Determine appropriate base step size based on data range
     const realRange = maxReal - minReal;
     const imagRange = maxImag - minImag;
     const maxRange = Math.max(realRange, Math.abs(imagRange));
     
-    // Calculate unified step size for both axes to ensure orthogonal grid
-    const targetSteps = 10;
-    const unifiedStepSize = maxRange / targetSteps;
+    // Calculate clean integer step size
+    let baseStep = 1;
+    if (maxRange > 100) {
+      baseStep = Math.ceil(maxRange / 10); // e.g., for range 0-150, use step=15
+      // Round to nice numbers
+      if (baseStep <= 5) baseStep = 5;
+      else if (baseStep <= 10) baseStep = 10;
+      else if (baseStep <= 25) baseStep = 25;
+      else if (baseStep <= 50) baseStep = 50;
+      else if (baseStep <= 100) baseStep = 100;
+      else if (baseStep <= 250) baseStep = 250;
+      else if (baseStep <= 500) baseStep = 500;
+      else baseStep = Math.ceil(baseStep / 1000) * 1000;
+    } else if (maxRange > 50) {
+      baseStep = 5;
+    } else if (maxRange > 20) {
+      baseStep = 2;
+    } else {
+      baseStep = 1;
+    }
     
-    // Generate grid values with identical step sizes
+    // Generate clean integer grid values for both axes
     const realGridValues = [];
     const imagGridValues = [];
     
-    // Real axis grid with unified step size
-    const realStart = Math.floor(minReal / unifiedStepSize) * unifiedStepSize;
-    for (let step = realStart; step <= maxReal + unifiedStepSize; step += unifiedStepSize) {
-      if (step >= minReal && step <= maxReal) {
-        realGridValues.push(step);
-      }
+    // Real axis with integer steps: ..., -2, -1, 0, 1, 2, 3, 4, 5, ...
+    const realStart = Math.floor(minReal / baseStep) * baseStep;
+    const realEnd = Math.ceil(maxReal / baseStep) * baseStep;
+    for (let value = realStart; value <= realEnd; value += baseStep) {
+      realGridValues.push(value);
     }
     
-    // Imaginary axis grid with identical step size
-    const imagStart = Math.floor(minImag / unifiedStepSize) * unifiedStepSize;
-    for (let step = imagStart; step <= maxImag + unifiedStepSize; step += unifiedStepSize) {
-      if (step >= minImag && step <= maxImag) {
-        imagGridValues.push(step);
-      }
+    // Imaginary axis with identical integer steps: ..., -3, -2, -1, 0, 1, 2, 3, ...
+    const imagStart = Math.floor(minImag / baseStep) * baseStep;
+    const imagEnd = Math.ceil(maxImag / baseStep) * baseStep;
+    for (let value = imagStart; value <= imagEnd; value += baseStep) {
+      imagGridValues.push(value);
     }
     
     // Draw vertical grid lines (real axis) with unified step size
@@ -398,26 +559,163 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     ctx.strokeStyle = '#374151';
     ctx.lineWidth = 1;
     
-    // Draw resnorm group median dots
+    // Draw resnorm group ribbon plots (financial modeling style)
     if (chromaEnabled) {
-      groupMedians.forEach(({ group, median }) => {
-        if (median.length > 0) {
-          // Draw median dots
-          ctx.fillStyle = group.color;
+      groupStatistics.forEach(({ group, median, min, max }) => {
+        if (median.length > 0 && min.length > 0 && max.length > 0) {
+          // Parse color and create semi-transparent fill
+          const color = group.color;
+          const rgbMatch = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          let fillColor = color + '40'; // Add alpha for transparency
           
+          if (rgbMatch) {
+            const [, r, g, b] = rgbMatch;
+            fillColor = `rgba(${r}, ${g}, ${b}, 0.25)`; // 25% opacity for ribbon fill
+          }
+          
+          // Draw smooth ribbon fill between min and max
+          if (min.length > 1 && max.length > 1) {
+            ctx.fillStyle = fillColor;
+            ctx.beginPath();
+            
+            // Draw smooth upper bound (max) using quadratic curves
+            const maxX = toCanvasX(max[0].real);
+            const maxY = toCanvasY(max[0].imaginary);
+            ctx.moveTo(maxX, maxY);
+            
+            for (let i = 1; i < max.length; i++) {
+              const x = toCanvasX(max[i].real);
+              const y = toCanvasY(max[i].imaginary);
+              
+              if (i < max.length - 1) {
+                // Use quadratic curve for smoothness
+                const nextX = toCanvasX(max[i + 1].real);
+                const nextY = toCanvasY(max[i + 1].imaginary);
+                const cpX = x;
+                const cpY = y;
+                const endX = (x + nextX) / 2;
+                const endY = (y + nextY) / 2;
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+              } else {
+                // Last point
+                ctx.lineTo(x, y);
+              }
+            }
+            
+            // Draw smooth lower bound (min) in reverse order
+            for (let i = min.length - 1; i >= 0; i--) {
+              const x = toCanvasX(min[i].real);
+              const y = toCanvasY(min[i].imaginary);
+              
+              if (i > 0) {
+                // Use quadratic curve for smoothness
+                const prevX = toCanvasX(min[i - 1].real);
+                const prevY = toCanvasY(min[i - 1].imaginary);
+                const cpX = x;
+                const cpY = y;
+                const endX = (x + prevX) / 2;
+                const endY = (y + prevY) / 2;
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+              } else {
+                // Last point (first in min array)
+                ctx.lineTo(x, y);
+              }
+            }
+            
+            ctx.closePath();
+            ctx.fill();
+          }
+          
+          // Draw smooth min line (dotted)
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 3]); // Dotted line for min
+          ctx.beginPath();
+          if (min.length > 0) {
+            const startX = toCanvasX(min[0].real);
+            const startY = toCanvasY(min[0].imaginary);
+            ctx.moveTo(startX, startY);
+            
+            for (let i = 1; i < min.length; i++) {
+              const x = toCanvasX(min[i].real);
+              const y = toCanvasY(min[i].imaginary);
+              
+              if (i < min.length - 1) {
+                // Use quadratic curve for smoothness
+                const nextX = toCanvasX(min[i + 1].real);
+                const nextY = toCanvasY(min[i + 1].imaginary);
+                const cpX = x;
+                const cpY = y;
+                const endX = (x + nextX) / 2;
+                const endY = (y + nextY) / 2;
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+              } else {
+                // Last point
+                ctx.lineTo(x, y);
+              }
+            }
+          }
+          ctx.stroke();
+          
+          // Draw smooth max line (solid)
+          ctx.setLineDash([]); // Solid line for max
+          ctx.beginPath();
+          if (max.length > 0) {
+            const startX = toCanvasX(max[0].real);
+            const startY = toCanvasY(max[0].imaginary);
+            ctx.moveTo(startX, startY);
+            
+            for (let i = 1; i < max.length; i++) {
+              const x = toCanvasX(max[i].real);
+              const y = toCanvasY(max[i].imaginary);
+              
+              if (i < max.length - 1) {
+                // Use quadratic curve for smoothness
+                const nextX = toCanvasX(max[i + 1].real);
+                const nextY = toCanvasY(max[i + 1].imaginary);
+                const cpX = x;
+                const cpY = y;
+                const endX = (x + nextX) / 2;
+                const endY = (y + nextY) / 2;
+                ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+              } else {
+                // Last point
+                ctx.lineTo(x, y);
+              }
+            }
+          }
+          ctx.stroke();
+          
+          // Reset line dash
+          ctx.setLineDash([]);
+        }
+      });
+      
+      // Draw median dots on top of all ribbons for better visibility
+      groupStatistics.forEach(({ group, median }) => {
+        if (median.length > 0) {
+          // Draw median dots with white outline for visibility
           median.forEach((point) => {
             const x = toCanvasX(point.real);
             const y = toCanvasY(point.imaginary);
             
+            // White outline
             ctx.beginPath();
-            ctx.arc(x, y, 4, 0, 2 * Math.PI); // 4px radius dots
+            ctx.arc(x, y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            
+            // Colored center
+            ctx.beginPath();
+            ctx.arc(x, y, 3.5, 0, 2 * Math.PI);
+            ctx.fillStyle = group.color;
             ctx.fill();
           });
         }
       });
     }
     
-    // Draw ground truth impedance as white dots
+    // Draw ground truth impedance as white dots (represents current parameters)
     if (showGroundTruth && groundTruthImpedance.length > 0) {
       ctx.fillStyle = '#ffffff'; // White for dark mode
       
@@ -452,14 +750,28 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
     
-    // Create consistent axis labels using unified step size
+    // Create consistent axis labels with clean integer formatting
     const formatValue = (value: number) => {
-      const absValue = Math.abs(value);
+      // Handle floating point precision issues
+      const rounded = Math.round(value * 100) / 100;
+      const absValue = Math.abs(rounded);
+      
       if (absValue >= 1000) {
-        const kValue = value / 1000;
-        return kValue.toFixed(kValue % 1 === 0 ? 0 : 1) + 'k';
+        const kValue = rounded / 1000;
+        // For k-values, show decimal only if needed
+        if (Math.abs(kValue % 1) < 0.01) {
+          return Math.round(kValue) + 'k';
+        }
+        return kValue.toFixed(1) + 'k';
       }
-      return value.toFixed(value % 1 === 0 ? 0 : 1);
+      
+      // For regular values, show as integer if it's a whole number
+      if (Math.abs(rounded % 1) < 0.01) {
+        return Math.round(rounded).toString();
+      }
+      
+      // Show up to 1 decimal place for non-integers
+      return rounded.toFixed(1);
     };
     
     // Draw X-axis labels with unified formatting
@@ -522,10 +834,32 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
     ctx.font = 'bold 18px Arial';
     ctx.fillText('Nyquist Plot', width / 2, 30);
     
-  }, [width, height, groundTruthImpedance, groupMedians, plotBounds, showGroundTruth, chromaEnabled, plotWidth, plotHeight, plotMargin]);
+  }, [width, height, groundTruthImpedance, groupStatistics, plotBounds, showGroundTruth, chromaEnabled, plotWidth, plotHeight, plotMargin]);
   
   return (
     <div className="bg-neutral-800 rounded border border-neutral-600 p-4">
+      {/* Median Calculation Toggle */}
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-lg font-medium text-neutral-200">Nyquist Plot</h3>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="checkbox"
+              checked={medianByResnorm}
+              onChange={(e) => setMedianByResnorm(e.target.checked)}
+              className="rounded text-blue-600 focus:ring-blue-500 bg-neutral-700 border-neutral-600"
+            />
+            <span>Median by Resnorm</span>
+          </label>
+          <div className="text-xs text-neutral-400 max-w-48">
+            {medianByResnorm 
+              ? "Shows best/median/worst fitting models as complete curves"
+              : "Shows min/median/max impedance magnitude at each frequency"
+            }
+          </div>
+        </div>
+      </div>
+      
       <canvas 
         ref={canvasRef}
         width={width}
@@ -538,7 +872,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
         {showGroundTruth && (
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 bg-white rounded-full"></div>
-            <span className="text-neutral-200 font-medium">Ground Truth</span>
+            <span className="text-neutral-200 font-medium">Current Parameters</span>
           </div>
         )}
         
@@ -548,7 +882,9 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
               className="w-3 h-3 rounded-full"
               style={{ backgroundColor: group.color }}
             ></div>
-            <span className="text-neutral-200">{group.label} (median)</span>
+            <span className="text-neutral-200">
+              {group.label} ({medianByResnorm ? 'resnorm-based' : 'impedance-based'})
+            </span>
           </div>
         ))}
       </div>
