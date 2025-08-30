@@ -4,6 +4,23 @@
 
 import { CircuitParameters } from '../types/parameters';
 
+/**
+ * Available resnorm calculation methods for EIS parameter fitting
+ * Simplified to use only Sum of Squared Residuals (SSR) method
+ */
+export enum ResnormMethod {
+  SSR = 'ssr'           // Sum of Squared Residuals (classic least-squares in complex plane)
+}
+
+/**
+ * Configuration for resnorm calculation
+ */
+export interface ResnormConfig {
+  method: ResnormMethod;
+  useRangeAmplification?: boolean;
+  useFrequencyWeighting?: boolean;
+}
+
 // Define local interfaces for clear types
 export interface Impedance {
   real: number;
@@ -127,25 +144,22 @@ export const calculate_impedance_spectrum = (params: CircuitParameters): Impedan
 };
 
 /**
- * Calculate residual norm (resnorm) between reference and test data.
- * Uses the formula: (1/n) * sqrt(sum(wi * ri^2)) with optional frequency weighting.
- * With optional range amplification and frequency weighting.
+ * Calculate residual norm (resnorm) between reference and test data using various methods.
+ * Supports MAE, SSR, and RMSE methods.
  * 
  * @param testData Array of impedance points to compare against reference
  * @param referenceData Array of reference impedance points
  * @param logFunction Optional logging function for debugging
  * @param frequency Optional frequency for single point comparison
- * @param useRangeAmplification Optional toggle for range amplification
- * @param useFrequencyWeighting Optional toggle for frequency weighting (w = f^-0.5)
- * @returns The calculated resnorm value
+ * @param config Configuration object with method and parameters
+ * @returns The calculated resnorm value using specified method
  */
-export const calculateResnorm = (
+export const calculateResnormWithConfig = (
   testData: ImpedancePoint[] | ImpedancePoint,
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
   frequency?: number,
-  useRangeAmplification: boolean = false,
-  useFrequencyWeighting: boolean = false
+  config: ResnormConfig = { method: ResnormMethod.MAE }
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
@@ -170,7 +184,7 @@ export const calculateResnorm = (
     };
     
     // Convert to arrays and call the main implementation
-    return calculateResnorm([testPoint], [refPoint], undefined, undefined, useRangeAmplification, useFrequencyWeighting);
+    return calculateResnormWithConfig([testPoint], [refPoint], undefined, undefined, config);
   }
   
   // Handle arrays case (main implementation)
@@ -193,8 +207,15 @@ export const calculateResnorm = (
 
   // Process each test data point
   for (const testPoint of testDataArray) {
+    // Safety check for testPoint structure
+    if (!testPoint || typeof testPoint.frequency !== 'number' || !isFinite(testPoint.frequency)) {
+      if (logger) logger("Invalid test point encountered, skipping");
+      continue;
+    }
+    
     // Find matching reference point with the same frequency
     const refPoint = referenceDataArray.find(p => 
+      p && typeof p.frequency === 'number' && isFinite(p.frequency) &&
       Math.abs(p.frequency - testPoint.frequency) / testPoint.frequency < 0.01);
     
     if (refPoint) {
@@ -213,49 +234,50 @@ export const calculateResnorm = (
 
   if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
-  // Calculate sum of squared residuals using formula: (1/n) * sqrt(sum(wi * ri^2))
-  let sumWeightedSquaredResiduals = 0;
+  // const n = matchedData.length; // Not needed for simplified implementation
+  let totalError = 0;
   let sumWeights = 0;
-  const n = matchedData.length;
 
   for (const point of matchedData) {
-    // Calculate residuals for real and imaginary components
-    const realResidual = point.test.real - point.reference.real;
-    const imagResidual = point.test.imaginary - point.reference.imaginary;
+    // Calculate reference magnitude to check for zero division
+    const refMag = Math.sqrt(point.reference.real * point.reference.real + point.reference.imaginary * point.reference.imaginary);
     
-    // Calculate squared residual (ri^2)
-    const squaredResidual = realResidual * realResidual + imagResidual * imagResidual;
+    // Skip points with zero reference magnitude to avoid division by zero
+    if (refMag === 0) {
+      if (logger) logger(`Skipping point at ${point.frequency} Hz with zero reference magnitude`);
+      continue;
+    }
+    
+    // Calculate error using Sum of Squared Residuals method only
+    const realDiff = point.test.real - point.reference.real;
+    const imagDiff = point.test.imaginary - point.reference.imaginary;
+    const error = Math.sqrt(realDiff * realDiff + imagDiff * imagDiff);
     
     // Apply frequency weighting if enabled
     let weight = 1.0;
-    if (useFrequencyWeighting && point.frequency > 0) {
-      // Frequency weighting: w = f^(-0.5) emphasizes low frequencies
+    if (config.useFrequencyWeighting && point.frequency > 0) {
       weight = Math.pow(point.frequency, -0.5);
     }
     
-    sumWeightedSquaredResiduals += weight * squaredResidual;
+    totalError += weight * error;
     sumWeights += weight;
     
     if (logger) {
-      const weightStr = useFrequencyWeighting ? ` (weight: ${weight.toFixed(4)})` : '';
-      logger(`Freq: ${point.frequency.toFixed(2)} Hz, Residual: ${Math.sqrt(squaredResidual).toFixed(4)}${weightStr}`);
+      const weightStr = config.useFrequencyWeighting ? ` (weight: ${weight.toFixed(4)})` : '';
+      logger(`Freq: ${point.frequency.toFixed(2)} Hz, SSR: ${error.toFixed(4)}${weightStr}`);
     }
   }
 
-  // Calculate base resnorm with or without weighting
-  let baseResnorm: number;
-  if (useFrequencyWeighting && sumWeights > 0) {
-    // Weighted resnorm: sqrt(sum(wi * ri^2) / sum(wi))
-    baseResnorm = Math.sqrt(sumWeightedSquaredResiduals / sumWeights);
-  } else {
-    // Standard resnorm: (1/n) * sqrt(sum(ri^2))
-    baseResnorm = (1 / n) * Math.sqrt(sumWeightedSquaredResiduals);
-  }
+  // Calculate base resnorm
+  if (sumWeights === 0) return Infinity;
+  
+  // Calculate final value using SSR method only
+  const baseResnorm = totalError / sumWeights;  // Mean of squared residuals
   
   // Apply range amplification if enabled
   let finalResnorm = baseResnorm;
   
-  if (useRangeAmplification && matchedData.length > 1) {
+  if (config.useRangeAmplification && matchedData.length > 1) {
     // Range Amplification: Amplifier = sqrt(log10(ωmax/ωmin))
     const frequencies = matchedData.map(d => d.frequency);
     const ωmax = Math.max(...frequencies);
@@ -271,10 +293,34 @@ export const calculateResnorm = (
   }
   
   if (logger) {
-    logger(`Base resnorm: ${baseResnorm.toFixed(6)}, Final resnorm: ${finalResnorm.toFixed(6)}`);
+    logger(`Base resnorm (SSR): ${baseResnorm.toFixed(6)}, Final resnorm: ${finalResnorm.toFixed(6)}`);
   }
 
   return finalResnorm;
+};
+
+/**
+ * Legacy calculateResnorm function for backward compatibility
+ * @deprecated Use calculateResnormWithConfig instead
+ * Now always uses SSR method
+ */
+export const calculateResnorm = (
+  testData: ImpedancePoint[] | ImpedancePoint,
+  referenceData: ImpedancePoint[] | number,
+  logFunction?: ((message: string) => void) | number,
+  frequency?: number,
+  useRangeAmplification: boolean = false,
+  useFrequencyWeighting: boolean = false,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _useMaeMethod: boolean = true // Ignored - always uses SSR now
+): number => {
+  const config: ResnormConfig = {
+    method: ResnormMethod.SSR,
+    useRangeAmplification,
+    useFrequencyWeighting
+  };
+  
+  return calculateResnormWithConfig(testData, referenceData, logFunction, frequency, config);
 };
 
 /**
@@ -426,14 +472,8 @@ export const groundTruthDataset: ImpedancePoint[] = [
   }
 ];
 
-/**
- * Calculate TER (Transepithelial Resistance)
- */
-export const calculateTER = (params: CircuitParameters): number => {
-  const numerator = params.Rsh * (params.Ra + params.Rb);
-  const denominator = params.Rsh + params.Ra + params.Rb;
-  return numerator / denominator;
-};
+// TER calculation moved to centralized math/utils.ts
+export { calculateTER } from '../math/utils';
 
 /**
  * Calculate TEC (Transepithelial Capacitance)

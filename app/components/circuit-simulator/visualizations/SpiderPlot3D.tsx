@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { ModelSnapshot } from '../types';
 import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad } from '../types/parameters';
 
@@ -8,24 +8,22 @@ import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad } from '../types
 interface SpiderPlot3DProps {
   models: ModelSnapshot[];
   referenceModel?: ModelSnapshot | null;
-  chromaEnabled?: boolean;
   width?: number;
   height?: number;
   showControls?: boolean;
   showAdvancedControls?: boolean; // New toggle for detailed info
-  resnormScale?: number;
+  resnormSpread?: number;
   gridSize?: number; // Number of points per parameter dimension
   onRotationChange?: (rotation: { x: number; y: number; z: number }) => void;
+  useResnormCenter?: boolean; // New: rotate around resnorm center instead of grid front
+  responsive?: boolean; // New: enable responsive sizing
+  showLabels?: boolean; // New: toggle for parameter labels, values, and resnorm markers
+  resnormRange?: { min: number; max: number } | null; // New: filter models by resnorm range
+  onModelTag?: (model: ModelSnapshot, tag: string) => void; // Callback for tagging models
+  taggedModels?: Map<string, string>; // Map of model id to tag name
 }
 
-// Spectrum navigation state for traversing resnorm sections
-interface SpectrumNavigation {
-  enabled: boolean;
-  currentSection: number; // Current resnorm section index
-  totalSections: number; // Total number of sections
-  modelsPerSection: number; // Models to show per section
-  sectionRange: { min: number; max: number; }; // Current section's resnorm range
-}
+// Navigation removed - now handled by resnorm distribution section
 
 // 3D Point representing a model in parameter space with resnorm as Z-axis
 interface Point3D {
@@ -46,12 +44,6 @@ interface Polygon3D {
   zHeight: number;
 }
 
-// Mini-map state for resnorm spectrum visualization
-interface MinimapState {
-  totalRange: { min: number; max: number };
-  visibleRange: { min: number; max: number };
-  dataDistribution: number[];
-}
 
 // 3D Rotation state
 interface Rotation3D {
@@ -106,20 +98,87 @@ const getCircuitParameters = () => {
 export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   models,
   referenceModel,
-  chromaEnabled = true,
   width = 800,
   height = 600,
   showControls = true,
   showAdvancedControls: _showAdvancedControls = false, // eslint-disable-line @typescript-eslint/no-unused-vars
-  resnormScale = 1.0,
+  resnormSpread = 1.0,
   gridSize = DEFAULT_GRID_SIZE,
   onRotationChange,
+  useResnormCenter = false,
+  responsive = true,
+  showLabels = true, // eslint-disable-line @typescript-eslint/no-unused-vars
+  resnormRange = null,
+  onModelTag,
+  taggedModels = new Map(),
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Responsive sizing state
+  const [actualWidth, setActualWidth] = useState(width);
+  const [actualHeight, setActualHeight] = useState(height);
+  
+  // Component initialization state to prevent laggy first render
+  const [isComponentReady, setIsComponentReady] = useState(false);
+  
+  // Initialize component after first mount to prevent initial lag
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsComponentReady(true);
+    }, 50); // Small delay to allow DOM to settle
+    
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Initialize user session for database integration
+  // Removed database initialization - using parent callback system instead
+  
+  // Responsive sizing effect
+  useEffect(() => {
+    if (!responsive || !containerRef.current) {
+      setActualWidth(width);
+      setActualHeight(height);
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width: containerWidth, height: containerHeight } = entry.contentRect;
+        setActualWidth(Math.floor(containerWidth));
+        setActualHeight(Math.floor(containerHeight));
+      }
+    });
+
+    resizeObserver.observe(containerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [responsive, width, height]);
   
   // Get dynamic circuit parameters configuration
   const circuitParams = React.useMemo(() => getCircuitParameters(), []);
   const paramKeys = React.useMemo(() => circuitParams.map(p => p.key), [circuitParams]);
+
+  // Utility function to check if a point is inside a polygon
+  const isPointInPolygon = useCallback((x: number, y: number, polygon: {x: number; y: number}[]): boolean => {
+    if (polygon.length < 3) return false;
+    
+    let inside = false;
+    let j = polygon.length - 1;
+    
+    for (let i = 0; i < polygon.length; i++) {
+      if (((polygon[i].y > y) !== (polygon[j].y > y)) &&
+          (x < (polygon[j].x - polygon[i].x) * (y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside;
+      }
+      j = i;
+    }
+    
+    return inside;
+  }, []);
+
   
   const [rotation, setRotation] = useState<Rotation3D>({ x: -30, y: 45, z: 0 });
   const [camera, setCamera] = useState<Camera3D>({
@@ -139,47 +198,29 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     isCtrlPressed: false
   });
   
-  // Spectrum navigation state
-  const [spectrumNav, setSpectrumNav] = useState<SpectrumNavigation>({
-    enabled: false,
-    currentSection: 0,
-    totalSections: 10, // Default to 10 sections
-    modelsPerSection: 100, // Show 100 models per section
-    sectionRange: { min: 0, max: 1 }
-  });
+  // Model selection and tagging state
+  const [hoveredModel, setHoveredModel] = useState<ModelSnapshot | null>(null);
+  const [showTagDialog, setShowTagDialog] = useState<{model: ModelSnapshot; x: number; y: number} | null>(null);
   
-  // Mini-map state for resnorm spectrum visualization
-  const [minimapState, setMinimapState] = useState<MinimapState>({
-    totalRange: { min: 0, max: 1 },
-    visibleRange: { min: 0, max: 1 },
-    dataDistribution: []
-  });
+  // Tagging state
+  const [isTagging, setIsTagging] = useState<boolean>(false);
+  
 
-  // Filter models based on spectrum navigation
+  // Filter models based on spectrum navigation and resnorm range
   const filteredModels = React.useMemo(() => {
-    if (!models.length || !spectrumNav.enabled) return models;
+    let filteredByRange = models;
     
-    // Sort models by resnorm for consistent sectioning
-    const sortedModels = [...models].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
-    
-    const startIndex = spectrumNav.currentSection * spectrumNav.modelsPerSection;
-    const endIndex = Math.min(startIndex + spectrumNav.modelsPerSection, sortedModels.length);
-    
-    const sectionModels = sortedModels.slice(startIndex, endIndex);
-    
-    // Update section range
-    if (sectionModels.length > 0) {
-      const minResnorm = Math.min(...sectionModels.map(m => m.resnorm || 0));
-      const maxResnorm = Math.max(...sectionModels.map(m => m.resnorm || 0));
-      setSpectrumNav(prev => ({
-        ...prev,
-        sectionRange: { min: minResnorm, max: maxResnorm },
-        totalSections: Math.ceil(sortedModels.length / prev.modelsPerSection)
-      }));
+    // Apply resnorm range filtering first if provided
+    if (resnormRange) {
+      filteredByRange = models.filter(model => {
+        const modelResnorm = model.resnorm || 0;
+        return modelResnorm >= resnormRange.min && modelResnorm <= resnormRange.max;
+      });
     }
     
-    return sectionModels;
-  }, [models, spectrumNav.enabled, spectrumNav.currentSection, spectrumNav.modelsPerSection]);
+    // Navigation removed - resnorm distribution section handles granular selection
+    return filteredByRange;
+  }, [models, resnormRange]);
   
   // Convert models to 3D radar polygons
   const convert3DPolygons = React.useMemo(() => {
@@ -201,25 +242,6 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const maxResnorm = Math.max(...resnorms);
     const resnormRange = maxResnorm - minResnorm;
     
-    // Update minimap state with current data range
-    const visibleResnorms = resnorms.slice(0, 1000); // Limit for performance
-    const currentMinVisible = Math.min(...visibleResnorms);
-    const currentMaxVisible = Math.max(...visibleResnorms);
-    
-    // Create histogram for data distribution
-    const histogramBins = 20;
-    const distribution = new Array(histogramBins).fill(0);
-    resnorms.forEach(r => {
-      const binIndex = Math.floor(((r - minResnorm) / resnormRange) * (histogramBins - 1));
-      distribution[Math.max(0, Math.min(histogramBins - 1, binIndex))]++;
-    });
-    
-    // Update minimap state
-    setMinimapState({
-      totalRange: { min: minResnorm, max: maxResnorm },
-      visibleRange: { min: currentMinVisible, max: currentMaxVisible },
-      dataDistribution: distribution
-    });
 
     return filteredModels.map(model => {
       const resnorm = model.resnorm || 0;
@@ -229,7 +251,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         ? (resnorm - minResnorm) / resnormRange 
         : 0;
       // CORRECT: Better models (lower resnorm) should be closer to ground truth (lower Z)
-      const zHeight = normalizedResnorm * 5.0 * resnormScale; // Scale Z from 0 to 5 (lower resnorm = lower Z)
+      const zHeight = normalizedResnorm * 5.0 * resnormSpread; // Scale Z from 0 to 5 (lower resnorm = lower Z)
 
       // Determine color based on resnorm quartiles (FIXED: lower resnorm = better = green)
       const sortedResnorms = [...resnorms].sort((a, b) => a - b);
@@ -266,15 +288,39 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
       return {
         vertices,
-        color: chromaEnabled ? color : '#CCCCCC',
+        color: color,
         opacity: Math.max(0.2, 1.0 - normalizedResnorm * 0.7),
         model,
         zHeight
       };
     });
-  }, [filteredModels, chromaEnabled, resnormScale, paramKeys]);
+  }, [filteredModels, resnormSpread, paramKeys]);
 
-  // Restored original projection with navigation improvements
+
+  // Calculate resnorm center for rotation pivot
+  const resnormCenter = React.useMemo(() => {
+    if (!useResnormCenter || !filteredModels.length) {
+      return { x: 0, y: 0, z: 2.5 }; // Default center
+    }
+
+    // Calculate the weighted center of all resnorm points
+    const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
+    if (resnorms.length === 0) return { x: 0, y: 0, z: 2.5 };
+
+    const minResnorm = Math.min(...resnorms);
+    const maxResnorm = Math.max(...resnorms);
+    const resnormRange = maxResnorm - minResnorm;
+    
+    // Calculate center Z based on median resnorm
+    const sortedResnorms = [...resnorms].sort((a, b) => a - b);
+    const medianResnorm = sortedResnorms[Math.floor(sortedResnorms.length / 2)];
+    const normalizedMedian = resnormRange > 0 ? (medianResnorm - minResnorm) / resnormRange : 0;
+    const centerZ = normalizedMedian * 5.0 * resnormSpread;
+
+    return { x: 0, y: 0, z: centerZ };
+  }, [useResnormCenter, filteredModels, resnormSpread]);
+
+  // Enhanced projection with configurable rotation center
   const project3D = React.useCallback((point: Point3D): { x: number; y: number; visible: boolean; depth: number } => {
     // Apply rotation
     const rad = (deg: number) => (deg * Math.PI) / 180;
@@ -286,11 +332,15 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const ry = rad(rotation.y);
     const rz = rad(rotation.z);
 
-    // Apply rotations (order: Z, Y, X) - back to original method
-    let x = point.x;
-    let y = point.y;
-    let z = point.z;
+    // Use configurable rotation center
+    const rotationCenter = useResnormCenter ? resnormCenter : { x: 0, y: 0, z: 0 };
 
+    // Translate to rotation center
+    let x = point.x - rotationCenter.x;
+    let y = point.y - rotationCenter.y;
+    let z = point.z - rotationCenter.z;
+
+    // Apply rotations (order: Z, Y, X)
     // Z rotation
     const x1 = x * cos(rz) - y * sin(rz);
     const y1 = x * sin(rz) + y * cos(rz);
@@ -306,31 +356,58 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const z3 = y * sin(rx) + z * cos(rx);
     y = y3; z = z3;
 
+    // Translate back from rotation center
+    x += rotationCenter.x;
+    y += rotationCenter.y;
+    z += rotationCenter.z;
+
     // Apply camera distance and target offset
     x -= camera.target.x;
     y -= camera.target.y;
     z += camera.distance - camera.target.z;
 
-    // Original-style projection to avoid distortion
+    // Projection with depth testing
     if (z <= 0.1) return { x: 0, y: 0, visible: false, depth: 0 };
 
-    // Restored conservative perspective calculation
-    const baseScale = Math.min(width, height) * 0.12; // Back to original scale
+    // Conservative perspective calculation
+    const baseScale = Math.min(actualWidth, actualHeight) * 0.12; // Use actual dimensions
     const perspectiveFactor = Math.max(0.7, 1.0 - (camera.distance - 8) * 0.02);
     const scale = baseScale * perspectiveFactor;
     
-    const projX = width / 2 + x * scale;
-    const projY = height / 2 - y * scale;
+    const projX = actualWidth / 2 + x * scale; // Use actual dimensions
+    const projY = actualHeight / 2 - y * scale; // Use actual dimensions
 
-    // Original visibility bounds
+    // Visibility bounds with actual dimensions
     const margin = 50;
     return { 
       x: projX, 
       y: projY, 
-      visible: projX >= -margin && projX <= width + margin && projY >= -margin && projY <= height + margin,
+      visible: projX >= -margin && projX <= actualWidth + margin && projY >= -margin && projY <= actualHeight + margin,
       depth: z
     };
-  }, [rotation, camera, width, height]);
+  }, [rotation, camera, actualWidth, actualHeight, useResnormCenter, resnormCenter]);
+
+  // Function to find which model polygon contains a click point
+  const findModelAtPoint = useCallback((clickX: number, clickY: number): ModelSnapshot | null => {
+    // Check polygons from front to back (reverse order since we render back to front)
+    const sortedPolygons = [...convert3DPolygons].sort((a, b) => b.zHeight - a.zHeight);
+    
+    for (const polygon of sortedPolygons) {
+      const projectedVertices = polygon.vertices
+        .map(vertex => project3D(vertex))
+        .filter(p => p.visible);
+      
+      if (projectedVertices.length >= 3) {
+        const polygonPoints = projectedVertices.map(p => ({ x: p.x, y: p.y }));
+        
+        if (isPointInPolygon(clickX, clickY, polygonPoints)) {
+          return polygon.model;
+        }
+      }
+    }
+    
+    return null;
+  }, [convert3DPolygons, project3D, isPointInPolygon]);
 
   // Draw 3D radar grid with dynamic scaling
   const draw3DRadarGrid = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -405,6 +482,11 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const avgDepth = projectedVertices.reduce((sum, p) => sum + p.projected.depth, 0) / projectedVertices.length;
     const depthFactor = Math.max(0.3, Math.min(1.0, 10 / avgDepth)); // Closer = more visible
     
+    // Check if this model is hovered or tagged
+    const isHovered = hoveredModel?.id === polygon.model.id;
+    const isTagged = taggedModels.has(polygon.model.id);
+    const tagName = taggedModels.get(polygon.model.id);
+    
     // Draw vertical lines from base to polygon (depth indicators) with adaptive styling
     ctx.strokeStyle = polygon.color;
     ctx.lineWidth = Math.max(0.5, depthFactor * camera.scale);
@@ -422,9 +504,24 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
     });
     
-    // Draw wireframe polygon with adaptive line width
-    ctx.globalAlpha = Math.max(0.5, polygon.opacity * depthFactor);
-    ctx.lineWidth = Math.max(1, 2 * depthFactor * camera.scale);
+    // Draw wireframe polygon with adaptive line width and highlighting
+    const baseOpacity = Math.max(0.5, polygon.opacity * depthFactor);
+    const baseLineWidth = Math.max(1, 2 * depthFactor * camera.scale);
+    
+    // Enhanced styling for hovered/tagged models
+    if (isHovered) {
+      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.3);
+      ctx.lineWidth = baseLineWidth * 2;
+      ctx.strokeStyle = '#FFD700'; // Gold highlight for hover
+    } else if (isTagged) {
+      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.2);
+      ctx.lineWidth = baseLineWidth * 1.5;
+      ctx.strokeStyle = '#FF6B9D'; // Pink highlight for tagged
+    } else {
+      ctx.globalAlpha = baseOpacity;
+      ctx.lineWidth = baseLineWidth;
+      ctx.strokeStyle = polygon.color;
+    }
     ctx.setLineDash([]);
 
     const projectedOnly = projectedVertices.map(p => p.projected);
@@ -436,18 +533,45 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.closePath();
     ctx.stroke();
 
-    // Draw vertices as adaptive-sized dots
-    ctx.fillStyle = polygon.color;
-    ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.4) * depthFactor);
-    const dotSize = Math.max(1.5, 3 * depthFactor * camera.scale);
+    // Draw vertices as adaptive-sized dots with highlighting
+    if (isHovered) {
+      ctx.fillStyle = '#FFD700';
+      ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.6) * depthFactor);
+    } else if (isTagged) {
+      ctx.fillStyle = '#FF6B9D';
+      ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.5) * depthFactor);
+    } else {
+      ctx.fillStyle = polygon.color;
+      ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.4) * depthFactor);
+    }
+    
+    const baseDotSize = Math.max(1.5, 3 * depthFactor * camera.scale);
+    const dotSize = isHovered ? baseDotSize * 1.5 : (isTagged ? baseDotSize * 1.2 : baseDotSize);
+    
     projectedOnly.forEach(vertex => {
       ctx.beginPath();
       ctx.arc(vertex.x, vertex.y, dotSize, 0, 2 * Math.PI);
       ctx.fill();
     });
+    
+    // Draw tag label if model is tagged
+    if (isTagged && tagName) {
+      const centerX = projectedOnly.reduce((sum, v) => sum + v.x, 0) / projectedOnly.length;
+      const centerY = projectedOnly.reduce((sum, v) => sum + v.y, 0) / projectedOnly.length;
+      
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.font = 'bold 10px Arial';
+      const textWidth = ctx.measureText(tagName).width;
+      ctx.fillRect(centerX - textWidth/2 - 3, centerY - 8, textWidth + 6, 14);
+      
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(tagName, centerX, centerY);
+    }
 
     ctx.restore();
-  }, [project3D, camera.scale]);
+  }, [project3D, camera.scale, hoveredModel, taggedModels]);
 
   // Draw enhanced 3D radar labels with intelligent value markers (min/max/median only)
   const draw3DRadarLabels = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -534,11 +658,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   // Draw modern 3D orientation cube with dynamic positioning
   const drawOrientationCube = React.useCallback((ctx: CanvasRenderingContext2D) => {
     const cubeSize = Math.max(60, 80 * camera.scale); // Increased size
-    const margin = 0; // Remove margin for alignment to edge
-    const minimapHeight = 140; // Height of minimap above
-    const spacing = 10; // Small spacing between minimap and cube
-    const cubeX = width - cubeSize - margin;
-    const cubeY = minimapHeight + spacing; // Position below minimap at top-right
+    const margin = 10; // Small margin from edge
+    const cubeX = actualWidth - cubeSize - margin;
+    const cubeY = margin; // Position at top-right corner
     
     ctx.save();
     
@@ -672,315 +794,227 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.fillText('Z', xStart.x + 15, xStart.y + 20);
     
     ctx.restore();
-  }, [width, rotation, camera.scale]);
+  }, [actualWidth, rotation, camera.scale]);
 
-  // Draw dynamic resnorm Z-axis with responsive positioning
+  // Draw resnorm labels inside the core of the 3D spider plot
   const drawResnormAxis = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    if (!models.length) return;
+    if (!filteredModels.length) return;
     
-    // Calculate resnorm range
-    const resnorms = models.map(m => m.resnorm || 0).filter(r => r > 0);
+    // Calculate resnorm range from filtered models (respects resnorm range and navigation filtering)
+    const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
     const minResnorm = Math.min(...resnorms);
     const maxResnorm = Math.max(...resnorms);
     
     ctx.save();
     
-    // Smart axis positioning that ensures visibility
-    const minOffset = 3.0; // Minimum offset to ensure visibility
-    const maxOffset = 8.0; // Maximum offset to prevent being too far
-    const screenBasedOffset = Math.min(width, height) * 0.08; // Reduced responsive factor
-    const baseOffset = Math.max(minOffset, Math.min(maxOffset, screenBasedOffset / camera.scale));
-    const axisX = baseOffset;
-    const axisY = baseOffset;
-    const zAxisHeight = 5.0 * resnormScale; // Respect resnormScale prop
+    // Position resnorm labels at the CENTER of the spider plot (x=0, y=0)
+    const coreX = 0;
+    const coreY = 0;
+    const zAxisHeight = 5.0 * resnormSpread; // Respect resnormSpread prop
     
-    // Draw Z-axis line with improved scaling
-    const axisStart = project3D({ x: axisX, y: axisY, z: 0, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-    const axisEnd = project3D({ x: axisX, y: axisY, z: zAxisHeight, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Draw a subtle central vertical line for reference
+    const axisStart = project3D({ x: coreX, y: coreY, z: 0, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+    const axisEnd = project3D({ x: coreX, y: coreY, z: zAxisHeight, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
     
     if (axisStart.visible && axisEnd.visible) {
-      // Dynamic axis line with scale-aware styling
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = Math.max(2, 3 * camera.scale);
-      ctx.globalAlpha = Math.min(0.9, 0.5 + camera.scale * 0.4);
+      // Draw subtle central reference line
+      ctx.strokeStyle = '#666666';
+      ctx.lineWidth = Math.max(1, 2 * camera.scale);
+      ctx.globalAlpha = 0.3;
+      ctx.setLineDash([2, 4]);
       ctx.beginPath();
       ctx.moveTo(axisStart.x, axisStart.y);
       ctx.lineTo(axisEnd.x, axisEnd.y);
       ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    
+    // Draw resnorm value labels positioned inside the core at different Z heights
+    const fontSize = Math.max(10, Math.min(14, 12 * camera.scale));
+    ctx.font = `bold ${fontSize}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    const numLabels = Math.max(3, Math.min(6, 5)); // Fixed optimal label count for readability
+    for (let i = 0; i < numLabels; i++) {
+      const z = (i / (numLabels - 1)) * zAxisHeight;
+      const normalizedZ = i / (numLabels - 1);
+      const resnormValue = minResnorm + (normalizedZ * (maxResnorm - minResnorm));
       
-      // Draw axis ticks and labels with enhanced visibility
-      const fontSize = Math.max(10, Math.min(16, 12 * camera.scale)); // Better font size range
-      ctx.font = `bold ${fontSize}px Arial`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
+      // Position labels at the center of the spider plot
+      const labelPoint = project3D({ x: coreX, y: coreY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
       
-      const numTicks = Math.max(3, Math.min(6, 5)); // Fixed optimal tick count for readability
-      for (let i = 0; i < numTicks; i++) {
-        const z = (i / (numTicks - 1)) * zAxisHeight;
-        const normalizedZ = i / (numTicks - 1);
-        const resnormValue = minResnorm + (normalizedZ * (maxResnorm - minResnorm));
+      if (labelPoint.visible) {
+        // Format value label with proper scientific notation
+        let labelText: string;
+        if (resnormValue >= 1) {
+          labelText = resnormValue.toFixed(2);
+        } else if (resnormValue >= 0.01) {
+          labelText = resnormValue.toFixed(3);
+        } else {
+          labelText = resnormValue.toExponential(2);
+        }
         
-        const tickSize = Math.max(0.15, 0.3 / camera.scale); // Ensure minimum tick size for visibility
-        const tickPoint = project3D({ x: axisX, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-        const tickEndPoint = project3D({ x: axisX + tickSize, y: axisY, z: z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+        // Draw enhanced circular background for core labels
+        const labelWidth = ctx.measureText(labelText).width;
+        const labelHeight = fontSize + 4;
+        const backgroundRadius = Math.max(labelWidth/2 + 6, labelHeight/2 + 2);
         
-        if (tickPoint.visible && tickEndPoint.visible) {
-          // Draw scale-aware tick mark
-          ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = Math.max(1, 2 * camera.scale);
-          ctx.beginPath();
-          ctx.moveTo(tickPoint.x, tickPoint.y);
-          ctx.lineTo(tickEndPoint.x, tickEndPoint.y);
-          ctx.stroke();
-          
-          // Format value label with proper scientific notation
-          let labelText: string;
-          if (resnormValue >= 1) {
-            labelText = resnormValue.toFixed(2);
-          } else if (resnormValue >= 0.01) {
-            labelText = resnormValue.toFixed(3);
-          } else {
-            labelText = resnormValue.toExponential(2);
-          }
-          
-          // Draw label with enhanced visibility and smart positioning
-          const labelWidth = ctx.measureText(labelText).width;
-          const labelOffset = Math.max(8, 12 * camera.scale);
-          const labelHeight = fontSize + 6;
-          
-          // Ensure label stays within screen bounds
-          let labelX = tickEndPoint.x + labelOffset;
-          let labelY = tickEndPoint.y;
-          
-          // Adjust if label would go off screen
-          if (labelX + labelWidth + 10 > width) {
-            labelX = tickEndPoint.x - labelOffset - labelWidth - 6; // Position to the left
-          }
-          if (labelY - labelHeight/2 < 0) {
-            labelY = labelHeight/2 + 5;
-          }
-          if (labelY + labelHeight/2 > height) {
-            labelY = height - labelHeight/2 - 5;
-          }
-          
-          // Draw enhanced background
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-          ctx.fillRect(labelX, labelY - labelHeight/2, labelWidth + 8, labelHeight);
-          ctx.strokeStyle = '#555555';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(labelX, labelY - labelHeight/2, labelWidth + 8, labelHeight);
-          
-          // Draw text with better contrast
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillText(labelText, labelX + 4, labelY);
+        // Draw circular background
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.beginPath();
+        ctx.arc(labelPoint.x, labelPoint.y, backgroundRadius, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Draw circular border with correct color scheme
+        ctx.strokeStyle = i === 0 ? '#22c55e' : i === numLabels - 1 ? '#ef4444' : '#fbbf24'; // Green for min (better), red for max (worse), yellow for middle
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 1.0;
+        ctx.stroke();
+        
+        // Draw text at center
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText(labelText, labelPoint.x, labelPoint.y);
+        
+        // Add small indicator for what this value represents
+        if (i === 0) {
+          ctx.fillStyle = '#22c55e';
+          ctx.font = `${Math.max(8, fontSize - 2)}px Arial`;
+          ctx.fillText('MIN', labelPoint.x, labelPoint.y + fontSize/2 + 3);
+        } else if (i === numLabels - 1) {
+          ctx.fillStyle = '#ef4444';
+          ctx.font = `${Math.max(8, fontSize - 2)}px Arial`;
+          ctx.fillText('MAX', labelPoint.x, labelPoint.y + fontSize/2 + 3);
         }
       }
-      
-      // Draw enhanced axis title with guaranteed visibility
-      const titleOffset = Math.max(0.4, 0.8 / camera.scale);
-      const titlePoint = project3D({ x: axisX + titleOffset, y: axisY, z: zAxisHeight / 2, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-      
-      // Always show title, even if projected point is not visible
-      const titleX = titlePoint.visible ? titlePoint.x : Math.min(width * 0.8, 100);
-      const titleY = titlePoint.visible ? titlePoint.y : height * 0.3;
-      
-      ctx.save();
-      ctx.translate(titleX, titleY);
-      ctx.rotate(-Math.PI / 2);
-      
-      const titleFontSize = Math.max(14, Math.min(18, 16 * camera.scale));
-      const titleWidth = Math.max(70, 80 * camera.scale);
-      const titleHeight = titleFontSize + 10;
-      
-      // Enhanced title background
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-      ctx.fillRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
-      ctx.strokeStyle = '#666666';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-titleWidth/2, -titleHeight/2, titleWidth, titleHeight);
-      
-      // Enhanced title text
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = `bold ${titleFontSize}px Arial`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('Resnorm', 0, 0);
-      ctx.restore();
-      
-      // Add fallback axis info in bottom-left if main axis is not clearly visible
-      if (!axisStart.visible || !axisEnd.visible || camera.scale < 0.5) {
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(5, height - 80, 120, 60);
-        ctx.strokeStyle = '#555555';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(5, height - 80, 120, 60);
-        
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = 'bold 11px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText('Z-Axis: Resnorm', 10, height - 65);
-        ctx.font = '9px Arial';
-        ctx.fillStyle = '#CCCCCC';
-        ctx.fillText(`Min: ${minResnorm.toExponential(2)}`, 10, height - 50);
-        ctx.fillText(`Max: ${maxResnorm.toExponential(2)}`, 10, height - 37);
-        ctx.fillText(`Scale: ${resnormScale.toFixed(1)}x`, 10, height - 24);
-      }
     }
     
-    ctx.restore();
-  }, [width, models, project3D, camera.scale, resnormScale]);
-
-  // Draw resnorm spectrum mini-map with dynamic positioning
-  const drawResnormMinimap = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const mapWidth = 220; // Increased from 180
-    const mapHeight = 140; // Increased from 120
-    const margin = 0; // Remove margin for complete alignment
-    const mapX = width - mapWidth - margin; // Position at top-right edge completely
-    const mapY = margin;
+    // Title removed as requested
     
-    ctx.save();
-    
-    // Draw minimap background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(mapX, mapY, mapWidth, mapHeight);
-    ctx.strokeStyle = '#666666';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(mapX, mapY, mapWidth, mapHeight);
-    
-    // Draw title
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '11px Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText('Resnorm Spectrum', mapX + 5, mapY + 15);
-    
-    // Draw data distribution histogram
-    const histHeight = 60;
-    const histY = mapY + 25;
-    const barWidth = (mapWidth - 20) / minimapState.dataDistribution.length;
-    
-    const maxCount = Math.max(...minimapState.dataDistribution, 1);
-    
-    ctx.fillStyle = '#4A90E2';
-    minimapState.dataDistribution.forEach((count, i) => {
-      const barHeight = (count / maxCount) * histHeight;
-      const barX = mapX + 10 + i * barWidth;
-      const barY = histY + histHeight - barHeight;
-      
-      ctx.fillRect(barX, barY, barWidth - 1, barHeight);
-    });
-    
-    // Draw visible range indicator
-    const totalRange = minimapState.totalRange.max - minimapState.totalRange.min;
-    if (totalRange > 0) {
-      const visibleStart = ((minimapState.visibleRange.min - minimapState.totalRange.min) / totalRange) * (mapWidth - 20);
-      const visibleWidth = ((minimapState.visibleRange.max - minimapState.visibleRange.min) / totalRange) * (mapWidth - 20);
-      
-      // Draw visible range rectangle
-      ctx.strokeStyle = '#FF6B35';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(mapX + 10 + visibleStart, histY, visibleWidth, histHeight);
-      
-      // Draw range values
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = '9px Arial';
-      ctx.textAlign = 'left';
-      ctx.fillText(`Min: ${minimapState.totalRange.min.toExponential(2)}`, mapX + 5, mapY + mapHeight - 25);
-      ctx.fillText(`Max: ${minimapState.totalRange.max.toExponential(2)}`, mapX + 5, mapY + mapHeight - 15);
-      
-      ctx.fillStyle = '#FF6B35';
-      ctx.fillText(`Visible: ${minimapState.visibleRange.min.toExponential(2)} - ${minimapState.visibleRange.max.toExponential(2)}`, mapX + 5, mapY + mapHeight - 5);
-    }
-    
-    // Draw current render info
-    ctx.fillStyle = '#CCCCCC';
-    ctx.font = '9px Arial';
-    ctx.textAlign = 'right';
-    ctx.fillText(`Models: ${models.length}`, mapX + mapWidth - 5, mapY + 15);
     
     ctx.restore();
-  }, [width, height, models.length, minimapState]);
+  }, [filteredModels, project3D, camera.scale, resnormSpread]);
 
-  // Draw parameter values list with dynamic positioning
+
+  // Draw parameter values list with clean table formatting
   const drawParameterValuesList = React.useCallback((ctx: CanvasRenderingContext2D) => {
     const params = circuitParams;
-    const listWidth = 400; // Increased from 280
-    const listHeight = 220; // Increased from 160
-    const margin = 0; // Remove margin for complete alignment
-    const listX = margin; // Position at bottom-left edge completely
-    const listY = height - listHeight - margin;
+    const listWidth = 380;
+    const listHeight = 200;
+    const margin = 10;
+    const listX = margin;
+    const listY = actualHeight - listHeight - margin;
     
     ctx.save();
     
-    // Draw background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    // Draw background with subtle styling
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
     ctx.fillRect(listX, listY, listWidth, listHeight);
-    ctx.strokeStyle = '#555555';
+    ctx.strokeStyle = '#666666';
     ctx.lineWidth = 1;
     ctx.strokeRect(listX, listY, listWidth, listHeight);
     
-    // Draw title
+    // Draw header
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 16px Arial'; // Increased font size
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'left';
-    ctx.fillText('Parameter Values', listX + 12, listY + 20);
+    ctx.fillText('Parameter Grid Values', listX + 10, listY + 18);
     
-    // Draw grid size info
     const numPoints = gridSize || 5;
     ctx.fillStyle = '#CCCCCC';
-    ctx.font = '12px Arial'; // Increased font size
-    ctx.fillText(`${numPoints} points per parameter`, listX + 12, listY + 40);
+    ctx.font = '10px Arial';
+    ctx.fillText(`Grid: ${numPoints} points per parameter`, listX + 10, listY + 32);
     
-    // Draw parameter values for each parameter
+    // Table setup
+    const tableStartY = listY + 45;
+    const rowHeight = 24;
+    const colWidth = (listWidth - 20) / (numPoints + 1); // +1 for parameter name column
+    
+    // Draw table header with grid points
+    ctx.fillStyle = '#888888';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    for (let j = 0; j < numPoints; j++) {
+      const colX = listX + 10 + (j + 1) * colWidth + colWidth / 2;
+      ctx.fillText(`${j + 1}`, colX, tableStartY - 5);
+    }
+    
+    // Draw parameter rows with clean formatting
     params.forEach((param, i) => {
-      const startY = listY + 55 + (i * 30); // Increased spacing
+      if (i >= 6) return; // Limit to fit in available space
       
-      // Parameter name
+      const rowY = tableStartY + (i * rowHeight);
+      
+      // Parameter name column
       ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 13px Arial'; // Increased font size
-      ctx.fillText(param.name, listX + 12, startY);
+      ctx.font = 'bold 10px Arial';
+      ctx.textAlign = 'left';
+      const paramLabel = param.key; // Use short form (Ra, Rb, Ca, Cb, Rsh)
+      ctx.fillText(paramLabel, listX + 10, rowY + 12);
       
-      // Generate all values for this parameter
-      const values: string[] = [];
-      
+      // Generate and display values in fixed columns
       for (let j = 0; j < numPoints; j++) {
         const ratio = j / (numPoints - 1);
         let value: number;
+        let displayValue: string;
         
         if (param.name.includes('Ω')) {
           // Logarithmic scale for resistance
           const logMin = Math.log10(param.range.min);
           const logMax = Math.log10(param.range.max);
           value = Math.pow(10, logMin + ratio * (logMax - logMin));
-          values.push(value >= 1000 ? `${(value/1000).toFixed(1)}kΩ` : `${value.toFixed(0)}Ω`);
+          
+          if (value >= 10000) {
+            displayValue = `${(value/1000).toFixed(0)}k`;
+          } else if (value >= 1000) {
+            displayValue = `${(value/1000).toFixed(1)}k`;
+          } else {
+            displayValue = `${value.toFixed(0)}`;
+          }
         } else {
-          // Linear scale for capacitance  
+          // Linear scale for capacitance
           value = param.range.min + ratio * (param.range.max - param.range.min);
-          values.push(value < 1 ? `${value.toFixed(1)}µF` : `${value.toFixed(0)}µF`);
+          if (value < 1) {
+            displayValue = `${value.toFixed(1)}`;
+          } else if (value < 10) {
+            displayValue = `${value.toFixed(1)}`;
+          } else {
+            displayValue = `${value.toFixed(0)}`;
+          }
         }
+        
+        // Draw value in column with monospace alignment
+        const colX = listX + 10 + (j + 1) * colWidth + colWidth / 2;
+        ctx.fillStyle = '#CCCCCC';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(displayValue, colX, rowY + 12);
       }
       
-      // Draw values
-      ctx.fillStyle = '#AAAAAA';
-      ctx.font = '11px Arial'; // Increased font size
-      const valuesText = values.join(', ');
-      
-      // Handle text wrapping if too long
-      const maxWidth = listWidth - 30; // More padding for larger text
-      if (ctx.measureText(valuesText).width > maxWidth) {
-        // Split into two lines if needed
-        const midPoint = Math.ceil(values.length / 2);
-        const line1 = values.slice(0, midPoint).join(', ');
-        const line2 = values.slice(midPoint).join(', ');
-        
-        ctx.fillText(line1, listX + 12, startY + 15);
-        ctx.fillText(line2, listX + 12, startY + 28);
-      } else {
-        ctx.fillText(valuesText, listX + 12, startY + 15);
+      // Draw subtle row separator
+      if (i < params.length - 1) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(listX + 5, rowY + rowHeight - 2);
+        ctx.lineTo(listX + listWidth - 5, rowY + rowHeight - 2);
+        ctx.stroke();
       }
     });
     
+    // Draw vertical column separators
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+    for (let j = 0; j <= numPoints; j++) {
+      const colX = listX + 10 + j * colWidth;
+      ctx.beginPath();
+      ctx.moveTo(colX, tableStartY - 10);
+      ctx.lineTo(colX, tableStartY + params.length * rowHeight - 5);
+      ctx.stroke();
+    }
+    
     ctx.restore();
-  }, [width, circuitParams, gridSize]);
+  }, [actualHeight, circuitParams, gridSize]);
 
   // Render 3D visualization with enhanced smoothness
   const render3D = React.useCallback(() => {
@@ -1001,11 +1035,11 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     }
     
     // Clear canvas with anti-aliasing
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, actualWidth, actualHeight);
 
     // Set canvas background
     ctx.fillStyle = '#000000';
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, actualWidth, actualHeight);
 
     // Draw 3D radar chart grid
     draw3DRadarGrid(ctx);
@@ -1094,8 +1128,6 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     draw3DRadarLabels(ctx);
     drawResnormAxis(ctx);
     
-    // Draw minimap overlay
-    drawResnormMinimap(ctx);
     
     // Draw parameter values list
     drawParameterValuesList(ctx);
@@ -1103,10 +1135,31 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw orientation cube
     drawOrientationCube(ctx);
 
-  }, [convert3DPolygons, project3D, referenceModel, width, height, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawResnormMinimap, drawParameterValuesList, drawOrientationCube, paramKeys]);
+  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawOrientationCube, paramKeys]);
 
-  // Professional 3D navigation handlers (Blender/Onshape-style)
+  // Professional 3D navigation handlers (Blender/Onshape-style) with model selection
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Check for model selection on left click without modifiers
+    if (e.button === 0 && !e.shiftKey && !e.ctrlKey && onModelTag) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        
+        const clickedModel = findModelAtPoint(clickX, clickY);
+        if (clickedModel) {
+          // Show tag dialog
+          setShowTagDialog({
+            model: clickedModel,
+            x: e.clientX,
+            y: e.clientY
+          });
+          return; // Don't start dragging if we're showing tag dialog
+        }
+      }
+    }
+    
     // Determine interaction mode based on mouse button and modifiers
     let dragMode: NavigationMode = 'orbit';
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
@@ -1125,7 +1178,19 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!interaction.isDragging) return;
+    // Handle hover detection for model highlighting
+    if (!interaction.isDragging) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const hoverX = e.clientX - rect.left;
+        const hoverY = e.clientY - rect.top;
+        
+        const hoveredModelFound = findModelAtPoint(hoverX, hoverY);
+        setHoveredModel(hoveredModelFound);
+      }
+      return;
+    }
 
     const deltaX = e.clientX - interaction.lastMousePos.x;
     const deltaY = e.clientY - interaction.lastMousePos.y;
@@ -1260,11 +1325,17 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   }, [render3D]);
 
   return (
-    <div className="relative bg-black overflow-hidden w-full h-full">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
+    <div ref={containerRef} className="relative bg-black overflow-hidden w-full h-full">
+      {!isComponentReady ? (
+        <div className="absolute inset-0 bg-black flex items-center justify-center">
+          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      ) : null}
+      {isComponentReady && (
+        <canvas
+          ref={canvasRef}
+        width={actualWidth}
+        height={actualHeight}
         className={`w-full h-full object-contain ${
           interaction.isDragging 
             ? interaction.dragMode === 'pan' ? 'cursor-move' 
@@ -1281,121 +1352,31 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         onContextMenu={handleContextMenu}
         onFocus={() => canvasRef.current?.focus()}
       />
+      )}
       
-      {/* Navigation Toolbar - Dynamic positioning */}
-      <div className="absolute top-4 left-4 bg-gray-900 bg-opacity-80 rounded p-2 z-10">
-        <div className="flex flex-col space-y-2">
-          {/* View Controls */}
-          <div className="flex space-x-1">
-            <button
-              onClick={() => {
-                setRotation({ x: -30, y: 45, z: 0 });
-                setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
-              }}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-xs transition-colors"
-              title="Reset View (R)"
-            >
-              Reset
-            </button>
-            <button
-              onClick={() => setCamera(prev => ({ ...prev, target: { x: 0, y: 0, z: 2.5 }, distance: 12, scale: 1.0 }))}
-              className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-white text-xs transition-colors"
-              title="Focus View (F)"
-            >
-              Focus
-            </button>
-            <button
-              onClick={() => setSpectrumNav(prev => ({ ...prev, enabled: !prev.enabled, currentSection: 0 }))}
-              className={`px-2 py-1 rounded text-white text-xs transition-colors ${
-                spectrumNav.enabled ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600'
-              }`}
-              title="Navigate Spectrum Sections"
-            >
-              {spectrumNav.enabled ? 'Exit Nav' : 'Navigate'}
-            </button>
-          </div>
-          
-          {/* Spectrum Navigation Controls */}
-          {spectrumNav.enabled && (
-            <div className="flex flex-col space-y-1 border-t border-gray-600 pt-2">
-              {/* Section Slider */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setSpectrumNav(prev => ({ ...prev, currentSection: Math.max(0, prev.currentSection - 1) }))}
-                  disabled={spectrumNav.currentSection === 0}
-                  className="px-1 py-0.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-white text-xs"
-                >
-                  ◀
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max={Math.max(0, spectrumNav.totalSections - 1)}
-                  value={spectrumNav.currentSection}
-                  onChange={(e) => setSpectrumNav(prev => ({ ...prev, currentSection: parseInt(e.target.value) }))}
-                  className="flex-1 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                  style={{
-                    background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${(spectrumNav.currentSection / Math.max(1, spectrumNav.totalSections - 1)) * 100}%, #4b5563 ${(spectrumNav.currentSection / Math.max(1, spectrumNav.totalSections - 1)) * 100}%, #4b5563 100%)`
-                  }}
-                />
-                <button
-                  onClick={() => setSpectrumNav(prev => ({ ...prev, currentSection: Math.min(prev.totalSections - 1, prev.currentSection + 1) }))}
-                  disabled={spectrumNav.currentSection >= spectrumNav.totalSections - 1}
-                  className="px-1 py-0.5 bg-gray-600 hover:bg-gray-500 disabled:bg-gray-800 disabled:cursor-not-allowed rounded text-white text-xs"
-                >
-                  ▶
-                </button>
-              </div>
-              
-              {/* Section Info */}
-              <div className="text-xs text-gray-300">
-                <div>Section {spectrumNav.currentSection + 1} / {spectrumNav.totalSections}</div>
-                <div className="text-gray-400">
-                  Resnorm: {spectrumNav.sectionRange.min.toFixed(3)} - {spectrumNav.sectionRange.max.toFixed(3)}
-                </div>
-                <div className="text-gray-400">
-                  Showing {filteredModels.length} / {models.length} models
-                </div>
-              </div>
-              
-              {/* Models per section control */}
-              <div className="flex items-center space-x-2">
-                <span className="text-xs text-gray-400">Per section:</span>
-                <select
-                  value={spectrumNav.modelsPerSection}
-                  onChange={(e) => setSpectrumNav(prev => ({ ...prev, modelsPerSection: parseInt(e.target.value), currentSection: 0 }))}
-                  className="bg-gray-700 text-white text-xs rounded px-1 py-0.5"
-                >
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                  <option value={200}>200</option>
-                  <option value={500}>500</option>
-                </select>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {/* Reset Button - Clean positioning */}
+      <button
+        onClick={() => {
+          setRotation({ x: -30, y: 45, z: 0 });
+          setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
+        }}
+        className="absolute top-4 left-4 px-3 py-1.5 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white text-xs transition-all z-10 border border-gray-600"
+        title="Reset View (R)"
+      >
+        Reset
+      </button>
       
       {showControls && (
         <div className="absolute bottom-4 right-4">
           <div className="bg-black bg-opacity-80 p-3 rounded text-white text-xs">
             <div className="space-y-1">
               <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
-              <div className="text-xs text-gray-400">WASD/Arrows: Navigate • R: Reset • F: Focus</div>
+              <div className="text-xs text-gray-400">R: Reset</div>
             </div>
           </div>
         </div>
       )}
 
-      {filteredModels.length === 0 && models.length > 0 && spectrumNav.enabled && (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-black bg-opacity-50">
-          <div className="text-center p-8 bg-gray-900 bg-opacity-80 rounded-lg">
-            <div className="text-lg mb-2 text-white">No models in this section</div>
-            <div className="text-sm mb-4">Try adjusting the section or models per section</div>
-          </div>
-        </div>
-      )}
       
       {models.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-black bg-opacity-50">
@@ -1407,6 +1388,107 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             </div>
           </div>
         </div>
+      )}
+      
+      {models.length > 50000 && (
+        <div className="absolute inset-0 flex items-center justify-center text-gray-400 bg-black bg-opacity-50">
+          <div className="text-center p-8 bg-gray-900 bg-opacity-80 rounded-lg">
+            <div className="text-xl text-orange-400 mb-4">⚠️ Exceeds Rendering Capacity</div>
+            <div className="text-neutral-300 mb-2">
+              Too many models to render in 3D: {models.length.toLocaleString()}
+            </div>
+            <div className="text-sm text-neutral-400 mb-4">
+              Maximum safe limit: 50,000 models
+            </div>
+            <div className="text-xs text-neutral-500">
+              Try reducing the resnorm matching portion or grid size for better performance
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tag Dialog */}
+      {showTagDialog && (
+        <>
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black bg-opacity-50 z-40"
+            onClick={() => setShowTagDialog(null)}
+          />
+          
+          {/* Dialog */}
+          <div 
+            className="fixed z-50 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-xl"
+            style={{ 
+              left: Math.min(showTagDialog.x + 10, window.innerWidth - 200), 
+              top: Math.max(10, showTagDialog.y - 50)
+            }}
+          >
+            <div className="text-white text-sm mb-2">
+              Tag Model 
+              <span className="text-gray-400 text-xs ml-2">
+                (Resnorm: {showTagDialog.model.resnorm?.toFixed(4) || 'N/A'})
+              </span>
+            </div>
+            <input
+              type="text"
+              placeholder="Enter tag name..."
+              className="w-40 px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter') {
+                  const tagName = e.currentTarget.value.trim();
+                  if (tagName && showTagDialog && onModelTag) {
+                    setIsTagging(true);
+                    try {
+                      // Use parent callback for tagging
+                      onModelTag(showTagDialog.model, tagName);
+                    } catch (error) {
+                      console.error('Failed to tag model:', error);
+                    } finally {
+                      setIsTagging(false);
+                    }
+                  }
+                  setShowTagDialog(null);
+                } else if (e.key === 'Escape') {
+                  setShowTagDialog(null);
+                }
+              }}
+              autoFocus
+            />
+            <div className="flex gap-2 mt-2">
+              <button
+                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 transition-colors rounded text-white"
+                disabled={isTagging}
+                onClick={async () => {
+                  if (!showTagDialog || !onModelTag) return;
+                  
+                  const input = document.querySelector('input[placeholder="Enter tag name..."]') as HTMLInputElement;
+                  const tagName = input?.value.trim();
+                  if (!tagName) return;
+                  
+                  setIsTagging(true);
+                  try {
+                    // Use parent callback for tagging
+                    onModelTag(showTagDialog.model, tagName);
+                  } catch (error) {
+                    console.error('Failed to tag model:', error);
+                  } finally {
+                    setIsTagging(false);
+                  }
+                  setShowTagDialog(null);
+                }}
+              >
+                {isTagging ? 'Saving...' : 'Tag'}
+              </button>
+              <button
+                className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 transition-colors rounded text-white"
+                onClick={() => setShowTagDialog(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

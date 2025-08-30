@@ -12,4 +12,4 @@ export { VisualizationLimitsControl } from './VisualizationLimitsControl';
 export { ToolboxSidebar } from './ToolboxSidebar';
 export { CenterParameterPanel } from './CenterParameterPanel';
 export { EnhancedInput } from './EnhancedInput';
-export { DualRangeSlider } from './DualRangeSlider'; 
+ 

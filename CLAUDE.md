@@ -149,11 +149,13 @@ The application implements a modified Randles circuit model:
 ```
 
 #### Resnorm Calculation
-Advanced residual norm calculation with:
-- Frequency weighting for low-frequency emphasis
+Advanced residual norm calculation using **Mean Absolute Error (MAE)** methodology:
+- **MAE Cost Function**: (1/n) * sum(|Z_test - Z_reference|) following battery EIS research
+- Frequency weighting for low-frequency emphasis (optional)
 - Component-specific weighting (resistive vs capacitive)
 - Magnitude normalization for scale independence
-- Range amplification based on frequency span
+- Range amplification based on frequency span (optional)
+- **Default**: Uses MAE method for consistency with published EIS parameter extraction approaches
 
 ### File Organization Patterns
 

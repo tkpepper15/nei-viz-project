@@ -33,13 +33,17 @@ export const EnhancedInput: React.FC<EnhancedInputProps> = ({
   id
 }) => {
   // Local state for input value to allow typing without immediate validation
-  const [inputValue, setInputValue] = useState(value.toString());
+  const [inputValue, setInputValue] = useState(
+    (value != null && !isNaN(value)) ? value.toString() : ''
+  );
   const [isFocused, setIsFocused] = useState(false);
   
   // Update input value when prop value changes (external updates)
   useEffect(() => {
     if (!isFocused) {
-      setInputValue(value.toString());
+      setInputValue(
+        (value != null && !isNaN(value)) ? value.toString() : ''
+      );
     }
   }, [value, isFocused]);
   
@@ -69,7 +73,9 @@ export const EnhancedInput: React.FC<EnhancedInputProps> = ({
     // Reset to current value if input is invalid
     const numValue = parseFloat(inputValue);
     if (isNaN(numValue) || !isFinite(numValue)) {
-      setInputValue(value.toString());
+      setInputValue(
+        (value != null && !isNaN(value)) ? value.toString() : ''
+      );
     } else {
       setInputValue(numValue.toString());
     }

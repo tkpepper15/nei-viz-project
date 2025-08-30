@@ -9,11 +9,14 @@ interface ProfileCardProps {
   onEdit: () => void;
   onEditParameters?: () => void;
   onCopyParams?: () => void;
+  onViewTaggedModels?: () => void;
   // Multi-select functionality
   isMultiSelectMode?: boolean;
   isSelectedForDelete?: boolean;
   onToggleSelect?: () => void;
   onClick?: () => void;
+  // Computing state
+  isComputing?: boolean;
 }
 
 export const ProfileCard: React.FC<ProfileCardProps> = ({
@@ -24,10 +27,12 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
   onEdit,
   onEditParameters,
   onCopyParams,
+  onViewTaggedModels,
   isMultiSelectMode = false,
   isSelectedForDelete = false,
   onToggleSelect,
-  onClick
+  onClick,
+  isComputing = false
 }) => {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -53,34 +58,26 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
       className={`group relative rounded-lg transition-all duration-200 hover:bg-neutral-800/50 ${
         isSelected ? 'bg-neutral-700 border border-neutral-600' : ''
       } ${
-        isSelectedForDelete ? 'ring-2 ring-blue-500 bg-blue-900/20' : ''
+        isSelectedForDelete ? 'ring-2 ring-blue-500' : ''
+      } ${
+        isComputing ? 'ring-2 ring-green-500 bg-green-900/20' : ''
       } ${
         isMultiSelectMode ? 'cursor-pointer' : ''
       }`}
       onClick={isMultiSelectMode ? onToggleSelect : onClick}
     >
       <div className="flex items-center p-3 gap-3">
-        {/* Multi-select checkbox */}
-        {isMultiSelectMode && (
-          <div className="flex-shrink-0">
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-              isSelectedForDelete 
-                ? 'bg-blue-600 border-blue-600' 
-                : 'border-neutral-500 hover:border-neutral-400'
-            }`}>
-              {isSelectedForDelete && (
-                <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              )}
-            </div>
-          </div>
-        )}
         {/* Main Content - Non-clickable */}
         <div className="flex-1 min-w-0">
           {/* Profile Name */}
-          <h4 className="text-sm font-medium text-white truncate mb-1">
+          <h4 className="text-sm font-medium text-white truncate mb-1 flex items-center gap-2">
             {profile.name}
+            {isComputing && (
+              <span className="flex items-center gap-1 text-xs text-green-400">
+                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                Computing...
+              </span>
+            )}
           </h4>
           
           {/* Grid Info */}
@@ -100,6 +97,8 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
               {profile.description}
             </p>
           )}
+          
+          {/* Tagged Models Note: Now loaded from database when viewing */}
           
           {/* Time */}
           <div className="text-xs text-neutral-400">
@@ -159,6 +158,22 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 100 4m0-4v2m0-6V4" />
                     </svg>
                     Edit Parameters
+                  </button>
+                )}
+                
+                {onViewTaggedModels && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onViewTaggedModels();
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a.997.997 0 01-1.414 0l-7-7A1.997 1.997 0 013 12V7a4 4 0 014-4z" />
+                    </svg>
+                    View Tagged Models
                   </button>
                 )}
                 

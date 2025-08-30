@@ -90,7 +90,7 @@ const GridFilterControls: React.FC<{
               min="5"
               max="100"
               step="5"
-              value={filterSettings.visibilityPercentage}
+              value={isNaN(filterSettings.visibilityPercentage) ? 50 : filterSettings.visibilityPercentage}
               onChange={(e) => handleSettingChange('visibilityPercentage', parseInt(e.target.value))}
               className="w-full h-2 bg-neutral-700 rounded appearance-none cursor-pointer slider"
               style={{

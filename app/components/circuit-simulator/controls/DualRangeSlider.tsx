@@ -12,6 +12,7 @@ interface DualRangeSliderProps {
   unit?: string;
   onChange: (min: number, max: number) => void;
   className?: string;
+  formatValue?: (value: number) => string;
 }
 
 export const DualRangeSlider: React.FC<DualRangeSliderProps> = ({
@@ -23,7 +24,8 @@ export const DualRangeSlider: React.FC<DualRangeSliderProps> = ({
   step,
   unit = "",
   onChange,
-  className = ""
+  className = "",
+  formatValue
 }) => {
   const minRef = useRef<HTMLInputElement>(null);
   const maxRef = useRef<HTMLInputElement>(null);
@@ -35,28 +37,21 @@ export const DualRangeSlider: React.FC<DualRangeSliderProps> = ({
     [min, max]
   );
 
-  // Handle min value change with constraints
-  const handleMinChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Math.min(Number(e.target.value), maxValue - step);
-    onChange(value, maxValue);
-  }, [maxValue, step, onChange]);
+  // Apple-style dual slider handlers with proper thumb behavior
+  const handleMinThumbChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = Number(e.target.value);
+    // Min thumb can't go above max value
+    const constrainedValue = Math.min(newValue, maxValue);
+    onChange(constrainedValue, maxValue);
+  }, [maxValue, onChange]);
 
-  // Handle max value change with constraints
-  const handleMaxChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Math.max(Number(e.target.value), minValue + step);
-    onChange(minValue, value);
-  }, [minValue, step, onChange]);
+  const handleMaxThumbChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = Number(e.target.value);
+    // Max thumb can't go below min value
+    const constrainedValue = Math.max(newValue, minValue);
+    onChange(minValue, constrainedValue);
+  }, [minValue, onChange]);
 
-  // Handle number input changes
-  const handleMinInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newMin = parseFloat(e.target.value) || minValue;
-    onChange(newMin, maxValue);
-  }, [minValue, maxValue, onChange]);
-
-  const handleMaxInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const newMax = parseFloat(e.target.value) || maxValue;
-    onChange(minValue, newMax);
-  }, [minValue, maxValue, onChange]);
 
   // Update range highlight when values change
   useEffect(() => {
@@ -72,38 +67,44 @@ export const DualRangeSlider: React.FC<DualRangeSliderProps> = ({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Label and Values */}
-      <div className="flex items-center justify-between">
-        <label className="text-sm font-medium text-neutral-200">
-          {label}{unit ? ` (${unit})` : ''}
-        </label>
-        <div className="text-sm text-neutral-400">
-          {minValue} - {maxValue}{unit ? ` ${unit}` : ''}
+      {(label || (minValue !== 0 || maxValue !== 0)) && (
+        <div className="flex items-center justify-between">
+          {label && (
+            <label className="text-sm font-medium text-neutral-200">
+              {label}
+            </label>
+          )}
+          {(minValue !== 0 || maxValue !== 0) && (
+            <div className="text-sm text-neutral-400">
+              {formatValue ? formatValue(minValue) : minValue} - {formatValue ? formatValue(maxValue) : maxValue}{unit ? ` ${unit}` : ''}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Dual Range Container */}
       <div className="dual-range-container">
-        {/* Min range input */}
+        {/* Min thumb slider */}
         <input
           type="range"
           min={min}
           max={max}
           step={step}
-          value={minValue}
+          value={isNaN(minValue) ? min : minValue}
           ref={minRef}
-          onChange={handleMinChange}
+          onChange={handleMinThumbChange}
           className="dual-range-thumb dual-range-thumb-min"
         />
         
-        {/* Max range input */}
+        {/* Max thumb slider */}
         <input
           type="range"
           min={min}
           max={max}
           step={step}
-          value={maxValue}
+          value={isNaN(maxValue) ? max : maxValue}
           ref={maxRef}
-          onChange={handleMaxChange}
+          onChange={handleMaxThumbChange}
           className="dual-range-thumb dual-range-thumb-max"
         />
 
@@ -114,35 +115,12 @@ export const DualRangeSlider: React.FC<DualRangeSliderProps> = ({
         </div>
       </div>
 
-      {/* Min/Max boundary labels */}
-      <div className="flex justify-between text-xs text-neutral-500 px-2">
-        <span>{min}{unit ? ` ${unit}` : ''}</span>
-        <span>{max}{unit ? ` ${unit}` : ''}</span>
+      {/* Slider bounds labels - always show the full range */}
+      <div className="flex justify-between text-xs text-neutral-500 px-2 mt-1">
+        <span>{formatValue ? formatValue(min) : min}{unit ? ` ${unit}` : ''}</span>
+        <span>{formatValue ? formatValue(max) : max}{unit ? ` ${unit}` : ''}</span>
       </div>
 
-      {/* Individual value inputs */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs text-neutral-400 mb-1">Min Value</label>
-          <input
-            type="number"
-            value={minValue}
-            onChange={handleMinInputChange}
-            step={step}
-            className="w-full px-2 py-1 text-sm bg-neutral-800 border border-neutral-600 rounded text-white focus:border-blue-400 focus:outline-none"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-neutral-400 mb-1">Max Value</label>
-          <input
-            type="number"
-            value={maxValue}
-            onChange={handleMaxInputChange}
-            step={step}
-            className="w-full px-2 py-1 text-sm bg-neutral-800 border border-neutral-600 rounded text-white focus:border-blue-400 focus:outline-none"
-          />
-        </div>
-      </div>
     </div>
   );
 };

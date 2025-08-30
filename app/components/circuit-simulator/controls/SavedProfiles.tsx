@@ -12,6 +12,7 @@ interface SavedProfilesProps {
   onEditProfile: (profileId: string, name: string, description?: string) => void;
   onEditParameters?: (profileId: string) => void;
   onComputeProfile: (profileId: string) => void;
+  onViewTaggedModels?: (profileId: string) => void;
   onCopyParams?: (profileId: string) => void;
   isCollapsed: boolean;
   onRestart?: () => void;
@@ -20,10 +21,11 @@ interface SavedProfilesProps {
   isMultiSelectMode?: boolean;
   onToggleMultiSelect?: () => void;
   onBulkDelete?: () => void;
+  // Computing state
+  computingProfileId?: string | null;
 }
 
-type SortOption = 'recent' | 'name' | 'created' | 'computed';
-type FilterOption = 'all' | 'computed' | 'uncomputed';
+// Filter options removed as requested
 
 export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   profiles,
@@ -34,24 +36,29 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   onEditProfile,
   onEditParameters,
   onComputeProfile,
+  onViewTaggedModels,
   onCopyParams,
   isCollapsed,
   onRestart: _onRestart, // eslint-disable-line @typescript-eslint/no-unused-vars
   selectedCircuits = [],
   isMultiSelectMode = false,
   onToggleMultiSelect,
-  onBulkDelete
+  onBulkDelete,
+  computingProfileId = null
 }) => {
   const [editingProfile, setEditingProfile] = useState<SavedProfile | null>(null);
-  const [sortBy, setSortBy] = useState<SortOption>('recent');
-  const [filterBy, setFilterBy] = useState<FilterOption>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Sorted and filtered profiles
+  // Search-only profiles (no filtering or sorting)
   const processedProfiles = useMemo(() => {
+    // Ensure profiles is always an array
+    if (!Array.isArray(profiles)) {
+      return [];
+    }
+    
     let filtered = profiles;
 
-    // Apply search filter
+    // Apply search filter only
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(profile => 
@@ -60,35 +67,8 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
       );
     }
 
-    // Apply status filter
-    if (filterBy === 'computed') {
-      filtered = filtered.filter(profile => profile.isComputed);
-    } else if (filterBy === 'uncomputed') {
-      filtered = filtered.filter(profile => !profile.isComputed);
-    }
-
-    // Apply sorting
-    const sorted = [...filtered].sort((a, b) => {
-      switch (sortBy) {
-        case 'recent':
-          return b.lastModified - a.lastModified; // Most recent first
-        case 'name':
-          return a.name.localeCompare(b.name);
-        case 'created':
-          return b.created - a.created; // Most recently created first
-        case 'computed':
-          // Computed profiles first, then by recent within each group
-          if (a.isComputed !== b.isComputed) {
-            return a.isComputed ? -1 : 1;
-          }
-          return b.lastModified - a.lastModified;
-        default:
-          return 0;
-      }
-    });
-
-    return sorted;
-  }, [profiles, sortBy, filterBy, searchTerm]);
+    return filtered;
+  }, [profiles, searchTerm]);
 
 
 
@@ -175,12 +155,10 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
                   onToggleMultiSelect && (
                     <button
                       onClick={onToggleMultiSelect}
-                      className="w-8 h-8 flex items-center justify-center rounded-md bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white transition-colors"
+                      className="px-2 py-1 text-xs rounded-md bg-neutral-700 hover:bg-neutral-600 text-neutral-300 hover:text-white transition-colors font-medium"
                       title="Select multiple circuits"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
+                      Select
                     </button>
                   )
                 )}
@@ -193,40 +171,14 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
       {/* Filtering and Sorting Controls */}
       {profiles.length > 0 && (
         <div className="px-3 py-2 bg-neutral-800/50 border-b border-neutral-700">
-          {/* Search */}
-          <div className="mb-2">
-            <input
-              type="text"
-              placeholder="Search circuits..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          
-          {/* Sort and Filter */}
-          <div className="flex gap-2">
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="flex-1 px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:border-blue-500"
-            >
-              <option value="recent">Recent</option>
-              <option value="name">Name</option>
-              <option value="created">Created</option>
-              <option value="computed">Computed</option>
-            </select>
-            
-            <select
-              value={filterBy}
-              onChange={(e) => setFilterBy(e.target.value as FilterOption)}
-              className="flex-1 px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:border-blue-500"
-            >
-              <option value="all">All</option>
-              <option value="computed">Computed</option>
-              <option value="uncomputed">Uncomputed</option>
-            </select>
-          </div>
+          {/* Search Only */}
+          <input
+            type="text"
+            placeholder="Search circuits..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-blue-500"
+          />
         </div>
       )}
       
@@ -253,9 +205,11 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
                 onEdit={() => setEditingProfile(profile)}
                 onEditParameters={onEditParameters ? () => onEditParameters(profile.id) : undefined}
                 onCompute={() => onComputeProfile(profile.id)}
+                onViewTaggedModels={onViewTaggedModels ? () => onViewTaggedModels(profile.id) : undefined}
                 onCopyParams={onCopyParams ? () => onCopyParams(profile.id) : undefined}
                 isMultiSelectMode={isMultiSelectMode}
                 isSelectedForDelete={selectedCircuits.includes(profile.id)}
+                isComputing={computingProfileId === profile.id}
                 onToggleSelect={() => onSelectProfile(profile.id)}
                 onClick={() => onSelectProfileOriginal ? onSelectProfileOriginal(profile.id) : onSelectProfile(profile.id)}
               />

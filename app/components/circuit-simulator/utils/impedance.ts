@@ -111,15 +111,8 @@ export const calculateImpedanceSpectrum = (
     });
 };
 
-/**
- * Calculate TER (Transepithelial Resistance)
- * TER = Rsh * (Ra + Rb) / (Rsh + Ra + Rb)
- */
-export const calculateTER = (params: CircuitParameters): number => {
-    const numerator = params.Rsh * (params.Ra + params.Rb);
-    const denominator = params.Rsh + params.Ra + params.Rb;
-    return numerator / denominator;
-};
+// TER calculation moved to centralized math/utils.ts
+export { calculateTER } from '../math/utils';
 
 /**
  * Calculate TEC (Transepithelial Capacitance)

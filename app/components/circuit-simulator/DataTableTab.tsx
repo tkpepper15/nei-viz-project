@@ -13,6 +13,8 @@ interface DataTableTabProps {
   groundTruthParams: CircuitParameters;
   gridParameterArrays: GridParameterArrays | null;
   opacityExponent: number;
+  minFreq: number;
+  maxFreq: number;
 }
 
 interface ImpedanceCalculation {
@@ -31,6 +33,11 @@ interface ImpedanceCalculation {
 
 // Add formatValue function to handle unit conversions
 const formatValue = (value: number, isCapacitance: boolean): string => {
+  // Safety check for undefined/null/NaN values
+  if (typeof value !== 'number' || !isFinite(value) || isNaN(value)) {
+    return isCapacitance ? '0.00' : '0.0';
+  }
+  
   if (isCapacitance) {
     // Convert from Farads to µF and format with 2 decimal places
     return (value * 1e6).toFixed(2);
@@ -104,9 +111,11 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   parameters,
   groundTruthParams,
   gridParameterArrays,
-  opacityExponent
+  opacityExponent,
+  minFreq,
+  maxFreq
 }) => {
-  // Table sorting state
+  // Table sorting state - ALL HOOKS MUST BE CALLED BEFORE ANY EARLY RETURNS
   const [sortColumn, setSortColumn] = useState<string>('resnorm');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -114,14 +123,17 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
   
   // Frequency selection and calculation breakdown state
   const [selectedParams, setSelectedParams] = useState<CircuitParameters | null>(null);
-  const [selectedFrequency, setSelectedFrequency] = useState<number>(1000);
+  const [selectedFrequency, setSelectedFrequency] = useState<number>(() => {
+    // Start with middle frequency on log scale
+    return Math.sqrt(minFreq * maxFreq);
+  });
   const [showCalculationBreakdown, setShowCalculationBreakdown] = useState<boolean>(false);
   
-  // Generate frequency array for slider (100 points between 1 Hz and 10 kHz)
+  // Generate frequency array for slider using the actual simulator frequency range
   const frequencyArray = useMemo(() => {
     const frequencies = [];
-    const startFreq = 1;
-    const endFreq = 10000;
+    const startFreq = minFreq;
+    const endFreq = maxFreq;
     const numPoints = 100;
     
     // Generate logarithmic frequency spacing
@@ -134,7 +146,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     }
     
     return frequencies;
-  }, []);
+  }, [minFreq, maxFreq]);
   
   // Find current frequency index
   const currentFreqIndex = useMemo(() => {
@@ -339,14 +351,32 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
     };
   }, [gridParameterArrays]);
 
+  // Early return AFTER all hooks are called - this prevents the React hooks rules violation
+  if (!parameters || typeof parameters.Rsh !== 'number' || !minFreq || !maxFreq) {
+    return (
+      <div className="flex items-center justify-center h-32 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md p-4">
+        <div className="text-center">
+          <p className="text-sm text-red-400">
+            Invalid circuit parameters. Please set valid parameter values.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Add grid parameter info display
   const renderGridInfo = () => {
     if (!gridParameterArrays) return null;
 
-    const getMinMax = (values: number[]) => ({
-      min: Math.min(...values),
-      max: Math.max(...values)
-    });
+    const getMinMax = (values: number[]) => {
+      if (!values || values.length === 0) return { min: 0, max: 0 };
+      const validValues = values.filter(v => typeof v === 'number' && !isNaN(v));
+      if (validValues.length === 0) return { min: 0, max: 0 };
+      return {
+        min: Math.min(...validValues),
+        max: Math.max(...validValues)
+      };
+    };
 
     const ranges = {
       Rsh: getMinMax(gridParameterArrays.Rsh),
@@ -414,7 +444,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
           <svg className="w-4 h-4 mr-2 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
           </svg>
-          Impedance Calculation Frequency
+          Selected Circuit Impedance @ Frequency
         </h3>
         
         <div className="space-y-4">
@@ -429,6 +459,24 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
               </span>
             </div>
             
+            {/* Quick frequency presets */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-blue-300/70">Quick:</span>
+              {[1, 10, 100, 1000, 10000].filter(f => f >= minFreq && f <= maxFreq).map(freq => (
+                <button
+                  key={freq}
+                  onClick={() => setSelectedFrequency(freq)}
+                  className={`text-xs px-2 py-1 rounded transition-colors ${
+                    Math.abs(selectedFrequency - freq) < 1 
+                      ? 'bg-blue-600 text-blue-100' 
+                      : 'bg-blue-800/40 hover:bg-blue-700/60 text-blue-200'
+                  }`}
+                >
+                  {freq >= 1000 ? `${freq/1000}k` : `${freq}`}
+                </button>
+              ))}
+            </div>
+            
             <div className="text-xs text-blue-300/70">
               Real and imaginary impedance values calculated at this frequency
             </div>
@@ -436,13 +484,13 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
           
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-xs text-blue-300">
-              <span>1 Hz</span>
+              <span>{minFreq < 1 ? `${minFreq} Hz` : `${minFreq.toFixed(0)} Hz`}</span>
               <div className="flex-1 relative">
                 <input
                   type="range"
                   min={0}
                   max={frequencyArray.length - 1}
-                  value={currentFreqIndex}
+                  value={isNaN(currentFreqIndex) ? 0 : currentFreqIndex}
                   onChange={(e) => {
                     const index = parseInt(e.target.value);
                     setSelectedFrequency(frequencyArray[index]);
@@ -455,10 +503,43 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                   }}
                 />
               </div>
-              <span>10 kHz</span>
+              <span>{maxFreq >= 1000 ? `${(maxFreq/1000).toFixed(0)} kHz` : `${maxFreq.toFixed(0)} Hz`}</span>
             </div>
             <div className="text-xs text-blue-400">
-              100 frequency points available • Position {currentFreqIndex + 1}/100
+              100 frequency points available • Position {currentFreqIndex + 1}/100 • Range: {minFreq.toFixed(1)} - {maxFreq.toLocaleString()} Hz
+            </div>
+          </div>
+          
+          {/* Show reference impedance calculation at selected frequency */}
+          <div className="mt-4 p-3 bg-blue-800/10 rounded border border-blue-600/20">
+            <div className="text-xs text-blue-200 mb-2 font-medium">Reference Model Impedance:</div>
+            <div className="grid grid-cols-3 gap-4 text-xs">
+              {(() => {
+                const refParams = groundTruthParams || parameters;
+                
+                // Safety check to prevent errors with undefined parameters
+                if (!refParams || !refParams.Rsh || selectedFrequency === undefined || selectedFrequency === null) {
+                  return <div className="text-red-400 text-sm">Invalid parameters or frequency</div>;
+                }
+                
+                const refCalc = calculateImpedanceAtFrequency(refParams, selectedFrequency);
+                return (
+                  <>
+                    <div>
+                      <span className="text-blue-300">Real:</span>
+                      <span className="font-mono text-blue-100 ml-1">{refCalc.Z_total_real.toFixed(2)} Ω</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-300">Imag:</span>
+                      <span className="font-mono text-blue-100 ml-1">{refCalc.Z_total_imag.toFixed(2)} Ω</span>
+                    </div>
+                    <div>
+                      <span className="text-blue-300">|Z|:</span>
+                      <span className="font-mono text-blue-100 ml-1">{refCalc.magnitude.toFixed(2)} Ω</span>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -665,14 +746,20 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                 <th className="p-2 text-left">Real (Ω)</th>
                 <th className="p-2 text-left">Imag (Ω)</th>
                 <th className="p-2 text-left">|Z| (Ω)</th>
-                <th>Opacity</th>
-                <th>Actions</th>
+                <th className="p-2 text-left">Opacity</th>
+                <th className="p-2 text-left">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-700">
               {/* Reference Row */}
               {(() => {
                 const refParams = groundTruthParams || parameters;
+                
+                // Safety check to prevent errors with undefined parameters
+                if (!refParams || !refParams.Rsh || selectedFrequency === undefined || selectedFrequency === null) {
+                  return null;
+                }
+                
                 const refCalc = calculateImpedanceAtFrequency(refParams, selectedFrequency);
                 return (
                   <tr className="bg-primary/10 hover:bg-primary/15 transition-colors border-t border-neutral-700">
@@ -702,14 +789,14 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                     <td className="p-2 text-xs font-mono">{refCalc.Z_total_real.toFixed(2)}</td>
                     <td className="p-2 text-xs font-mono">{refCalc.Z_total_imag.toFixed(2)}</td>
                     <td className="p-2 text-xs font-mono">{refCalc.magnitude.toFixed(2)}</td>
-                    <td className="p-2">1.000</td>
+                    <td className="p-2 text-xs font-mono">1.000</td>
                     <td className="p-2">
                       <button 
                         onClick={() => {
                           setSelectedParams(refParams);
                           setShowCalculationBreakdown(true);
                         }}
-                        className="text-xs bg-primary/20 hover:bg-primary/30 text-primary px-2 py-1 rounded"
+                        className="text-xs bg-primary/20 hover:bg-primary/30 text-primary px-2 py-1 rounded transition-colors"
                       >
                         Show Math
                       </button>
@@ -736,6 +823,11 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                       const mapped = 1 - Math.pow(normalizedResnorm, opacityExponent);
                       opacity = 0.05 + (Math.max(0, Math.min(mapped, 1)) * 0.95);
                     }
+                  }
+                  
+                  // Safety check for parameter data
+                  if (!point.parameters || !point.parameters.Rsh || selectedFrequency === undefined || selectedFrequency === null) {
+                    return null; // Skip this row if parameters are invalid
                   }
                   
                   const pointCalc = calculateImpedanceAtFrequency(point.parameters, selectedFrequency);
@@ -779,14 +871,14 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                       <td className="p-2 text-xs font-mono">{pointCalc.Z_total_real.toFixed(2)}</td>
                       <td className="p-2 text-xs font-mono">{pointCalc.Z_total_imag.toFixed(2)}</td>
                       <td className="p-2 text-xs font-mono">{pointCalc.magnitude.toFixed(2)}</td>
-                      <td className="p-2">{opacity.toFixed(3)}</td>
+                      <td className="p-2 text-xs font-mono">{opacity.toFixed(3)}</td>
                       <td className="p-2">
                         <button 
                           onClick={() => {
                             setSelectedParams(point.parameters);
                             setShowCalculationBreakdown(true);
                           }}
-                          className="text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 px-2 py-1 rounded"
+                          className="text-xs bg-neutral-700 hover:bg-neutral-600 text-neutral-300 px-2 py-1 rounded transition-colors"
                         >
                           Show Math
                         </button>
@@ -874,6 +966,11 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
               </div>
               
               {(() => {
+                // Safety check for parameter data
+                if (!selectedParams || !selectedParams.Rsh || selectedFrequency === undefined || selectedFrequency === null) {
+                  return <div className="text-red-400">Invalid parameters or frequency selected</div>;
+                }
+                
                 const calc = calculateImpedanceAtFrequency(selectedParams, selectedFrequency);
                 const omega = 2 * Math.PI * selectedFrequency;
                 
@@ -894,6 +991,16 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                         <span className="text-neutral-400">ω = 2πf = </span>
                         <span className="font-mono text-neutral-200">{omega.toExponential(3)} rad/s</span>
                       </div>
+                      
+                      {/* Unit Conversion Note */}
+                      <div className="mt-3 p-3 bg-blue-900/10 rounded border border-blue-700/20">
+                        <div className="text-xs text-blue-200 font-medium mb-2">📝 Unit Conversions Used:</div>
+                        <div className="text-xs text-blue-300/80 space-y-1">
+                          <div>• Capacitance: Internal storage in Farads (F) → Display in microfarads (μF) × 10⁶</div>
+                          <div>• Ca = {selectedParams.Ca.toExponential(3)} F = {(selectedParams.Ca * 1e6).toFixed(2)} μF</div>
+                          <div>• Cb = {selectedParams.Cb.toExponential(3)} F = {(selectedParams.Cb * 1e6).toFixed(2)} μF</div>
+                        </div>
+                      </div>
                     </div>
                     
                     {/* Step-by-step calculation */}
@@ -905,7 +1012,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                         <div className="border border-neutral-600 rounded p-3">
                           <h4 className="font-medium text-green-400 mb-2">Step 1: Calculate Za = Ra/(1+jωRaCa)</h4>
                           <div className="space-y-2 font-mono text-xs">
-                            <div>ωRaCa = {omega.toExponential(3)} × {selectedParams.Ra.toFixed(2)} × {selectedParams.Ca.toExponential(3)} = {(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)}</div>
+                            <div>ωRaCa = {omega.toExponential(3)} rad/s × {selectedParams.Ra.toFixed(2)} Ω × {selectedParams.Ca.toExponential(3)} F = {(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)} (dimensionless)</div>
                             <div>Denominator: 1 + j({(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)})</div>
                             <div>|Denominator|² = 1² + ({(omega * selectedParams.Ra * selectedParams.Ca).toExponential(3)})² = {(1 + Math.pow(omega * selectedParams.Ra * selectedParams.Ca, 2)).toExponential(3)}</div>
                             <div className="text-green-300">Za = {calc.Za_real.toFixed(3)} + j({calc.Za_imag.toFixed(3)}) Ω</div>
@@ -916,7 +1023,7 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                         <div className="border border-neutral-600 rounded p-3">
                           <h4 className="font-medium text-blue-400 mb-2">Step 2: Calculate Zb = Rb/(1+jωRbCb)</h4>
                           <div className="space-y-2 font-mono text-xs">
-                            <div>ωRbCb = {omega.toExponential(3)} × {selectedParams.Rb.toFixed(2)} × {selectedParams.Cb.toExponential(3)} = {(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)}</div>
+                            <div>ωRbCb = {omega.toExponential(3)} rad/s × {selectedParams.Rb.toFixed(2)} Ω × {selectedParams.Cb.toExponential(3)} F = {(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)} (dimensionless)</div>
                             <div>Denominator: 1 + j({(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)})</div>
                             <div>|Denominator|² = 1² + ({(omega * selectedParams.Rb * selectedParams.Cb).toExponential(3)})² = {(1 + Math.pow(omega * selectedParams.Rb * selectedParams.Cb, 2)).toExponential(3)}</div>
                             <div className="text-blue-300">Zb = {calc.Zb_real.toFixed(3)} + j({calc.Zb_imag.toFixed(3)}) Ω</div>
@@ -927,8 +1034,8 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                         <div className="border border-neutral-600 rounded p-3">
                           <h4 className="font-medium text-purple-400 mb-2">Step 3: Calculate Za + Zb</h4>
                           <div className="space-y-2 font-mono text-xs">
-                            <div>Real: {calc.Za_real.toFixed(3)} + {calc.Zb_real.toFixed(3)} = {calc.Za_plus_Zb_real.toFixed(3)} Ω</div>
-                            <div>Imaginary: ({calc.Za_imag.toFixed(3)}) + ({calc.Zb_imag.toFixed(3)}) = {calc.Za_plus_Zb_imag.toFixed(3)} Ω</div>
+                            <div>Real: {calc.Za_real.toFixed(3)} Ω + {calc.Zb_real.toFixed(3)} Ω = {calc.Za_plus_Zb_real.toFixed(3)} Ω</div>
+                            <div>Imaginary: ({calc.Za_imag.toFixed(3)}) Ω + ({calc.Zb_imag.toFixed(3)}) Ω = {calc.Za_plus_Zb_imag.toFixed(3)} Ω</div>
                             <div className="text-purple-300">Za + Zb = {calc.Za_plus_Zb_real.toFixed(3)} + j({calc.Za_plus_Zb_imag.toFixed(3)}) Ω</div>
                           </div>
                         </div>
@@ -937,9 +1044,9 @@ export const DataTableTab: React.FC<DataTableTabProps> = ({
                         <div className="border border-neutral-600 rounded p-3">
                           <h4 className="font-medium text-yellow-400 mb-2">Step 4: Calculate Z_total = (Rsh × (Za + Zb)) / (Rsh + Za + Zb)</h4>
                           <div className="space-y-2 font-mono text-xs">
-                            <div>Numerator: {selectedParams.Rsh.toFixed(2)} × ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)})</div>
-                            <div>Denominator: {selectedParams.Rsh.toFixed(2)} + ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)})</div>
-                            <div>Denominator: {(selectedParams.Rsh + calc.Za_plus_Zb_real).toFixed(3)} + j({calc.Za_plus_Zb_imag.toFixed(3)})</div>
+                            <div>Numerator: {selectedParams.Rsh.toFixed(2)} Ω × ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)}) Ω</div>
+                            <div>Denominator: {selectedParams.Rsh.toFixed(2)} Ω + ({calc.Za_plus_Zb_real.toFixed(3)} + j{calc.Za_plus_Zb_imag.toFixed(3)}) Ω</div>
+                            <div>Denominator: {(selectedParams.Rsh + calc.Za_plus_Zb_real).toFixed(3)} + j({calc.Za_plus_Zb_imag.toFixed(3)}) Ω</div>
                             <div className="text-yellow-300 text-lg font-semibold mt-2">Z_total = {calc.Z_total_real.toFixed(3)} + j({calc.Z_total_imag.toFixed(3)}) Ω</div>
                             <div className="text-yellow-300">|Z| = {calc.magnitude.toFixed(3)} Ω, φ = {calc.phase.toFixed(2)}°</div>
                           </div>

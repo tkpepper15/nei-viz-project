@@ -87,7 +87,10 @@ export const ParamSlider: React.FC<ParamSliderProps> = ({
           <span className="text-xs text-neutral-400 mb-1">Min</span>
           <input
             type="number"
-            value={transformValue ? parseFloat(transformValue(min)) : min}
+            value={transformValue ? 
+              (isNaN(parseFloat(transformValue(min))) ? '' : parseFloat(transformValue(min))) : 
+              (isNaN(min) ? '' : min)
+            }
             onChange={(e) => {
               const newMin = parseFloat(e.target.value);
               if (!isNaN(newMin)) handleMinChange(newMin);
@@ -144,7 +147,10 @@ export const ParamSlider: React.FC<ParamSliderProps> = ({
           <span className="text-xs text-neutral-400 mb-1">Max</span>
           <input
             type="number"
-            value={transformValue ? parseFloat(transformValue(max)) : max}
+            value={transformValue ? 
+              (isNaN(parseFloat(transformValue(max))) ? '' : parseFloat(transformValue(max))) : 
+              (isNaN(max) ? '' : max)
+            }
             onChange={(e) => {
               const newMax = parseFloat(e.target.value);
               if (!isNaN(newMax)) handleMaxChange(newMax);

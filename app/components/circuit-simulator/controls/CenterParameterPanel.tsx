@@ -4,7 +4,8 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { CircuitParameters } from '../types/parameters';
 import { StaticRenderSettings } from './StaticRenderControls';
 import { EnhancedInput } from './EnhancedInput';
-import { DualRangeSlider } from './DualRangeSlider';
+import { groupPortionSampler, groupPortionToPercentage, percentageToGroupPortion, calculateShownModels } from '../utils/parameterSampling';
+
 
 // Collapsible section component
 interface CollapsibleSectionProps {
@@ -89,10 +90,12 @@ interface CenterParameterPanelProps {
   numPoints: number;
   onNumPointsChange: (points: number) => void;
   onCompute: () => void;
-  onSaveProfile: (name: string, description?: string) => void;
+  onSaveProfile: (name: string, description?: string, forceNew?: boolean) => void;
   isComputing: boolean;
   configurationName?: string;
   onConfigurationNameChange?: (name: string) => void;
+  selectedProfileId?: string | null; // To know if there's a current profile to update
+  // Removed resnorm config props since method is fixed to SSR
 }
 
 export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
@@ -112,11 +115,15 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
   onSaveProfile,
   isComputing,
   configurationName = '',
-  onConfigurationNameChange
+  onConfigurationNameChange,
+  selectedProfileId
+  // Removed resnorm config params since method is fixed to SSR
 }) => {
   // Circuit parameter change handlers
   const handleCircuitParamChange = useCallback((param: keyof CircuitParameters, value: number) => {
     if (param === 'frequency_range') return; // Handle separately
+    if (!circuitParams) return; // Guard against undefined circuitParams
+    
     onCircuitParamsChange({
       ...circuitParams,
       [param]: value
@@ -132,17 +139,25 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
     });
   }, [staticRenderSettings, onStaticRenderSettingsChange]);
 
-  const handleGroupPortionChange = useCallback((portion: number) => {
+  // Clean group portion handling using the parameter sampling utility
+  const currentGroupPercentage = useMemo(() => {
+    return groupPortionToPercentage(staticRenderSettings.groupPortion);
+  }, [staticRenderSettings.groupPortion]);
+
+  const handleGroupPortionPercentageChange = useCallback((percentageValue: number) => {
+    const newGroupPortion = percentageToGroupPortion(percentageValue);
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
-      groupPortion: portion / 100 // Convert percentage to decimal
+      groupPortion: newGroupPortion
     });
   }, [staticRenderSettings, onStaticRenderSettingsChange]);
 
-  // Calculate actual number of models being shown
+  // Removed unused resnorm method handler since method is fixed to SSR
+
+  // Calculate actual number of models being shown using the utility
   const totalModels = useMemo(() => Math.pow(gridSize, 5), [gridSize]);
   const shownModels = useMemo(() => 
-    Math.floor(totalModels * staticRenderSettings.groupPortion), 
+    calculateShownModels(totalModels, staticRenderSettings.groupPortion), 
     [totalModels, staticRenderSettings.groupPortion]
   );
 
@@ -153,6 +168,10 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
   // Check if all circuit parameters are valid (numeric and within range)
   const circuitParamsValid = useMemo(() => {
+    if (!circuitParams || typeof circuitParams !== 'object') {
+      return false;
+    }
+    
     return (
       validateParameter(circuitParams.Rsh, 10, 10000) &&
       validateParameter(circuitParams.Ra, 10, 10000) &&
@@ -165,6 +184,16 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
   // Frequency range validation (convert Hz to kHz for validation)
   const frequencyRangeValid = useMemo(() => {
+    // Check for the specific warning conditions
+    const hasMinMaxWarning = minFreq >= maxFreq;
+    const hasNegativeWarning = minFreq <= 0 || maxFreq <= 0;
+    
+    // If either warning condition is true, validation fails
+    if (hasMinMaxWarning || hasNegativeWarning) {
+      return false;
+    }
+    
+    // Additional range validation
     return (
       validateParameter(minFreq / 1000, 0.0001, 10000) && // Allow down to 0.1 Hz (0.0001 kHz)
       validateParameter(maxFreq / 1000, 0.0001, 10000) &&
@@ -177,11 +206,6 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
     return validateParameter(numPoints, 10, 1000);
   }, [numPoints, validateParameter]);
 
-  // Handle frequency range change from dual slider
-  const handleFrequencyRangeChange = useCallback((min: number, max: number) => {
-    onMinFreqChange(min);
-    onMaxFreqChange(max);
-  }, [onMinFreqChange, onMaxFreqChange]);
 
   // Grid size validation
   const gridSizeValid = useMemo(() => {
@@ -221,22 +245,91 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
         <p className="text-neutral-400 text-lg">Configure your circuit parameters for the electrochemical impedance spectroscopy simulation</p>
       </div>
 
+      {/* Configuration Name Input - Moved to top */}
+      {onConfigurationNameChange && (
+        <div className="mb-6">
+          <label className="block text-sm font-medium text-neutral-300 mb-2">
+            Configuration Name
+          </label>
+          <input
+            type="text"
+            value={configurationName}
+            onChange={(e) => onConfigurationNameChange(e.target.value)}
+            placeholder="Enter configuration name..."
+            className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+          />
+        </div>
+      )}
+
       <div className="space-y-6">
           {/* Configuration Section */}
           <CollapsibleSection title="Configuration" defaultOpen={true}>
             <div className="space-y-6 mt-4">
               {/* Frequency Range */}
               <div>
-                <DualRangeSlider
-                  label="Frequency Range"
-                  minValue={minFreq / 1000}
-                  maxValue={maxFreq / 1000}
-                  min={0.001}
-                  max={10000}
-                  step={0.001}
-                  unit="kHz"
-                  onChange={(min, max) => handleFrequencyRangeChange(min * 1000, max * 1000)}
-                />
+                <label className="block text-sm font-medium text-neutral-300 mb-3">Frequency Range</label>
+                
+                {/* Min and Max Frequency Inputs */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1">Min Frequency (Hz)</label>
+                    <input
+                      type="text"
+                      value={minFreq === 0 ? '' : minFreq.toString()}
+                      onChange={(e) => {
+                        const value = e.target.value.trim();
+                        if (value === '') {
+                          onMinFreqChange(0);
+                          return;
+                        }
+                        
+                        // Parse value, supporting scientific notation
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          onMinFreqChange(numValue);
+                        }
+                        // If invalid, don't update but allow user to keep typing
+                      }}
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                      placeholder="0.1 or 1e2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-neutral-400 mb-1">Max Frequency (Hz)</label>
+                    <input
+                      type="text"
+                      value={maxFreq === 0 ? '' : maxFreq.toString()}
+                      onChange={(e) => {
+                        const value = e.target.value.trim();
+                        if (value === '') {
+                          onMaxFreqChange(0);
+                          return;
+                        }
+                        
+                        // Parse value, supporting scientific notation
+                        const numValue = parseFloat(value);
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          onMaxFreqChange(numValue);
+                        }
+                        // If invalid, don't update but allow user to keep typing
+                      }}
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                      placeholder="1e5 or 100000"
+                    />
+                  </div>
+                </div>
+
+                {/* Frequency Range Validation Warnings */}
+                {(minFreq >= maxFreq) && (
+                  <div className="mb-3 p-2 bg-red-900/20 border border-red-700/50 rounded text-red-300 text-xs">
+                    ⚠️ Warning: Minimum frequency must be less than maximum frequency
+                  </div>
+                )}
+                {(minFreq <= 0 || maxFreq <= 0) && (
+                  <div className="mb-3 p-2 bg-red-900/20 border border-red-700/50 rounded text-red-300 text-xs">
+                    ⚠️ Warning: Frequencies must be positive values
+                  </div>
+                )}
               </div>
 
               {/* Frequency Points */}
@@ -278,21 +371,23 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-neutral-200">
-                      Group Portion
+                      Group Portion (%)
                     </label>
                     <div className="text-sm text-neutral-400">
-                      {shownModels.toLocaleString()} models ({(staticRenderSettings.groupPortion * 100).toFixed(0)}%)
+                      {shownModels.toLocaleString()} models
                     </div>
                   </div>
                   <EnhancedInput
                     label=""
-                    value={staticRenderSettings.groupPortion * 100}
-                    onChange={(value) => handleGroupPortionChange(value)}
-                    min={1}
+                    value={parseFloat(groupPortionSampler.formatValue(currentGroupPercentage))}
+                    onChange={handleGroupPortionPercentageChange}
+                    min={0.01}
                     max={100}
-                    step={1}
+                    step={groupPortionSampler.getStepSize(currentGroupPercentage)}
                     showSlider={true}
                   />
+                  <div className="flex justify-between text-xs text-neutral-500">
+                  </div>
                 </div>
               </div>
             </div>
@@ -303,7 +398,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
               <EnhancedInput
                 label="R shunt"
-                value={circuitParams.Rsh}
+                value={isNaN(circuitParams?.Rsh || 0) ? 0 : (circuitParams?.Rsh || 0)}
                 onChange={(value) => handleCircuitParamChange('Rsh', value)}
                 unit="Ω"
                 min={10}
@@ -313,7 +408,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
               />
               <EnhancedInput
                 label="Ra"
-                value={circuitParams.Ra}
+                value={isNaN(circuitParams?.Ra || 0) ? 0 : (circuitParams?.Ra || 0)}
                 onChange={(value) => handleCircuitParamChange('Ra', value)}
                 unit="Ω"
                 min={10}
@@ -323,7 +418,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
               />
               <EnhancedInput
                 label="Ca"
-                value={circuitParams.Ca * 1e6}
+                value={isNaN((circuitParams?.Ca || 0) * 1e6) ? 0 : (circuitParams?.Ca || 0) * 1e6}
                 onChange={(value) => handleCircuitParamChange('Ca', value / 1e6)}
                 unit="μF"
                 min={0.1}
@@ -333,7 +428,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
               />
               <EnhancedInput
                 label="Rb"
-                value={circuitParams.Rb}
+                value={isNaN(circuitParams?.Rb || 0) ? 0 : (circuitParams?.Rb || 0)}
                 onChange={(value) => handleCircuitParamChange('Rb', value)}
                 unit="Ω"
                 min={10}
@@ -343,7 +438,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
               />
               <EnhancedInput
                 label="Cb"
-                value={circuitParams.Cb * 1e6}
+                value={isNaN((circuitParams?.Cb || 0) * 1e6) ? 0 : (circuitParams?.Cb || 0) * 1e6}
                 onChange={(value) => handleCircuitParamChange('Cb', value / 1e6)}
                 unit="μF"
                 min={0.1}
@@ -355,77 +450,64 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
           </CollapsibleSection>
 
           {/* Visualization Settings */}
-          <CollapsibleSection title="Visualization Settings">
+          <CollapsibleSection title="Visualization Settings" defaultOpen={true}>
             <div className="space-y-4 mt-4">
               {/* Visualization Type */}
               <div>
                 <label className="block text-sm font-medium text-neutral-200 mb-2">
                   Visualization Type
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => handleVisualizationTypeChange('spider2d')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      staticRenderSettings.visualizationType === 'spider2d'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                    }`}
-                  >
-                    Spider 2D
-                  </button>
-                  <button
-                    onClick={() => handleVisualizationTypeChange('spider3d')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      staticRenderSettings.visualizationType === 'spider3d'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                    }`}
-                  >
-                    Spider 3D
-                  </button>
-                  <button
-                    onClick={() => handleVisualizationTypeChange('nyquist')}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      staticRenderSettings.visualizationType === 'nyquist'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                    }`}
-                  >
-                    Nyquist
-                  </button>
+                <select
+                  value={staticRenderSettings.visualizationType}
+                  onChange={(e) => handleVisualizationTypeChange(e.target.value as 'spider2d' | 'spider3d' | 'nyquist')}
+                  className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                >
+                  <option value="spider2d">Spider 2D</option>
+                  <option value="spider3d">Spider 3D</option>
+                  <option value="nyquist">Nyquist Plot</option>
+                </select>
+              </div>
+
+              {/* Resnorm Method - Fixed to SSR */}
+              <div>
+                <label className="block text-sm font-medium text-neutral-200 mb-2">
+                  Resnorm Method
+                </label>
+                <div className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200">
+                  SSR - Sum of Squared Residuals (Fixed)
                 </div>
+                <p className="text-xs text-neutral-400 mt-1">
+                  Classic least-squares in complex plane - equal weight to real and imaginary parts
+                </p>
               </div>
 
             </div>
           </CollapsibleSection>
 
-          {/* Configuration Name Input */}
-          {onConfigurationNameChange && (
-            <div className="pt-4">
-              <label className="block text-sm font-medium text-neutral-300 mb-2">
-                Configuration Name
-              </label>
-              <input
-                type="text"
-                value={configurationName}
-                onChange={(e) => onConfigurationNameChange(e.target.value)}
-                placeholder="Enter configuration name..."
-                className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-              />
-            </div>
-          )}
 
           {/* Action Buttons */}
-          <div className="flex gap-4 pt-4">
+          <div className="flex gap-3 pt-4">
+            {selectedProfileId && (
+              <button
+                onClick={() => {
+                  const name = configurationName.trim() || 'Untitled Configuration';
+                  onSaveProfile(name, 'Last action: Parameters updated from center panel', false);
+                }}
+                disabled={isComputing || !allValid}
+                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors"
+              >
+                Save
+              </button>
+            )}
             <button
               onClick={() => {
                 const name = configurationName.trim() || 'Untitled Configuration';
-                onSaveProfile(name, 'Saved from center parameter panel');
+                onSaveProfile(name, 'Last action: New profile saved from center panel', true);
               }}
               disabled={isComputing || !allValid}
-              className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors"
+              className={`flex-1 px-4 py-3 ${selectedProfileId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors`}
             >
-              Save Profile
+              {selectedProfileId ? 'Save As New' : 'Save Profile'}
             </button>
             <button
               onClick={onCompute}
