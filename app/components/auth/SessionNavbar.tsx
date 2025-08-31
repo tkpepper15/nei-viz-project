@@ -13,10 +13,15 @@ export const SessionNavbar: React.FC = () => {
     sessionName: null, 
     savedProfiles: [], 
     visualizationSettings: { visualizationType: 'spider3d' },
-    performanceSettings: {},
+    performanceSettings: { maxWorkers: 4 },
+    environment: { memoryLimit: '8GB' },
     taggedModels: []
   }; 
   const isReady = false;
+  const actions = {
+    createSession: (name: string) => console.log('Session creation disabled for deployment:', name),
+    saveConfiguration: (config: Record<string, unknown>) => console.log('Configuration saving disabled for deployment:', config)
+  };
   const [showSessionMenu, setShowSessionMenu] = useState(false)
 
   if (!user) {
