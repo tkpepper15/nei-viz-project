@@ -23,6 +23,7 @@ export interface SessionActions {
     circuitParameters: Record<string, unknown>
     resnormValue?: number
     notes?: string
+    configurationId?: string
   }) => Promise<boolean>
 }
 
@@ -124,6 +125,7 @@ export const useSessionManagement = () => {
     circuitParameters: Record<string, unknown>
     resnormValue?: number
     notes?: string
+    configurationId?: string
   }): Promise<boolean> => {
     console.log('🏷️ TagModel called with:', { 
       modelId: modelData.modelId, 
@@ -163,7 +165,7 @@ export const useSessionManagement = () => {
       const insertData = {
         user_id: sessionState.userId,
         session_id: sessionState.sessionId,
-        configuration_id: 'default', // Required field for TypeScript
+        configuration_id: modelData.configurationId || 'default', // Use passed configurationId or default
         model_id: modelData.modelId,
         tag_name: modelData.tagName,
         tag_category: modelData.tagCategory || 'user',
