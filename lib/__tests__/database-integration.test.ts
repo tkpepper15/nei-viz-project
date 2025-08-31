@@ -7,7 +7,6 @@
 
 import DatabaseService from '../database-service'
 import MLDataInterface from '../ml-data-interface'
-import { Database } from '../database.types'
 
 // Mock user ID for testing
 const TEST_USER_ID = 'test-user-123'
@@ -37,7 +36,6 @@ const TEST_MODEL_DATA = {
 
 describe('Database Service Integration Tests', () => {
   let testSessionId: string
-  let testConfigId: string
 
   beforeAll(async () => {
     // Initialize test session

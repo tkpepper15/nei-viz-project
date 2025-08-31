@@ -98,7 +98,7 @@ export const useSimpleSessionManagement = () => {
           environment: newSession.environment_variables as SessionEnvironment,
           visualizationSettings: newSession.visualization_settings as VisualizationSettings,
           performanceSettings: newSession.performance_settings as PerformanceSettings,
-          savedProfiles: newSession.saved_profiles as SavedProfile[]
+          savedProfiles: []
         })
       } catch (error) {
         console.error('Failed to initialize session:', error)
@@ -133,7 +133,7 @@ export const useSimpleSessionManagement = () => {
         environment: newSession.environment_variables as SessionEnvironment,
         visualizationSettings: newSession.visualization_settings as VisualizationSettings,
         performanceSettings: newSession.performance_settings as PerformanceSettings,
-        savedProfiles: newSession.saved_profiles as SavedProfile[]
+        savedProfiles: []
       }))
 
       return true
@@ -162,7 +162,7 @@ export const useSimpleSessionManagement = () => {
         environment: session.environment_variables as SessionEnvironment,
         visualizationSettings: session.visualization_settings as VisualizationSettings,
         performanceSettings: session.performance_settings as PerformanceSettings,
-        savedProfiles: session.saved_profiles as SavedProfile[]
+        savedProfiles: []
       }))
 
       return true
@@ -203,14 +203,14 @@ export const useSimpleSessionManagement = () => {
     try {
       const updatedSettings = { ...sessionState.visualizationSettings, ...settings }
       const { error } = await SessionDatabaseService.session.updateSession(sessionState.sessionId, {
-        visualization_settings: updatedSettings
+        visualization_settings: updatedSettings as VisualizationSettings
       })
 
       if (error) return false
 
       setSessionState(prev => ({
         ...prev,
-        visualizationSettings: updatedSettings
+        visualizationSettings: updatedSettings as VisualizationSettings
       }))
 
       return true
@@ -227,14 +227,14 @@ export const useSimpleSessionManagement = () => {
     try {
       const updatedSettings = { ...sessionState.performanceSettings, ...settings }
       const { error } = await SessionDatabaseService.session.updateSession(sessionState.sessionId, {
-        performance_settings: updatedSettings
+        performance_settings: updatedSettings as PerformanceSettings
       })
 
       if (error) return false
 
       setSessionState(prev => ({
         ...prev,
-        performanceSettings: updatedSettings
+        performanceSettings: updatedSettings as PerformanceSettings
       }))
 
       return true
@@ -261,7 +261,7 @@ export const useSimpleSessionManagement = () => {
 
       setSessionState(prev => ({
         ...prev,
-        savedProfiles: data.saved_profiles as SavedProfile[]
+        savedProfiles: [newProfile, ...prev.savedProfiles]
       }))
 
       return true
@@ -282,7 +282,7 @@ export const useSimpleSessionManagement = () => {
 
       setSessionState(prev => ({
         ...prev,
-        savedProfiles: data.saved_profiles as SavedProfile[]
+        savedProfiles: prev.savedProfiles.filter(p => p.id !== profileId)
       }))
 
       return true
@@ -330,7 +330,7 @@ export const useSimpleSessionManagement = () => {
           environment: activeSession.environment_variables as SessionEnvironment,
           visualizationSettings: activeSession.visualization_settings as VisualizationSettings,
           performanceSettings: activeSession.performance_settings as PerformanceSettings,
-          savedProfiles: activeSession.saved_profiles as SavedProfile[]
+          savedProfiles: prev.savedProfiles // Keep existing saved profiles
         }))
         return true
       }

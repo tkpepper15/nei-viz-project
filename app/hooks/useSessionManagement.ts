@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { getUser } from '../../lib/supabase'
+import { Json } from '../../lib/database.types'
 import DatabaseService, { SessionEnvironment, VisualizationSettings, PerformanceSettings } from '../../lib/database-service'
 
 export interface SessionState {
@@ -31,10 +32,10 @@ export interface SessionActions {
     modelId: string
     tagName: string
     tagCategory?: string
-    circuitParameters: any
+    circuitParameters: Record<string, unknown>
     resnormValue?: number
-    impedanceSpectrum?: any
-    context?: any
+    impedanceSpectrum?: Record<string, unknown>
+    context?: Record<string, unknown>
     notes?: string
   }) => Promise<boolean>
   refreshSession: () => Promise<boolean>
@@ -72,17 +73,17 @@ export const useSessionManagement = () => {
         const { data: activeSession } = await DatabaseService.session.getActiveSession(user.id)
         if (activeSession) {
           // Update session activity
-          await DatabaseService.session.updateSessionActivity(activeSession.session_id)
+          await DatabaseService.session.updateSessionActivity(activeSession.id)
           
           setSessionState({
             userId: user.id,
-            sessionId: activeSession.session_id,
+            sessionId: activeSession.id,
             sessionName: activeSession.session_name,
             isLoading: false,
             error: null,
-            environment: activeSession.environment_variables as SessionEnvironment,
-            visualizationSettings: activeSession.visualization_settings as VisualizationSettings,
-            performanceSettings: activeSession.performance_settings as PerformanceSettings
+            environment: null,
+            visualizationSettings: null,
+            performanceSettings: null
           })
         } else {
           // Create default session with unique timestamp
@@ -122,9 +123,9 @@ export const useSessionManagement = () => {
             sessionName: newSession.session_name,
             isLoading: false,
             error: null,
-            environment: newSession.environment_variables as SessionEnvironment,
-            visualizationSettings: newSession.visualization_settings as VisualizationSettings,
-            performanceSettings: newSession.performance_settings as PerformanceSettings
+            environment: newSession.environment_variables as unknown as SessionEnvironment,
+            visualizationSettings: newSession.visualization_settings as unknown as VisualizationSettings,
+            performanceSettings: newSession.performance_settings as unknown as PerformanceSettings
           })
         }
       } catch (error) {
@@ -186,9 +187,9 @@ export const useSessionManagement = () => {
         ...prev,
         sessionId: newSession.id,
         sessionName: newSession.session_name,
-        environment: newSession.environment_variables as SessionEnvironment,
-        visualizationSettings: newSession.visualization_settings as VisualizationSettings,
-        performanceSettings: newSession.performance_settings as PerformanceSettings
+        environment: newSession.environment_variables as unknown as SessionEnvironment,
+        visualizationSettings: newSession.visualization_settings as unknown as VisualizationSettings,
+        performanceSettings: newSession.performance_settings as unknown as PerformanceSettings
       }))
 
       return true
@@ -216,9 +217,9 @@ export const useSessionManagement = () => {
         ...prev,
         sessionId: session.id,
         sessionName: session.session_name,
-        environment: session.environment_variables as SessionEnvironment,
-        visualizationSettings: session.visualization_settings as VisualizationSettings,
-        performanceSettings: session.performance_settings as PerformanceSettings
+        environment: session.environment_variables as unknown as SessionEnvironment,
+        visualizationSettings: session.visualization_settings as unknown as VisualizationSettings,
+        performanceSettings: session.performance_settings as unknown as PerformanceSettings
       }))
 
       return true
@@ -235,7 +236,7 @@ export const useSessionManagement = () => {
     try {
       const updatedEnvironment = { ...sessionState.environment, ...environment }
       const { error } = await DatabaseService.session.updateSession(sessionState.sessionId, {
-        environment_variables: updatedEnvironment
+        environment_variables: updatedEnvironment as unknown as Json
       })
 
       if (error) {
@@ -272,7 +273,7 @@ export const useSessionManagement = () => {
 
       setSessionState(prev => ({
         ...prev,
-        visualizationSettings: updatedSettings
+        visualizationSettings: updatedSettings as VisualizationSettings
       }))
 
       return true
@@ -299,7 +300,7 @@ export const useSessionManagement = () => {
 
       setSessionState(prev => ({
         ...prev,
-        performanceSettings: updatedSettings
+        performanceSettings: updatedSettings as PerformanceSettings
       }))
 
       return true
@@ -342,42 +343,105 @@ export const useSessionManagement = () => {
     modelId: string
     tagName: string
     tagCategory?: string
-    circuitParameters: any
+    circuitParameters: Record<string, unknown>
     resnormValue?: number
-    impedanceSpectrum?: any
-    context?: any
+    impedanceSpectrum?: Record<string, unknown>
+    context?: Record<string, unknown>
     notes?: string
   }): Promise<boolean> => {
-    if (!sessionState.userId || !sessionState.sessionId) return false
+    console.log('🏷️ TagModel called with:', { 
+      modelId: modelData.modelId, 
+      tagName: modelData.tagName,
+      hasUserId: !!sessionState.userId,
+      hasSessionId: !!sessionState.sessionId,
+      userId: sessionState.userId,
+      sessionId: sessionState.sessionId,
+      isLoading: sessionState.isLoading,
+      error: sessionState.error
+    });
+
+    // Debug: Let's also test basic Supabase connectivity
+    console.log('🔗 Testing basic Supabase connectivity...');
+    try {
+      const { supabase: testSupabase } = await import('../../lib/supabase');
+      const { data: authUser, error: authError } = await testSupabase.auth.getUser();
+      console.log('🔗 Auth check:', { user: authUser?.user?.id, error: authError });
+    } catch (connectError) {
+      console.error('🔗 Supabase connection failed:', connectError);
+    }
+
+    if (!sessionState.userId) {
+      console.error('❌ No userId available for tagging');
+      return false;
+    }
+
+    if (!sessionState.sessionId) {
+      console.error('❌ No sessionId available for tagging');
+      return false;
+    }
 
     try {
       // Use simplified approach - direct Supabase insert to match simplified schema
       const { supabase } = await import('../../lib/supabase')
-      const { error } = await supabase
+      
+      const insertData = {
+        user_id: sessionState.userId,
+        session_id: sessionState.sessionId,
+        model_id: modelData.modelId,
+        tag_name: modelData.tagName,
+        tag_category: modelData.tagCategory || 'user',
+        circuit_parameters: JSON.stringify(modelData.circuitParameters), // Convert to JSON string like existing data
+        resnorm_value: modelData.resnormValue,
+        notes: modelData.notes,
+        is_interesting: false // Add missing field from schema
+      };
+
+      console.log('🏷️ Attempting to insert tag with data:', insertData);
+
+      // First, let's check if the table exists by testing a simple select
+      console.log('🔍 Testing table access first...');
+      const { data: testData, error: testError } = await supabase
         .from('tagged_models')
-        .insert({
-          user_id: sessionState.userId,
-          session_id: sessionState.sessionId,
-          model_id: modelData.modelId,
-          tag_name: modelData.tagName,
-          tag_category: modelData.tagCategory || 'user',
-          circuit_parameters: modelData.circuitParameters,
-          resnorm_value: modelData.resnormValue,
-          notes: modelData.notes,
-          is_interesting: true
-        })
+        .select('*', { count: 'exact', head: true });
+
+      console.log('🔍 Table access test result:', { count: testData, error: testError });
+
+      if (testError) {
+        console.error('❌ Table access test failed:', testError);
+        console.error('❌ Table test error details:', JSON.stringify(testError, null, 2));
+        return false;
+      }
+
+      const { data, error } = await supabase
+        .from('tagged_models')
+        .insert(insertData)
+        .select()
+
+      console.log('🏷️ Full Supabase response:', { data, error });
 
       if (error) {
-        console.error('Failed to tag model:', error)
+        console.error('❌ Supabase error tagging model:', error);
+        console.error('❌ Raw error object:', JSON.stringify(error, null, 2));
+        console.error('❌ Error details:', { 
+          message: error.message, 
+          details: error.details, 
+          hint: error.hint, 
+          code: error.code 
+        });
         return false
       }
 
+      console.log('✅ Successfully tagged model:', data);
       return true
     } catch (error) {
-      console.error('Error tagging model:', error)
+      console.error('❌ Exception while tagging model:', error);
+      if (error instanceof Error) {
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
       return false
     }
-  }, [sessionState.userId, sessionState.sessionId])
+  }, [sessionState.userId, sessionState.sessionId, sessionState.isLoading, sessionState.error])
 
   // Refresh session data
   const refreshSession = useCallback(async (): Promise<boolean> => {
@@ -385,12 +449,12 @@ export const useSessionManagement = () => {
 
     try {
       const { data: activeSession } = await DatabaseService.session.getActiveSession(sessionState.userId)
-      if (activeSession && activeSession.session_id === sessionState.sessionId) {
+      if (activeSession && activeSession.id === sessionState.sessionId) {
         setSessionState(prev => ({
           ...prev,
-          environment: activeSession.environment_variables as SessionEnvironment,
-          visualizationSettings: activeSession.visualization_settings as VisualizationSettings,
-          performanceSettings: activeSession.performance_settings as PerformanceSettings
+          environment: null,
+          visualizationSettings: null,
+          performanceSettings: null
         }))
         return true
       }

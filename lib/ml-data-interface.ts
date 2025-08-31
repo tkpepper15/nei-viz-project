@@ -7,7 +7,6 @@
  */
 
 import DatabaseService from './database-service'
-import { Database } from './database.types'
 
 // ML Data Types
 export interface MLFeatureMatrix {
@@ -50,7 +49,7 @@ export interface MLDataset {
 export interface MLExperimentConfig {
   modelType: 'regression' | 'classification' | 'optimization'
   algorithm: 'neural_network' | 'random_forest' | 'gaussian_process' | 'svm' | 'xgboost'
-  hyperparameters: Record<string, any>
+  hyperparameters: Record<string, unknown>
   crossValidation: {
     folds: number
     strategy: 'kfold' | 'stratified' | 'time_series'
@@ -115,10 +114,10 @@ export class MLDataExtractionService {
     const features: number[][] = []
     const targets: number[] = []
     const featureNames = ['Rsh', 'Ra', 'Ca', 'Rb', 'Cb']
-    const impedanceSpectra: any[] = []
+    const impedanceSpectra: Record<string, unknown>[] = []
 
     for (const model of filteredModels) {
-      const params = model.circuit_parameters as any
+      const params = model.circuit_parameters as Record<string, unknown>
       
       // Extract circuit parameters as features
       const featureRow = [
@@ -164,6 +163,7 @@ export class MLDataExtractionService {
    */
   static async extractFromComputationResults(
     configurationIds: string[],
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     options: {
       includeFailedComputations?: boolean
       maxSamples?: number
@@ -181,7 +181,7 @@ export class MLDataExtractionService {
     // Extract and process data from computation results
     const features: number[][] = []
     const targets: number[] = []
-    const impedanceData: any[] = []
+    const impedanceData: Record<string, unknown>[] = []
 
     // Process each computation result
     for (const result of computationResults) {
@@ -606,7 +606,7 @@ export class MLDataInterface {
   ): Promise<{
     dataset: MLDataset
     exportedData: string | object
-    metadata: any
+    metadata: Record<string, unknown>
   }> {
     // Step 1: Extract data
     let extractedData

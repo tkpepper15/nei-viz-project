@@ -51,6 +51,7 @@ export class ProfilesService {
 
     // Test table existence first (reduced logging when successful)
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data: tableCheck, error: tableError } = await supabase
         .from('user_profiles')
         .select('count')

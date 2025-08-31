@@ -55,6 +55,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [frequencyPoints, setFrequencyPoints] = useState<number[]>([]);
   
   // Resnorm calculation configuration - fixed to SSR method only
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [resnormConfig, setResnormConfig] = useState<ResnormConfig>({
     method: ResnormMethod.SSR, // Sum of Squared Residuals method only
     useRangeAmplification: false,
@@ -79,11 +80,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     actualComputedPoints, setActualComputedPoints,
     memoryLimitedPoints, setMemoryLimitedPoints,
     estimatedMemoryUsage, setEstimatedMemoryUsage,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars  
     userVisualizationPercentage,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     maxVisualizationPoints,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     isUserControlledLimits,
     calculateEffectiveVisualizationLimit,
     resnormGroups, setResnormGroups,
@@ -326,7 +325,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       Ca: 0.0000042000000000000004,
       Rb: 6210,
       Cb: 0.0000035,
-      frequency_range: [0.1, 100000]
+      frequency_range: [0.1, 100000] as [number, number]
     };
     
     setParameters(newParameters);
@@ -450,14 +449,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           id: index,
           parameters: result.parameters,
           resnorm: result.resnorm,
-          // Transform spectrum format from worker (freq, imag) to expected format (frequency, imaginary)
-          spectrum: result.spectrum?.map(point => ({
-            frequency: point.freq,
-            real: point.real,
-            imaginary: point.imag,
-            magnitude: point.mag,
-            phase: point.phase
-          })) || [],
+          // Keep spectrum format as-is since BackendMeshPoint expects {freq, imag, mag} format
+          spectrum: result.spectrum || [],
           isReference: false
         }));
 
@@ -547,7 +540,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setIsComputingGrid, setGridError, setComputationProgress, setComputationSummary,
     setGridResults, setGridResultsWithIds, setTotalGridPoints, setActualComputedPoints,
     setGridParameterArrays, savedProfilesState.selectedProfile, profileActions,
-    updateStatusMessage
+    updateStatusMessage, configurationName
   ]);
   
   // Multi-select functions
@@ -1218,7 +1211,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         return [];
       }
     }
-  }, [computeGridParallel, updateStatusMessage, generateSyntheticProfileData]);
+  }, [computeGridParallel, updateStatusMessage, generateSyntheticProfileData, resnormConfig]);
 
   // Updated grid computation using Web Workers for parallel processing
   const handleComputeRegressionMesh = useCallback(async () => {
@@ -1833,7 +1826,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       return hasChanged ? values : prev;
     });
-  }, []);
+  }, [setGridParameterArrays]);
 
   // Note: Grid clearing functionality is now handled by resetComputationState from useComputationState hook
 
@@ -1851,7 +1844,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       console.error('Error cancelling computation:', error);
       updateStatusMessage('❌ Error cancelling computation');
     }
-  }, [cancelComputation, setIsComputingGrid, resetComputationState, updateStatusMessage]);
+  }, [cancelComputation, setIsComputingGrid, resetComputationState, updateStatusMessage, profileActions]);
 
   // Handler for saving a profile
   // Helper function to check if two circuit parameter sets are identical
@@ -1974,7 +1967,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       updateStatusMessage(`Error saving profile "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
-  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, savedProfilesState.profiles, areParametersIdentical, areSettingsIdentical, profileActions]);
+  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, savedProfilesState.profiles, savedProfilesState.selectedProfile, areParametersIdentical, areSettingsIdentical, profileActions]);
 
 
 
@@ -2157,6 +2150,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Handle model tagging from visualization components
   const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string, profileId?: string) => {
+    console.log('🏷️ HandleModelTag called:', {
+      modelId: model.id,
+      tagName,
+      hasUser: !!user,
+      profileId,
+      selectedProfile: savedProfilesState.selectedProfile,
+      sessionReady: sessionManagement.isReady,
+      sessionError: sessionManagement.hasError,
+      sessionState: sessionManagement.sessionState
+    });
+
     const currentProfileId = profileId || savedProfilesState.selectedProfile;
     if (!currentProfileId) {
       console.warn('No profile selected for tagging model');
@@ -2170,13 +2174,19 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return;
     }
 
+    if (!sessionManagement.isReady) {
+      console.warn('Session not ready for tagging model');
+      updateStatusMessage('Session not ready - please wait for initialization');
+      return;
+    }
+
     try {
       // Use session management's tagModel function for proper database integration
       const success = await sessionManagement.actions.tagModel({
         modelId: model.id,
         tagName,
         tagCategory: 'user',
-        circuitParameters: model.parameters,
+        circuitParameters: model.parameters as unknown as Record<string, unknown>,
         resnormValue: model.resnorm || 0,
         notes: `Tagged from visualization at ${new Date().toLocaleString()}`
       });
@@ -2199,7 +2209,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         });
       } else {
         console.error('❌ Failed to tag model via session management');
-        updateStatusMessage('Failed to tag model - please check your connection');
+        console.log('🔍 Session state debug:', {
+          isReady: sessionManagement.isReady,
+          hasError: sessionManagement.hasError,
+          sessionState: sessionManagement.sessionState
+        });
+        updateStatusMessage('Failed to tag model - session not ready or authentication issue');
       }
     } catch (error) {
       console.error('❌ Error during model tagging:', error);
@@ -2304,7 +2319,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         profileActions.setPendingComputeProfile(null);
       }
     }
-  }, [savedProfilesState.pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, parameters.Rsh, parameters.Ra, handleComputeRegressionMesh, updateStatusMessage]);
+  }, [savedProfilesState.pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, parameters.Rsh, parameters.Ra, handleComputeRegressionMesh, updateStatusMessage, profileActions]);
 
 
   // Modify the main content area to show the correct tab content
@@ -2930,6 +2945,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     gridParameterArrays={gridParameterArrays}
                     opacityExponent={opacityExponent}
                     groundTruthParams={parameters}
+                    minFreq={minFreq}
+                    maxFreq={maxFreq}
                   />
                 </div>
               ) : (
@@ -3008,7 +3025,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     performanceSettings={performanceSettings}
                     numPoints={numPoints}
                     resnormConfig={resnormConfig}
-                    onResnormConfigChange={setResnormConfig}
                     groupPortion={staticRenderSettings.groupPortion}
                     onGroupPortionChange={(value) => setStaticRenderSettings({...staticRenderSettings, groupPortion: value})}
                     taggedModels={taggedModels}

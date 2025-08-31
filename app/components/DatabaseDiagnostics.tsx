@@ -59,9 +59,9 @@ export const DatabaseDiagnostics: React.FC = () => {
             <div className={`text-sm ${diagnostics.connection.success ? 'text-green-400' : 'text-red-400'}`}>
               {diagnostics.connection.success ? '✅ Connected' : '❌ Connection Failed'}
             </div>
-            {diagnostics.connection.details && (
+            {!!diagnostics.connection.details && (
               <pre className="text-xs text-neutral-400 mt-2 overflow-x-auto">
-                {JSON.stringify(diagnostics.connection.details, null, 2)}
+                {JSON.stringify(diagnostics.connection.details as Record<string, unknown>, null, 2)}
               </pre>
             )}
           </div>

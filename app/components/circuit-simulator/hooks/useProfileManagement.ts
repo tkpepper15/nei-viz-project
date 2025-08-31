@@ -28,7 +28,10 @@ export const useProfileManagement = ({
   
   const initialState: SavedProfilesState = {
     profiles: [],
-    selectedProfile: null
+    selectedProfile: null,
+    pendingComputeProfile: null,
+    isMultiSelectMode: false,
+    selectedCircuits: []
   };
 
   const [savedProfilesState, setSavedProfilesState, hasLoadedFromStorage] = useLocalStorage(

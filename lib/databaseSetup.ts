@@ -4,11 +4,12 @@ export class DatabaseSetup {
   /**
    * Test Supabase connection and authentication
    */
-  static async testConnection(): Promise<{success: boolean, error?: string, details?: any}> {
+  static async testConnection(): Promise<{success: boolean, error?: string, details?: Record<string, unknown>}> {
     try {
       console.log('🔍 Testing Supabase connection...');
       
       // Test 1: Basic connection using user_profiles table since it exists
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data: connectionTest, error: connectionError } = await supabase
         .from('user_profiles')
         .select('count')
@@ -33,6 +34,7 @@ export class DatabaseSetup {
       }
       
       // Also check session
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       const authStatus = {
@@ -70,6 +72,7 @@ export class DatabaseSetup {
     try {
       console.log('🗄️ Checking user_profiles table...');
       
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data, error } = await supabase
         .from('user_profiles')
         .select('count')
@@ -240,9 +243,9 @@ export class DatabaseSetup {
    * Run comprehensive database diagnostics
    */
   static async runDiagnostics(): Promise<{
-    connection: any,
-    table: any,
-    profileTest?: any,
+    connection: {success: boolean, error?: string, details?: Record<string, unknown>},
+    table: {exists: boolean, error?: string, canAccess?: boolean},
+    profileTest?: {success: boolean, error?: string, profileId?: string},
     recommendations: string[]
   }> {
     console.log('🔬 Running database diagnostics...');

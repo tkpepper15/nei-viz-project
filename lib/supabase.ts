@@ -21,7 +21,7 @@ export const signIn = async (email: string, password: string) => {
   return { data, error }
 }
 
-export const signUp = async (email: string, password: string, metadata?: Record<string, any>) => {
+export const signUp = async (email: string, password: string, metadata?: Record<string, unknown>) => {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -193,7 +193,7 @@ export const getComputationResults = async (configId: string) => {
 // Real-time subscriptions
 export const subscribeToUserConfigurations = (
   userId: string,
-  callback: (payload: any) => void
+  callback: (payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) => void
 ) => {
   return supabase
     .channel('user_configurations')
@@ -394,7 +394,7 @@ export const batchUpdateSessionStats = async (sessionId: string, stats: {
 // Real-time subscriptions for ML workflows
 export const subscribeToMLTrainingProgress = (
   userId: string,
-  callback: (payload: any) => void
+  callback: (payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) => void
 ) => {
   return supabase
     .channel('ml_training_progress')
@@ -424,7 +424,7 @@ export const subscribeToMLTrainingProgress = (
 export const subscribeToTaggedModels = (
   userId: string,
   sessionId: string,
-  callback: (payload: any) => void
+  callback: (payload: { eventType: string; new: Record<string, unknown>; old: Record<string, unknown> }) => void
 ) => {
   return supabase
     .channel('tagged_models_updates')

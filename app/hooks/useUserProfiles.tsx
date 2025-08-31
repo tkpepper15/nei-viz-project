@@ -18,6 +18,35 @@ export const useUserProfiles = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Enhanced localStorage fallback system
+  const loadProfilesFromLocalStorage = useCallback((): SavedProfile[] => {
+    try {
+      // Try multiple localStorage keys for backward compatibility
+      const keys = [
+        `user-profiles-${user?.id}`, // User-specific profiles
+        'nei-viz-saved-profiles',     // App-specific profiles
+        'savedProfiles'               // Legacy profiles
+      ];
+      
+      for (const key of keys) {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+          console.log('📂 Found profiles in localStorage key:', key);
+          const data = JSON.parse(stored);
+          const profiles = Array.isArray(data) ? data : (data.profiles || []);
+          if (profiles.length > 0) {
+            return profiles;
+          }
+        }
+      }
+      
+      console.log('📭 No profiles found in localStorage');
+    } catch (error) {
+      console.error('❌ Error loading profiles from localStorage:', error);
+    }
+    return [];
+  }, [user]);
+
   // Load profiles when user changes
   const loadProfiles = useCallback(async () => {
     if (!user) {
@@ -63,43 +92,14 @@ export const useUserProfiles = () => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, loadProfilesFromLocalStorage]);
 
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
 
-  // Enhanced localStorage fallback system
-  const loadProfilesFromLocalStorage = (): SavedProfile[] => {
-    try {
-      // Try multiple localStorage keys for backward compatibility
-      const keys = [
-        `user-profiles-${user?.id}`, // User-specific profiles
-        'nei-viz-saved-profiles',     // App-specific profiles
-        'savedProfiles'               // Legacy profiles
-      ];
-      
-      for (const key of keys) {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-          console.log('📂 Found profiles in localStorage key:', key);
-          const data = JSON.parse(stored);
-          const profiles = Array.isArray(data) ? data : (data.profiles || []);
-          if (profiles.length > 0) {
-            return profiles;
-          }
-        }
-      }
-      
-      console.log('📭 No profiles found in localStorage');
-    } catch (error) {
-      console.error('❌ Error loading profiles from localStorage:', error);
-    }
-    return [];
-  };
-
   // Enhanced localStorage save
-  const saveProfilesToLocalStorage = (profiles: SavedProfile[]) => {
+  const saveProfilesToLocalStorage = useCallback((profiles: SavedProfile[]) => {
     try {
       if (user) {
         // Save user-specific profiles
@@ -112,7 +112,7 @@ export const useUserProfiles = () => {
     } catch (error) {
       console.error('❌ Failed to save profiles to localStorage:', error);
     }
-  };
+  }, [user]);
 
   // Helper function to create profile in localStorage when no user is authenticated
   const createLocalProfile = useCallback((
@@ -136,7 +136,7 @@ export const useUserProfiles = () => {
       maxFreq,
       numPoints,
       created: now,
-      updated: now,
+      lastModified: now,
       isComputed: false
     };
     

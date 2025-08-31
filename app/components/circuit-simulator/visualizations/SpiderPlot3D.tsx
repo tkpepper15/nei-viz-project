@@ -394,7 +394,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     
     for (const polygon of sortedPolygons) {
       const projectedVertices = polygon.vertices
-        .map(vertex => project3D(vertex))
+        .map(vertex => project3D(vertex as Point3D))
         .filter(p => p.visible);
       
       if (projectedVertices.length >= 3) {

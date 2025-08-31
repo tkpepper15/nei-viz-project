@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 interface CircuitDiagramProps {
   className?: string;
@@ -16,9 +17,11 @@ export const CircuitDiagram: React.FC<CircuitDiagramProps> = ({
       </div>
       
       <div className="flex justify-center">
-        <img 
+        <Image 
           src="/img_9.png" 
           alt="Circuit diagram showing derivation of equivalent impedance Z_eq(ω) with Ra and Ca in apical membrane (Za), Rb and Cb in basal membrane (Zb), and mathematical formulas"
+          width={800}
+          height={400}
           className="max-w-full h-auto rounded-lg bg-white p-4"
           style={{ maxHeight: '400px' }}
         />
