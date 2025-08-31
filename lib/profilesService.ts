@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { SavedProfile } from '../app/components/circuit-simulator/types/savedProfiles';
 import { CircuitParameters } from '../app/components/circuit-simulator/types/parameters';
+import { Json } from './database.types';
 
 export interface DatabaseProfile {
   id: string;
@@ -83,10 +84,10 @@ export class ProfilesService {
 
     // Now attempt to fetch user profiles
     const { data, error } = await supabase
-      .from('user_profiles')
+      .from('saved_configurations')
       .select('*')
       .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
+      .order('last_used', { ascending: false });
 
     console.log('📊 Query result:', { 
       hasData: !!data, 
@@ -126,15 +127,15 @@ export class ProfilesService {
     description?: string
   ): Promise<SavedProfile> {
     const { data, error } = await supabase
-      .from('user_profiles')
+      .from('saved_configurations')
       .insert({
         user_id: userId,
-        name,
+        name: name,
         description,
-        parameters,
+        circuit_parameters: parameters as unknown as Json,
         grid_size: gridSize,
-        min_freq: minFreq,
-        max_freq: maxFreq,
+        min_frequency: minFreq,
+        max_frequency: maxFreq,
         num_points: numPoints,
         is_computed: false
       })
@@ -154,9 +155,16 @@ export class ProfilesService {
     profileId: string, 
     updates: Partial<Pick<DatabaseProfile, 'name' | 'description' | 'parameters' | 'is_computed' | 'computation_results'>>
   ): Promise<SavedProfile> {
+    // Map updates to correct column names  
+    const mappedUpdates: Record<string, unknown> = {};
+    if (updates.name) mappedUpdates.name = updates.name;
+    if (updates.description !== undefined) mappedUpdates.description = updates.description;
+    if (updates.parameters) mappedUpdates.circuit_parameters = updates.parameters as unknown as Json;
+    mappedUpdates.updated_at = new Date().toISOString();
+
     const { data, error } = await supabase
-      .from('user_profiles')
-      .update(updates)
+      .from('saved_configurations')
+      .update(mappedUpdates)
       .eq('id', profileId)
       .select()
       .single();
@@ -171,7 +179,7 @@ export class ProfilesService {
 
   static async deleteProfile(profileId: string): Promise<void> {
     const { error } = await supabase
-      .from('user_profiles')
+      .from('saved_configurations')
       .delete()
       .eq('id', profileId);
 
@@ -183,7 +191,7 @@ export class ProfilesService {
 
   static async deleteMultipleProfiles(profileIds: string[]): Promise<void> {
     const { error } = await supabase
-      .from('user_profiles')
+      .from('saved_configurations')
       .delete()
       .in('id', profileIds);
 
@@ -193,22 +201,22 @@ export class ProfilesService {
     }
   }
 
-  private static convertDatabaseProfileToSavedProfile(dbProfile: DatabaseProfile): SavedProfile {
+  private static convertDatabaseProfileToSavedProfile(dbProfile: Record<string, unknown>): SavedProfile {
     return {
-      id: dbProfile.id,
-      name: dbProfile.name,
-      description: dbProfile.description,
-      groundTruthParams: dbProfile.parameters,
-      gridSize: dbProfile.grid_size,
-      minFreq: dbProfile.min_freq,
-      maxFreq: dbProfile.max_freq,
-      numPoints: dbProfile.num_points,
-      isComputed: dbProfile.is_computed,
-      computationTime: dbProfile.computation_time,
-      totalPoints: dbProfile.total_points,
-      validPoints: dbProfile.valid_points,
-      created: new Date(dbProfile.created_at).getTime(),
-      lastModified: new Date(dbProfile.updated_at).getTime()
+      id: dbProfile.id as string,
+      name: (dbProfile.configuration_name || dbProfile.name) as string,
+      description: dbProfile.description as string,
+      groundTruthParams: dbProfile.circuit_parameters as CircuitParameters,
+      gridSize: dbProfile.grid_size as number,
+      minFreq: dbProfile.min_frequency as number,
+      maxFreq: dbProfile.max_frequency as number,  
+      numPoints: dbProfile.num_points as number,
+      isComputed: dbProfile.is_computed as boolean,
+      computationTime: dbProfile.computation_time as number,
+      totalPoints: dbProfile.total_points as number,
+      validPoints: dbProfile.valid_points as number,
+      created: new Date(dbProfile.created_at as string).getTime(),
+      lastModified: new Date(dbProfile.updated_at as string).getTime()
     };
   }
 }
