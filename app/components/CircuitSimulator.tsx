@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Image from 'next/image';
 import 'katex/dist/katex.min.css';
 import { 
@@ -13,6 +13,7 @@ import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/work
 import { useComputationState } from './circuit-simulator/hooks/useComputationState';
 import { useUserProfiles } from '../hooks/useUserProfiles';
 import { useSessionManagement } from '../hooks/useSessionManagement';
+import { useCircuitConfigurations } from '../hooks/useCircuitConfigurations';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
@@ -39,11 +40,26 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const { user, loading: authLoading, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   
-  // User profiles (replaces savedProfilesState)
-  const { profilesState: savedProfilesState, actions: profileActions } = useUserProfiles();
-  
   // Initialize session management
   const sessionManagement = useSessionManagement();
+  
+  // Circuit configurations management (replaces savedProfilesState)
+  const {
+    configurations: circuitConfigurations, // ENABLED: For sidebar display
+    activeConfigId,
+    // activeConfiguration, // Not used directly
+    loading: configLoading,
+    // error: configError, // Not used
+    createConfiguration,
+    updateConfiguration, // NEEDED: For handleSaveProfile
+    deleteConfiguration, // ENABLED: For profile deletion
+    deleteMultipleConfigurations, // ENABLED: For bulk deletion
+    setActiveConfiguration,
+    hasConfigurations
+  } = useCircuitConfigurations(sessionManagement.sessionState.userId || undefined);
+
+  // User profiles (for backward compatibility - will be phased out)
+  const { profilesState: savedProfilesState, actions: profileActions } = useUserProfiles();
   
   // Initialize worker manager for parallel computation
   const { computeGridParallel, cancelComputation } = useWorkerManager();
@@ -96,6 +112,28 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     clearAllComputationData, // eslint-disable-line @typescript-eslint/no-unused-vars
     lastComputedResults
   } = useComputationState();
+
+  // Convert CircuitConfigurations to SavedProfiles format for backward compatibility
+  const convertedProfiles = useMemo((): SavedProfile[] => {
+    if (!circuitConfigurations) return [];
+    
+    return circuitConfigurations.map(config => ({
+      id: config.id,
+      name: config.name,
+      description: config.description || '',
+      created: new Date(config.createdAt).getTime(),
+      lastModified: new Date(config.updatedAt).getTime(),
+      gridSize: config.gridSize,
+      minFreq: config.minFreq,
+      maxFreq: config.maxFreq,
+      numPoints: config.numPoints,
+      groundTruthParams: config.circuitParameters,
+      isComputed: config.isComputed,
+      computationTime: config.computationTime,
+      totalPoints: config.totalPoints,
+      validPoints: config.validPoints
+    }));
+  }, [circuitConfigurations]);
 
   // Enhanced UI coordination refs for large dataset processing
   const progressUpdateQueueRef = useRef<WorkerProgress[]>([]);
@@ -549,73 +587,76 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setSelectedCircuits([]);
   }, [isMultiSelectMode]);
   
-  const handleSelectCircuit = useCallback((profileId: string) => {
+  const handleSelectCircuit = useCallback((configId: string) => {
     if (isMultiSelectMode) {
       setSelectedCircuits(prev => 
-        prev.includes(profileId) 
-          ? prev.filter(id => id !== profileId)
-          : [...prev, profileId]
+        prev.includes(configId) 
+          ? prev.filter(id => id !== configId)
+          : [...prev, configId]
       );
     } else {
       // Normal single selection behavior
-      // Clear any pending computation
-      profileActions.setPendingComputeProfile(null);
-      
-      // Clear existing grid results when switching profiles
+      // Clear existing grid results when switching configurations
       resetComputationState();
       
-      // Select the profile and mark computation as cleared
-      profileActions.selectProfile(profileId);
+      // Set active configuration in both hooks
+      setActiveConfiguration(configId);
+      sessionManagement.actions.setActiveCircuitConfig(configId);
       
-      const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-      if (profile) {
-        // Load profile settings into current state
-        setGridSize(profile.gridSize);
-        setMinFreq(profile.minFreq);
-        setMaxFreq(profile.maxFreq);
-        setNumPoints(profile.numPoints);
-        setParameters(profile.groundTruthParams);
+      const config = circuitConfigurations?.find(c => c.id === configId);
+      if (config) {
+        // Load configuration settings into current state
+        setGridSize(config.gridSize);
+        setMinFreq(config.minFreq);
+        setMaxFreq(config.maxFreq);
+        setNumPoints(config.numPoints);
+        setParameters(config.circuitParameters);
         
-        // Auto-fill configuration name with profile name
-        setConfigurationName(profile.name);
+        // Auto-fill configuration name with config name
+        setConfigurationName(config.name);
         
         // Update frequencies based on loaded settings
-        updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+        updateFrequencies(config.minFreq, config.maxFreq, config.numPoints);
         
         // Mark parameters as changed to enable recompute
         setParameterChanged(true);
         
-        updateStatusMessage(`Loaded profile: ${profile.name} - Previous grid data cleared, ready to compute`);
+        updateStatusMessage(`Loaded configuration: ${config.name} - Previous grid data cleared, ready to compute`);
       }
     }
-  }, [isMultiSelectMode, resetComputationState, profileActions, savedProfilesState.profiles, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage]);
+  }, [isMultiSelectMode, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage]);
   
-  const handleBulkDelete = useCallback(() => {
+  const handleBulkDelete = useCallback(async () => {
     if (selectedCircuits.length === 0) return;
     
-    // Check if currently selected profile is being deleted
-    const wasCurrentlySelectedDeleted = selectedCircuits.includes(savedProfilesState.selectedProfile || '');
+    // Check if currently selected configuration is being deleted
+    const wasCurrentlySelectedDeleted = selectedCircuits.includes(activeConfigId || '');
     if (wasCurrentlySelectedDeleted) {
       resetComputationState();
     }
     
-    // Remove selected profiles using the new actions
-    profileActions.deleteMultipleProfiles(selectedCircuits);
+    // Remove selected circuit configurations
+    const success = await deleteMultipleConfigurations(selectedCircuits);
     
-    if (wasCurrentlySelectedDeleted) {
-      profileActions.selectProfile(null);
+    if (success) {
+      if (wasCurrentlySelectedDeleted) {
+        setActiveConfiguration(null);
+        // Note: SessionManagement doesn't have a clear method, so we only set local state to null
+      }
+      
+      const deletedCount = selectedCircuits.length;
+      setSelectedCircuits([]);
+      setIsMultiSelectMode(false);
+      
+      updateStatusMessage(
+        wasCurrentlySelectedDeleted 
+          ? `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted and grid data cleared`
+          : `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted`
+      );
+    } else {
+      updateStatusMessage('Failed to delete selected circuits');
     }
-    
-    const deletedCount = selectedCircuits.length;
-    setSelectedCircuits([]);
-    setIsMultiSelectMode(false);
-    
-    updateStatusMessage(
-      wasCurrentlySelectedDeleted 
-        ? `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted and grid data cleared`
-        : `${deletedCount} circuit${deletedCount > 1 ? 's' : ''} deleted`
-    );
-  }, [selectedCircuits, savedProfilesState.selectedProfile, resetComputationState, profileActions, updateStatusMessage]);
+  }, [selectedCircuits, activeConfigId, resetComputationState, setActiveConfiguration, updateStatusMessage, deleteMultipleConfigurations]);
   
   // Current memory usage for performance monitoring
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -827,6 +868,87 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setShowAuthModal(true);
     }
   }, [user, authLoading]);
+
+  // Auto-create default circuit configuration when user has none (only once)
+  useEffect(() => {
+    const createDefaultConfig = async () => {
+      // Guard against multiple creation attempts
+      if (!sessionManagement.sessionState.userId || 
+          configLoading || 
+          hasConfigurations ||
+          sessionManagement.sessionState.isLoading) {
+        return;
+      }
+
+      console.log('🔧 No circuit configurations found, creating default...');
+      
+      const defaultConfig = {
+        name: 'Default Circuit Configuration',
+        description: 'Automatically created default configuration',
+        circuitParameters: {
+          Rsh: 5005,
+          Ra: 5005,
+          Ca: 0.00002505,
+          Rb: 5005,
+          Cb: 0.00002505,
+          frequency_range: [0.1, 100000] as [number, number]
+        },
+        gridSize: 9,
+        minFreq: 0.1,
+        maxFreq: 100000,
+        numPoints: 100
+      };
+
+      const newConfig = await createConfiguration(defaultConfig);
+      
+      if (newConfig) {
+        console.log('✅ Default circuit configuration created:', newConfig.id);
+        // Set it as active in session
+        await sessionManagement.actions.setActiveCircuitConfig(newConfig.id);
+        updateStatusMessage('Default circuit configuration created');
+      } else {
+        console.error('❌ Failed to create default circuit configuration');
+        updateStatusMessage('Failed to create circuit configuration');
+      }
+    };
+
+    createDefaultConfig();
+  }, [sessionManagement.sessionState.userId, sessionManagement.sessionState.isLoading, configLoading, hasConfigurations, createConfiguration, sessionManagement.actions, updateStatusMessage]);
+
+  // Synchronize session's active circuit config with local state
+  useEffect(() => {
+    const syncActiveConfig = async () => {
+      const sessionConfigId = sessionManagement.sessionState.currentCircuitConfigId;
+      
+      // Case 1: Session has config but local state doesn't - sync to local
+      if (sessionConfigId && !activeConfigId) {
+        console.log('🔄 Syncing session config to local state:', sessionConfigId);
+        setActiveConfiguration(sessionConfigId);
+        return;
+      }
+      
+      // Case 2: Local has config but session doesn't - sync to session
+      if (activeConfigId && !sessionConfigId) {
+        console.log('🔄 Syncing local config to session:', activeConfigId);
+        await sessionManagement.actions.setActiveCircuitConfig(activeConfigId);
+        return;
+      }
+      
+      // Case 3: Both exist but differ - session wins (it's the source of truth)
+      if (sessionConfigId && activeConfigId && sessionConfigId !== activeConfigId) {
+        console.log('🔄 Resolving config mismatch - session wins:', sessionConfigId);
+        setActiveConfiguration(sessionConfigId);
+        return;
+      }
+      
+      // Case 4: Both match or both are null - no action needed
+    };
+
+    // Only sync if session is ready
+    if (sessionManagement.isReady) {
+      syncActiveConfig();
+    }
+  }, [sessionManagement.sessionState.currentCircuitConfigId, activeConfigId, sessionManagement.isReady, sessionManagement.actions, setActiveConfiguration]);
   
   // Add event listeners for custom events from VisualizerTab
   useEffect(() => {
@@ -1846,128 +1968,101 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [cancelComputation, setIsComputingGrid, resetComputationState, updateStatusMessage, profileActions]);
 
-  // Handler for saving a profile
-  // Helper function to check if two circuit parameter sets are identical
-  const areParametersIdentical = useCallback((params1: CircuitParameters, params2: CircuitParameters) => {
-    return params1.Rsh === params2.Rsh &&
-           params1.Ra === params2.Ra &&
-           params1.Rb === params2.Rb &&
-           params1.Ca === params2.Ca &&
-           params1.Cb === params2.Cb &&
-           params1.frequency_range[0] === params2.frequency_range[0] &&
-           params1.frequency_range[1] === params2.frequency_range[1];
-  }, []);
-
-  // Helper function to check if computation settings are identical
-  const areSettingsIdentical = useCallback((
-    profile: SavedProfile, 
-    currentGridSize: number, 
-    currentMinFreq: number, 
-    currentMaxFreq: number, 
-    currentNumPoints: number
-  ) => {
-    return profile.gridSize === currentGridSize &&
-           profile.minFreq === currentMinFreq &&
-           profile.maxFreq === currentMaxFreq &&
-           profile.numPoints === currentNumPoints;
-  }, []);
+  // Handler for saving circuit configurations (replaces legacy profile saving)
 
   const handleSaveProfile = useCallback(async (name: string, description?: string, forceNew?: boolean) => {
     const isAutoSave = forceNew === undefined; // Auto-save if forceNew is not specified
-    console.log('💾 Starting profile save:', { name, description, parameters, gridSize, minFreq, maxFreq, numPoints, isAutoSave, forceNew });
+    console.log('💾 Starting circuit configuration save:', { name, description, parameters, gridSize, minFreq, maxFreq, numPoints, isAutoSave, forceNew });
     
+    if (!sessionManagement.sessionState.userId) {
+      console.error('❌ No user ID for saving circuit configuration');
+      updateStatusMessage('Please sign in to save circuit configurations');
+      return null;
+    }
+
     // Handle different save modes
-    if (forceNew === false && savedProfilesState.selectedProfile) {
-      // Save mode: Update the currently selected profile
-      const currentProfile = savedProfilesState.profiles.find(p => p.id === savedProfilesState.selectedProfile);
-      if (currentProfile) {
-        console.log('🔄 Updating current profile:', currentProfile.name);
-        await profileActions.updateProfile(currentProfile.id, {
-          name: name || currentProfile.name,
-          description: description || currentProfile.description,
-          parameters
+    if (forceNew === false && activeConfigId) {
+      // Update mode: Update the currently active configuration
+      console.log('🔄 Updating current circuit configuration:', activeConfigId);
+      try {
+        const success = await updateConfiguration(activeConfigId, {
+          name: name || 'Updated Configuration',
+          description: description || 'Updated configuration',
+          circuitParameters: parameters,
+          gridSize,
+          minFreq,
+          maxFreq,
+          numPoints
         });
         
-        profileActions.selectProfile(currentProfile.id);
-        updateStatusMessage(`✅ Profile "${name || currentProfile.name}" updated`);
-        return currentProfile.id;
+        if (success) {
+          updateStatusMessage(`✅ Circuit configuration "${name}" updated`);
+          return activeConfigId;
+        } else {
+          updateStatusMessage(`Failed to update configuration "${name}"`);
+          return null;
+        }
+      } catch (error) {
+        console.error('❌ Configuration update error:', error);
+        updateStatusMessage(`Error updating configuration: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        return null;
       }
     }
     
     if (forceNew === true) {
-      // Save As New mode: Always create a new profile
-      console.log('🆕 Force creating new profile...');
-      // Skip the existing profile check and jump to new profile creation
-    } else {
-      // Auto-save mode: Check if a profile with identical parameters exists
-      const existingProfile = savedProfilesState.profiles.find(profile => 
-        areParametersIdentical(profile.groundTruthParams, parameters) &&
-        areSettingsIdentical(profile, gridSize, minFreq, maxFreq, numPoints)
-      );
-      
-      console.log('🔍 Existing profile check:', { existingProfile: existingProfile?.id, currentProfiles: savedProfilesState.profiles.length });
-
-        if (existingProfile) {
-          // Update existing profile - preserve name if auto-saving, update if user-saving
-          const updateData = {
-            name: isAutoSave ? existingProfile.name : (name || existingProfile.name),
-            description: description || existingProfile.description,
-            parameters
-          };
-          
-          await profileActions.updateProfile(existingProfile.id, updateData);
-          
-          profileActions.selectProfile(existingProfile.id);
-          // Force multiple refresh attempts to ensure immediate UI update
-          setTimeout(() => {
-            profileActions.refreshProfiles();
-          }, 50);
-          setTimeout(() => {
-            profileActions.refreshProfiles();
-          }, 200);
-          const finalName = isAutoSave ? existingProfile.name : (name || existingProfile.name);
-          updateStatusMessage(`Updated existing profile "${finalName}" - ${isAutoSave ? 'auto-saved' : 'manually updated'}`);
-          return existingProfile.id;
+      // Save As New mode: Always create a new configuration
+      console.log('🆕 Force creating new circuit configuration...');
+    } else if (activeConfigId) {
+      // Auto-save mode: Update existing active configuration
+      console.log('🔄 Auto-saving to existing configuration:', activeConfigId);
+      try {
+        const success = await updateConfiguration(activeConfigId, {
+          circuitParameters: parameters,
+          gridSize,
+          minFreq,
+          maxFreq,
+          numPoints
+        });
+        
+        if (success) {
+          updateStatusMessage(`Auto-saved to configuration`);
+          return activeConfigId;
         }
+      } catch (error) {
+        console.log('⚠️ Auto-save to existing config failed, creating new one:', error);
       }
+    }
     
-    // Create new profile (either force new or no existing profile found)
-    console.log('🆕 Creating new profile...');
+    // Create new configuration (either force new, no active config, or auto-save failed)
+    console.log('🆕 Creating new circuit configuration...');
     try {
-      const newProfile = await profileActions.createProfile(
-        name, 
-        parameters, 
-        gridSize, 
-        minFreq, 
-        maxFreq, 
-        numPoints, 
-        description
-      );
+      const newConfig = await createConfiguration({
+        name: name || 'New Circuit Configuration',
+        description: description || 'Circuit configuration saved from simulator',
+        circuitParameters: parameters,
+        gridSize,
+        minFreq,
+        maxFreq,
+        numPoints
+      });
       
-      console.log('✅ Profile creation result:', newProfile);
-      
-      if (newProfile) {
-        profileActions.selectProfile(newProfile.id);
-        // Force multiple refresh attempts to ensure immediate UI update
-        setTimeout(() => {
-          profileActions.refreshProfiles();
-        }, 50);
-        setTimeout(() => {
-          profileActions.refreshProfiles();
-        }, 200);
-        updateStatusMessage(`Profile "${name}" saved successfully`);
-        return newProfile.id;
+      if (newConfig) {
+        console.log('✅ Circuit configuration created:', newConfig.id);
+        // Set as active and sync with session
+        await sessionManagement.actions.setActiveCircuitConfig(newConfig.id);
+        updateStatusMessage(`Configuration "${newConfig.name}" saved successfully`);
+        return newConfig.id;
       } else {
-        console.error('❌ Profile creation returned null/undefined');
-        updateStatusMessage(`Failed to save profile "${name}"`);
+        console.error('❌ Configuration creation returned null');
+        updateStatusMessage(`Failed to save configuration "${name}"`);
         return null;
       }
     } catch (error) {
-      console.error('❌ Profile creation error:', error);
-      updateStatusMessage(`Error saving profile "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('❌ Configuration creation error:', error);
+      updateStatusMessage(`Error saving configuration "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
-  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, savedProfilesState.profiles, savedProfilesState.selectedProfile, areParametersIdentical, areSettingsIdentical, profileActions]);
+  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, activeConfigId, createConfiguration, updateConfiguration, sessionManagement]);
 
 
 
@@ -1985,24 +2080,24 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
 
   // Handler for copying profile parameters
-  const handleCopyParams = useCallback((profileId: string) => {
-    const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-    if (profile) {
+  const handleCopyParams = useCallback((configId: string) => {
+    const config = circuitConfigurations?.find(c => c.id === configId);
+    if (config) {
       const paramsData = {
-        profileName: profile.name,
+        profileName: config.name,
         gridSettings: {
-          gridSize: profile.gridSize,
-          minFreq: profile.minFreq,
-          maxFreq: profile.maxFreq,
-          numPoints: profile.numPoints
+          gridSize: config.gridSize,
+          minFreq: config.minFreq,
+          maxFreq: config.maxFreq,
+          numPoints: config.numPoints
         },
         circuitParameters: {
-          Rsh: profile.groundTruthParams.Rsh,
-          Ra: profile.groundTruthParams.Ra,
-          Ca: profile.groundTruthParams.Ca,
-          Rb: profile.groundTruthParams.Rb,
-          Cb: profile.groundTruthParams.Cb,
-          frequency_range: profile.groundTruthParams.frequency_range
+          Rsh: config.circuitParameters.Rsh,
+          Ra: config.circuitParameters.Ra,
+          Ca: config.circuitParameters.Ca,
+          Rb: config.circuitParameters.Rb,
+          Cb: config.circuitParameters.Cb,
+          frequency_range: config.circuitParameters.frequency_range
         }
       };
 
@@ -2012,7 +2107,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       if (navigator.clipboard && window.isSecureContext) {
         // Use the Clipboard API when available (HTTPS/localhost)
         navigator.clipboard.writeText(jsonString).then(() => {
-          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
+          updateStatusMessage(`Parameters copied to clipboard from "${config.name}"`);
         }).catch(() => {
           updateStatusMessage(`Failed to copy parameters to clipboard`);
         });
@@ -2027,13 +2122,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           textArea.select();
           document.execCommand('copy');
           document.body.removeChild(textArea);
-          updateStatusMessage(`Parameters copied to clipboard from "${profile.name}"`);
+          updateStatusMessage(`Parameters copied to clipboard from "${config.name}"`);
         } catch {
           updateStatusMessage(`Failed to copy parameters to clipboard`);
         }
       }
     }
-  }, [savedProfilesState.profiles, updateStatusMessage]);
+  }, [circuitConfigurations, updateStatusMessage]);
 
   // Tagged models state - track models tagged in visualizations
   const [taggedModels, setTaggedModels] = useState<Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>>(new Map());
@@ -2045,27 +2140,28 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return;
     }
 
-    const currentProfileId = savedProfilesState.selectedProfile;
-    if (!currentProfileId) {
-      console.log('🏷️ No profile selected, clearing tagged models');
+    // Use activeConfigId instead of legacy selectedProfile
+    if (!activeConfigId) {
+      console.log('🏷️ No active circuit configuration, clearing tagged models');
       setTaggedModels(new Map());
       return;
     }
 
     try {
-      console.log('🏷️ Loading tagged models for user:', user.id, 'profile:', currentProfileId);
+      console.log('🏷️ Loading tagged models for user:', user.id, 'circuit config:', activeConfigId);
       const { supabase } = await import('../../lib/supabase');
       
-      // Query tagged models by user_id AND configuration_id (profile-specific)
+      // Query tagged models by user_id AND circuit_config_id (circuit-specific)
       const { data: dbTaggedModels, error } = await supabase
         .from('tagged_models')
         .select('*')
         .eq('user_id', user.id)
-        .eq('configuration_id', currentProfileId)
+        .eq('circuit_config_id', activeConfigId) // FIXED: Use correct schema field
         .order('tagged_at', { ascending: false });
 
       if (error) {
         console.error('❌ Failed to load tagged models from database:', error);
+        console.error('❌ Error details:', error);
         return;
       }
 
@@ -2076,35 +2172,41 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         const newTaggedModels = new Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>();
         
         dbTaggedModels.forEach(dbModel => {
-          newTaggedModels.set(dbModel.model_id, {
-            tagName: dbModel.tag_name,
-            profileId: dbModel.configuration_id || 'default',
-            resnormValue: dbModel.resnorm_value || 0,
-            taggedAt: new Date(dbModel.tagged_at).getTime(),
-            notes: dbModel.notes || undefined
+          // Type cast to handle schema fields that aren't in generated types
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const model = dbModel as any;
+          newTaggedModels.set(model.model_id, {
+            tagName: model.tag_name,
+            profileId: model.circuit_config_id || 'default', // FIXED: Use correct schema field
+            resnormValue: model.resnorm_value || 0,
+            taggedAt: new Date(model.tagged_at).getTime(),
+            notes: model.notes || undefined
           });
         });
 
         setTaggedModels(newTaggedModels);
-        updateStatusMessage(`📊 Loaded ${dbTaggedModels.length} tagged models for current profile`);
+        updateStatusMessage(`📊 Loaded ${dbTaggedModels.length} tagged models for current circuit configuration`);
+      } else {
+        console.log('🏷️ No tagged models found for current circuit configuration');
+        setTaggedModels(new Map());
       }
     } catch (error) {
       console.error('❌ Error loading tagged models from database:', error);
     }
-  }, [user, savedProfilesState.selectedProfile, updateStatusMessage]);
+  }, [user, activeConfigId, updateStatusMessage]); // FIXED: Use activeConfigId dependency
 
-  // Load tagged models when user or profile changes
+  // Load tagged models when user or active circuit config changes
   useEffect(() => {
-    if (user && sessionManagement.isReady) {
+    if (user && sessionManagement.isReady && activeConfigId) {
       loadTaggedModelsFromDatabase();
     }
-  }, [user, sessionManagement.isReady, savedProfilesState.selectedProfile, loadTaggedModelsFromDatabase]);
+  }, [user, sessionManagement.isReady, activeConfigId, loadTaggedModelsFromDatabase]);
 
-  // Handle viewing tagged models for a specific profile  
-  const handleViewTaggedModels = useCallback(async (profileId: string) => {
-    const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-    if (!profile) {
-      updateStatusMessage('Profile not found');
+  // Handle viewing tagged models for a specific configuration  
+  const handleViewTaggedModels = useCallback(async (configId: string) => {
+    const config = circuitConfigurations?.find(c => c.id === configId);
+    if (!config) {
+      updateStatusMessage('Configuration not found');
       return;
     }
 
@@ -2113,34 +2215,27 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return;
     }
 
-    // Switch to the profile (this will automatically load tagged models via useEffect)
-    profileActions.selectProfile(profileId);
+    // Switch to the configuration (this will automatically load tagged models via useEffect)
+    setActiveConfiguration(configId);
+    sessionManagement.actions.setActiveCircuitConfig(configId);
     
     // Switch to visualizer tab to show the tagged models
     setVisualizationTab('visualizer');
     
-    updateStatusMessage(`📊 Switched to profile "${profile.name}" - loading tagged models...`);
-  }, [savedProfilesState.profiles, updateStatusMessage, user, profileActions]);
+    updateStatusMessage(`📊 Switched to configuration "${config.name}" - loading tagged models...`);
+  }, [circuitConfigurations, updateStatusMessage, user, setActiveConfiguration, sessionManagement.actions]);
 
   // Handle model tagging from visualization components
-  const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string, profileId?: string) => {
+  const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string) => {
     console.log('🏷️ HandleModelTag called:', {
       modelId: model.id,
       tagName,
       hasUser: !!user,
-      profileId,
-      selectedProfile: savedProfilesState.selectedProfile,
+      activeConfigId,
       sessionReady: sessionManagement.isReady,
       sessionError: sessionManagement.hasError,
       sessionState: sessionManagement.sessionState
     });
-
-    const currentProfileId = profileId || savedProfilesState.selectedProfile;
-    if (!currentProfileId) {
-      console.warn('No profile selected for tagging model');
-      updateStatusMessage('No circuit profile selected - please select a profile first');
-      return;
-    }
 
     if (!user) {
       console.warn('No authenticated user for tagging model');
@@ -2154,16 +2249,23 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return;
     }
 
+    // Check if we have an active circuit configuration
+    if (!activeConfigId) {
+      updateStatusMessage('Please create or select a circuit configuration first');
+      return;
+    }
+
     try {
       // Use session management's tagModel function for proper database integration
       const success = await sessionManagement.actions.tagModel({
+        circuitConfigId: activeConfigId, // NEW: Required field
         modelId: model.id,
         tagName,
         tagCategory: 'user',
         circuitParameters: model.parameters as unknown as Record<string, unknown>,
         resnormValue: model.resnorm || 0,
         notes: `Tagged from visualization at ${new Date().toLocaleString()}`,
-        configurationId: currentProfileId || undefined
+        isInteresting: false
       });
 
       if (success) {
@@ -2175,7 +2277,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           const newMap = new Map(prev);
           newMap.set(model.id, {
             tagName,
-            profileId: currentProfileId,
+            profileId: activeConfigId, // FIXED: Use activeConfigId instead of currentProfileId
             resnormValue: model.resnorm || 0,
             taggedAt: Date.now(),
             notes: `Tagged from visualization at ${new Date().toLocaleString()}`
@@ -2195,7 +2297,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       console.error('❌ Error during model tagging:', error);
       updateStatusMessage(`Failed to tag model: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [savedProfilesState.selectedProfile, updateStatusMessage, user, sessionManagement]);
+  }, [activeConfigId, updateStatusMessage, user, sessionManagement]);
 
   // Handle static render job creation
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2241,60 +2343,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [savedProfilesState, hasLoadedFromStorage]);
 
-  // Disabled automatic sample profile creation per user request
-  // useEffect(() => {
-  //   // Re-enabled with proper infinite loop protection
-  //   if (hasLoadedFromStorage && savedProfilesState.profiles.length === 0 && parameters.Rsh > 0 && user && !hasSampleProfileCreated) {
-  //     const sampleParameters = {
-  //       Rsh: 50,
-  //       Ra: 1000,
-  //       Ca: 1.0e-6,
-  //       Rb: 800,
-  //       Cb: 0.8e-6,
-  //       frequency_range: [1, 1000] as [number, number]
-  //     };
+  // Legacy auto-create sample profile functionality removed
 
-  //     setHasSampleProfileCreated(true);
-      
-  //     profileActions.createProfile(
-  //       'Sample Configuration',
-  //       sampleParameters,
-  //       5,
-  //       1,
-  //       1000,
-  //       20,
-  //       'Example profile showing a typical bioimpedance measurement setup'
-  //     );
-      
-  //     updateStatusMessage('Welcome! A sample profile has been created to get you started.');
-  //   }
-  // }, [hasLoadedFromStorage, parameters.Rsh, savedProfilesState.profiles.length, updateStatusMessage, user, profileActions, hasSampleProfileCreated]);
-
-  // Handle pending profile computation after parameters are loaded
-  useEffect(() => {
-    if (savedProfilesState.pendingComputeProfile && !isComputingGrid) {
-      const profile = savedProfilesState.profiles.find(p => p.id === savedProfilesState.pendingComputeProfile);
-      if (profile) {
-        // Check if parameters match the profile (indicating they've been loaded)
-        const paramsMatch = 
-          gridSize === profile.gridSize &&
-          minFreq === profile.minFreq &&
-          maxFreq === profile.maxFreq &&
-          numPoints === profile.numPoints &&
-          Math.abs(parameters.Rsh - profile.groundTruthParams.Rsh) < 0.1 &&
-          Math.abs(parameters.Ra - profile.groundTruthParams.Ra) < 0.1;
-        
-        if (paramsMatch) {
-          updateStatusMessage(`Starting computation for profile "${profile.name}"...`);
-          profileActions.setPendingComputeProfile(null);
-          handleComputeRegressionMesh();
-        }
-      } else {
-        // Profile not found, clear pending
-        profileActions.setPendingComputeProfile(null);
-      }
-    }
-  }, [savedProfilesState.pendingComputeProfile, isComputingGrid, savedProfilesState.profiles, gridSize, minFreq, maxFreq, numPoints, parameters.Rsh, parameters.Ra, handleComputeRegressionMesh, updateStatusMessage, profileActions]);
+  // Legacy pending computation logic removed - now handled by onComputeProfile with auto-computation
 
 
   // Modify the main content area to show the correct tab content
@@ -2449,117 +2500,132 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           
           {/* Saved Profiles Section - Scrollable - Always Show */}
           <SavedProfiles
-              profiles={savedProfilesState.profiles}
-              selectedProfile={savedProfilesState.selectedProfile}
+              profiles={convertedProfiles} // FIXED: Use circuit configurations instead of legacy profiles
+              selectedProfile={activeConfigId} // FIXED: Use activeConfigId instead of selectedProfile
               onCopyParams={handleCopyParams}
               selectedCircuits={selectedCircuits}
               isMultiSelectMode={isMultiSelectMode}
               onToggleMultiSelect={handleToggleMultiSelect}
               onBulkDelete={handleBulkDelete}
-              computingProfileId={isComputingGrid ? savedProfilesState.selectedProfile : null}
+              computingProfileId={isComputingGrid ? activeConfigId : null} // FIXED: Use activeConfigId
             onSelectProfile={handleSelectCircuit}
-            onSelectProfileOriginal={(profileId) => {
-              // Clear any pending computation
-              profileActions.setPendingComputeProfile(null);
-              
-              // Clear existing grid results when switching profiles
+            onSelectProfileOriginal={(configId) => {
+              // Clear existing grid results when switching configurations
               resetComputationState();
               
-              // Select the profile
-              profileActions.selectProfile(profileId);
+              // Set as active configuration
+              setActiveConfiguration(configId);
               
-              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-              if (profile) {
-                // Load profile settings into current state
-                setGridSize(profile.gridSize);
-                setMinFreq(profile.minFreq);
-                setMaxFreq(profile.maxFreq);
-                setNumPoints(profile.numPoints);
-                setParameters(profile.groundTruthParams);
+              // Sync with session management
+              sessionManagement.actions.setActiveCircuitConfig(configId);
+              
+              const config = circuitConfigurations?.find(c => c.id === configId);
+              if (config) {
+                // Load configuration settings into current state
+                setGridSize(config.gridSize);
+                setMinFreq(config.minFreq);
+                setMaxFreq(config.maxFreq);
+                setNumPoints(config.numPoints);
+                setParameters(config.circuitParameters);
                 
-                // Auto-fill configuration name with profile name
-                setConfigurationName(profile.name);
+                // Auto-fill configuration name
+                setConfigurationName(config.name);
                 
                 // Update frequencies based on loaded settings
-                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                updateFrequencies(config.minFreq, config.maxFreq, config.numPoints);
                 
                 // Mark parameters as changed to enable recompute
                 setParameterChanged(true);
                 
-                updateStatusMessage(`Loaded profile: ${profile.name} - Previous grid data cleared, ready to compute`);
+                updateStatusMessage(`Loaded configuration: ${config.name} - Previous grid data cleared, ready to compute`);
               }
             }}
-            onDeleteProfile={async (profileId) => {
-              // Clear grid results if we're deleting the currently selected profile
-              const wasSelected = savedProfilesState.selectedProfile === profileId;
+            onDeleteProfile={async (configId) => {
+              // Clear grid results if we're deleting the currently active configuration
+              const wasSelected = activeConfigId === configId;
               if (wasSelected) {
                 resetComputationState();
               }
               
-              await profileActions.deleteProfile(profileId);
-              updateStatusMessage(wasSelected ? 'Profile deleted and grid data cleared' : 'Profile deleted');
+              const success = await deleteConfiguration(configId);
+              if (success) {
+                updateStatusMessage(wasSelected ? 'Configuration deleted and grid data cleared' : 'Configuration deleted');
+              } else {
+                updateStatusMessage('Failed to delete configuration');
+              }
             }}
-            onEditProfile={async (profileId, name, description) => {
-              await profileActions.updateProfile(profileId, { name, description });
-              updateStatusMessage(`Profile "${name}" updated`);
+            onEditProfile={async (configId, name, description) => {
+              const success = await updateConfiguration(configId, { name, description });
+              if (success) {
+                updateStatusMessage(`Configuration "${name}" updated`);
+              } else {
+                updateStatusMessage(`Failed to update configuration "${name}"`);
+              }
             }}
-            onEditParameters={(profileId) => {
-              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-              if (profile) {
+            onEditParameters={(configId) => {
+              const config = circuitConfigurations?.find(c => c.id === configId);
+              if (config) {
                 // Expand the sidebar
                 setLeftNavCollapsed(false);
                 
                 // Clear existing grid results
                 resetComputationState();
                 
-                // Load profile settings into center panel for editing
-                setGridSize(profile.gridSize);
-                setMinFreq(profile.minFreq);
-                setMaxFreq(profile.maxFreq);
-                setNumPoints(profile.numPoints);
-                setParameters(profile.groundTruthParams);
+                // Load configuration settings into center panel for editing
+                setGridSize(config.gridSize);
+                setMinFreq(config.minFreq);
+                setMaxFreq(config.maxFreq);
+                setNumPoints(config.numPoints);
+                setParameters(config.circuitParameters);
                 
-                // Auto-fill configuration name with profile name for editing
-                setConfigurationName(profile.name);
+                // Auto-fill configuration name for editing
+                setConfigurationName(config.name);
                 
                 // Update frequencies
-                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                updateFrequencies(config.minFreq, config.maxFreq, config.numPoints);
                 
-                // Select this profile
-                profileActions.selectProfile(profileId);
+                // Set as active configuration
+                setActiveConfiguration(configId);
+                sessionManagement.actions.setActiveCircuitConfig(configId);
                 
                 // Mark parameters as changed to enable editing mode
                 setParameterChanged(true);
                 
-                updateStatusMessage(`Editing parameters for "${profile.name}" - make changes in center panel`);
+                updateStatusMessage(`Editing parameters for "${config.name}" - make changes in center panel`);
               }
             }}
-            onComputeProfile={(profileId) => {
-              const profile = savedProfilesState.profiles.find(p => p.id === profileId);
-              if (profile) {
+            onComputeProfile={(configId) => {
+              const config = circuitConfigurations?.find(c => c.id === configId);
+              if (config) {
                 // Clear existing grid results first
                 resetComputationState();
                 
-                // Load profile settings
-                setGridSize(profile.gridSize);
-                setMinFreq(profile.minFreq);
-                setMaxFreq(profile.maxFreq);
-                setNumPoints(profile.numPoints);
-                setParameters(profile.groundTruthParams);
+                // Load configuration settings
+                setGridSize(config.gridSize);
+                setMinFreq(config.minFreq);
+                setMaxFreq(config.maxFreq);
+                setNumPoints(config.numPoints);
+                setParameters(config.circuitParameters);
                 
-                // Auto-fill configuration name with profile name
-                setConfigurationName(profile.name);
+                // Auto-fill configuration name
+                setConfigurationName(config.name);
                 
                 // Update frequencies
-                updateFrequencies(profile.minFreq, profile.maxFreq, profile.numPoints);
+                updateFrequencies(config.minFreq, config.maxFreq, config.numPoints);
                 
-                // Select this profile
-                profileActions.selectProfile(profileId);
+                // Set as active configuration
+                setActiveConfiguration(configId);
+                sessionManagement.actions.setActiveCircuitConfig(configId);
                 
-                // Set pending computation - useEffect will handle when parameters are loaded
-                profileActions.setPendingComputeProfile(profileId);
+                // Mark parameters as loaded and ready for computation
+                setParameterChanged(false); // Parameters are fresh from saved config
                 
-                updateStatusMessage(`Loading profile "${profile.name}" parameters...`);
+                updateStatusMessage(`Loading configuration "${config.name}" parameters...`);
+                
+                // Auto-trigger computation
+                setTimeout(() => {
+                  handleComputeRegressionMesh();
+                }, 100);
               }
             }}
             onViewTaggedModels={handleViewTaggedModels}

@@ -4,27 +4,36 @@
  * Contains only the essential tagging functionality that's working
  */
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// ^ Disabled because database schema differs from generated types
+
 import { useState, useEffect, useCallback } from 'react'
 import { getUser } from '../../lib/supabase'
+import { Json } from '../../lib/database.types'
 
 export interface SessionState {
   userId: string | null
   sessionId: string | null
   sessionName: string | null
+  currentCircuitConfigId: string | null // NEW: Track active circuit configuration
   isLoading: boolean
   error: string | null
 }
 
 export interface SessionActions {
   tagModel: (modelData: {
+    circuitConfigId: string // NEW: Required field
     modelId: string
     tagName: string
     tagCategory?: string
     circuitParameters: Record<string, unknown>
     resnormValue?: number
     notes?: string
-    configurationId?: string
+    isInteresting?: boolean
   }) => Promise<boolean>
+  
+  // NEW: Set active circuit configuration
+  setActiveCircuitConfig: (configId: string) => Promise<void>
 }
 
 export const useSessionManagement = () => {
@@ -32,6 +41,7 @@ export const useSessionManagement = () => {
     userId: null,
     sessionId: null,
     sessionName: null,
+    currentCircuitConfigId: null,
     isLoading: true,
     error: null
   })
@@ -77,6 +87,7 @@ export const useSessionManagement = () => {
             userId: user.id,
             sessionId: activeSession.id,
             sessionName: activeSession.session_name,
+            currentCircuitConfigId: (activeSession as any).current_circuit_config_id || null,
             isLoading: false,
             error: null
           })
@@ -100,6 +111,7 @@ export const useSessionManagement = () => {
             userId: user.id,
             sessionId: newSession.id,
             sessionName: newSession.session_name,
+            currentCircuitConfigId: (newSession as any).current_circuit_config_id || null,
             isLoading: false,
             error: null
           })
@@ -117,25 +129,25 @@ export const useSessionManagement = () => {
     initializeSession()
   }, [])
 
-  // Tag a model - the core functionality that was working
+  // Tag a model - updated to require circuit configuration ID
   const tagModel = useCallback(async (modelData: {
+    circuitConfigId: string // Required field
     modelId: string
     tagName: string
     tagCategory?: string
     circuitParameters: Record<string, unknown>
     resnormValue?: number
     notes?: string
-    configurationId?: string
+    isInteresting?: boolean
   }): Promise<boolean> => {
     console.log('🏷️ TagModel called with:', { 
+      circuitConfigId: modelData.circuitConfigId,
       modelId: modelData.modelId, 
       tagName: modelData.tagName,
       hasUserId: !!sessionState.userId,
       hasSessionId: !!sessionState.sessionId,
       userId: sessionState.userId,
-      sessionId: sessionState.sessionId,
-      isLoading: sessionState.isLoading,
-      error: sessionState.error
+      sessionId: sessionState.sessionId
     });
 
     // Debug: Let's also test basic Supabase connectivity
@@ -165,21 +177,21 @@ export const useSessionManagement = () => {
       const insertData = {
         user_id: sessionState.userId,
         session_id: sessionState.sessionId,
-        configuration_id: modelData.configurationId || 'default', // Use passed configurationId or default
+        circuit_config_id: modelData.circuitConfigId, // NEW: Required field
         model_id: modelData.modelId,
         tag_name: modelData.tagName,
         tag_category: modelData.tagCategory || 'user',
-        circuit_parameters: JSON.stringify(modelData.circuitParameters), // Convert to JSON string like existing data
+        circuit_parameters: modelData.circuitParameters as Json,
         resnorm_value: modelData.resnormValue,
         notes: modelData.notes,
-        is_interesting: false // Add missing field from schema
+        is_interesting: modelData.isInteresting || false
       };
 
       console.log('🏷️ Attempting to insert tag with data:', insertData);
 
       // First, let's check if the table exists by testing a simple select
       console.log('🔍 Testing table access first...');
-      const { data: testData, error: testError } = await supabase
+      const { data: testData, error: testError } = await (supabase as any)
         .from('tagged_models')
         .select('*', { count: 'exact', head: true });
 
@@ -191,7 +203,7 @@ export const useSessionManagement = () => {
         return false;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('tagged_models')
         .insert(insertData)
         .select()
@@ -220,10 +232,49 @@ export const useSessionManagement = () => {
       }
       return false
     }
-  }, [sessionState.userId, sessionState.sessionId, sessionState.isLoading, sessionState.error])
+  }, [sessionState.userId, sessionState.sessionId])
+
+  // NEW: Set active circuit configuration for current session
+  const setActiveCircuitConfig = useCallback(async (configId: string): Promise<void> => {
+    console.log('🔄 Setting active circuit configuration:', configId);
+
+    if (!sessionState.sessionId) {
+      console.error('❌ No session ID available for setting circuit config');
+      return;
+    }
+
+    try {
+      const { supabase } = await import('../../lib/supabase');
+      
+      const { error } = await (supabase as any)
+        .from('user_sessions')
+        .update({ 
+          current_circuit_config_id: configId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionState.sessionId);
+
+      if (error) {
+        console.error('❌ Error setting active circuit config:', error);
+        return;
+      }
+
+      // Update local state
+      setSessionState(prev => ({
+        ...prev,
+        currentCircuitConfigId: configId
+      }));
+
+      console.log('✅ Active circuit configuration set successfully');
+
+    } catch (error) {
+      console.error('❌ Exception in setActiveCircuitConfig:', error);
+    }
+  }, [sessionState.sessionId]);
 
   const actions: SessionActions = {
-    tagModel
+    tagModel,
+    setActiveCircuitConfig
   }
 
   return {

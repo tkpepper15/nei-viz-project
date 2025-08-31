@@ -1,25 +1,24 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// ^ Disabled because database schema differs from generated types
+
 import { supabase } from './supabase';
 import { SavedProfile } from '../app/components/circuit-simulator/types/savedProfiles';
 import { CircuitParameters } from '../app/components/circuit-simulator/types/parameters';
 import { Json } from './database.types';
 
-export interface DatabaseProfile {
+// This interface matches the NEW user_profiles table schema (user metadata only)
+export interface UserProfileRow {
   id: string;
   user_id: string;
-  name: string;
-  description?: string;
-  parameters: CircuitParameters;
-  grid_size: number;
-  min_freq: number;
-  max_freq: number;
-  num_points: number;
-  is_computed: boolean;
-  computation_time?: number;
-  total_points?: number;
-  valid_points?: number;
-  computation_results?: unknown;
-  created_at: string;
-  updated_at: string;
+  username: string | null;
+  full_name: string | null;
+  avatar_url: string | null;
+  default_grid_size: number | null;
+  default_min_freq: number | null;
+  default_max_freq: number | null;
+  default_num_points: number | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export class ProfilesService {
@@ -53,8 +52,8 @@ export class ProfilesService {
     // Test table existence first (reduced logging when successful)
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { data: tableCheck, error: tableError } = await supabase
-        .from('saved_configurations')
+      const { data: tableCheck, error: tableError } = await (supabase as any)
+        .from('user_profiles')
         .select('count')
         .limit(1);
       
@@ -67,7 +66,7 @@ export class ProfilesService {
         });
         
         if (tableError.code === 'PGRST116' || tableError.message?.includes('does not exist')) {
-          throw new Error('saved_configurations table does not exist - run database migration');
+          throw new Error('user_profiles table does not exist - run database migration');
         }
         
         throw tableError;
@@ -83,8 +82,8 @@ export class ProfilesService {
     }
 
     // Now attempt to fetch user profiles
-    const { data, error } = await supabase
-      .from('saved_configurations')
+    const { data, error } = await (supabase as any)
+      .from('user_profiles')
       .select('*')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false });
@@ -96,7 +95,7 @@ export class ProfilesService {
     });
 
     if (error) {
-      console.error('❌ Error fetching user profiles from saved_configurations table:');
+      console.error('❌ Error fetching user profiles from user_profiles table:');
       console.error('Full error object:', JSON.stringify(error, null, 2));
       console.error('Error details:', {
         message: error.message,
@@ -105,7 +104,7 @@ export class ProfilesService {
         details: error.details
       });
       console.error('Query details:', {
-        table: 'saved_configurations',
+        table: 'user_profiles',
         userId: userId,
         orderBy: 'updated_at'
       });
@@ -124,53 +123,47 @@ export class ProfilesService {
   }
 
   static async createProfile(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     userId: string, 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     name: string, 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     parameters: CircuitParameters,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     gridSize: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     minFreq: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     maxFreq: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     numPoints: number,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     description?: string
   ): Promise<SavedProfile> {
-    const { data, error } = await supabase
-      .from('saved_configurations')
-      .insert({
-        user_id: userId,
-        name: name,
-        description,
-        circuit_parameters: parameters as unknown as Json,
-        grid_size: gridSize,
-        min_frequency: minFreq,
-        max_frequency: maxFreq,
-        num_points: numPoints,
-        is_computed: false
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating profile:', error);
-      console.error('Error details:', error.message, error.code, error.hint);
-      throw error;
-    }
-
-    return this.convertDatabaseProfileToSavedProfile(data);
+    // DEPRECATED: This method is no longer supported with the new schema
+    // Circuit configurations should use CircuitConfigService instead
+    console.warn('⚠️ ProfilesService.createProfile is deprecated - use CircuitConfigService instead');
+    throw new Error('ProfilesService.createProfile is deprecated - circuit configurations should use CircuitConfigService');
   }
 
   static async updateProfile(
     profileId: string, 
-    updates: Partial<Pick<DatabaseProfile, 'name' | 'description' | 'parameters' | 'is_computed' | 'computation_results'>>
+    updates: any // Legacy compatibility - this method is deprecated
   ): Promise<SavedProfile> {
+    // DEPRECATED: This method is no longer supported with the new schema
+    // Circuit configurations should use CircuitConfigService instead
+    console.warn('⚠️ ProfilesService.updateProfile is deprecated - use CircuitConfigService instead');
+    throw new Error('ProfilesService.updateProfile is deprecated - circuit configurations should use CircuitConfigService');
+    
     // Map updates to correct column names  
     const mappedUpdates: Record<string, unknown> = {};
     if (updates.name) mappedUpdates.name = updates.name;
     if (updates.description !== undefined) mappedUpdates.description = updates.description;
-    if (updates.parameters) mappedUpdates.circuit_parameters = updates.parameters as unknown as Json;
+    if (updates.parameters) mappedUpdates.parameters = updates.parameters as unknown as Json;
     mappedUpdates.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from('saved_configurations')
+    const { data, error } = await (supabase as any)
+      .from('user_profiles')
       .update(mappedUpdates)
       .eq('id', profileId)
       .select()
@@ -185,8 +178,8 @@ export class ProfilesService {
   }
 
   static async deleteProfile(profileId: string): Promise<void> {
-    const { error } = await supabase
-      .from('saved_configurations')
+    const { error } = await (supabase as any)
+      .from('user_profiles')
       .delete()
       .eq('id', profileId);
 
@@ -197,8 +190,8 @@ export class ProfilesService {
   }
 
   static async deleteMultipleProfiles(profileIds: string[]): Promise<void> {
-    const { error } = await supabase
-      .from('saved_configurations')
+    const { error } = await (supabase as any)
+      .from('user_profiles')
       .delete()
       .in('id', profileIds);
 
@@ -212,16 +205,16 @@ export class ProfilesService {
     return {
       id: dbProfile.id as string,
       name: dbProfile.name as string,
-      description: dbProfile.description as string,
-      groundTruthParams: dbProfile.circuit_parameters as CircuitParameters,
-      gridSize: dbProfile.grid_size as number,
-      minFreq: dbProfile.min_frequency as number,
-      maxFreq: dbProfile.max_frequency as number,  
-      numPoints: dbProfile.num_points as number,
-      isComputed: dbProfile.is_computed as boolean,
-      computationTime: dbProfile.computation_time as number,
-      totalPoints: dbProfile.total_points as number,
-      validPoints: dbProfile.valid_points as number,
+      description: (dbProfile.description as string) || '',
+      groundTruthParams: dbProfile.parameters as CircuitParameters,
+      gridSize: dbProfile.grid_size as number || 10,
+      minFreq: Number(dbProfile.min_freq) || 0.1,
+      maxFreq: Number(dbProfile.max_freq) || 100000,  
+      numPoints: dbProfile.num_points as number || 100,
+      isComputed: dbProfile.is_computed as boolean || false,
+      computationTime: dbProfile.computation_time ? Number(dbProfile.computation_time) : undefined,
+      totalPoints: dbProfile.total_points as number | undefined,
+      validPoints: dbProfile.valid_points as number | undefined,
       created: new Date(dbProfile.created_at as string).getTime(),
       lastModified: new Date(dbProfile.updated_at as string).getTime()
     };

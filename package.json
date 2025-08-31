@@ -37,7 +37,8 @@
     "react-plotly.js": "^2.6.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.0",
-    "three": "^0.179.1"
+    "three": "^0.179.1",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
