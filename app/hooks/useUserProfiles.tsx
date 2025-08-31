@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../components/auth/AuthProvider';
-import { ProfilesService } from '../../lib/profilesService';
+// import { ProfilesService } from '../../lib/profilesService'; // Temporarily disabled for deployment
 import { SavedProfile, SavedProfilesState } from '../components/circuit-simulator/types/savedProfiles';
 import { CircuitParameters } from '../components/circuit-simulator/types/parameters';
 
@@ -60,27 +60,21 @@ export const useUserProfiles = () => {
     setError(null);
     
     try {
-      const profiles = await ProfilesService.getUserProfiles(user.id);
-      console.log('✅ Loaded', profiles.length, 'profiles from Supabase');
-      setProfilesState(prev => ({ ...prev, profiles }));
-      setError(null); // Clear any previous errors
+      // TODO: Temporarily disabled for deployment
+      console.log('🔄 ProfilesService temporarily disabled, falling back to localStorage');
+      // const profiles = await ProfilesService.getUserProfiles(user.id);
+      // console.log('✅ Loaded', profiles.length, 'profiles from Supabase');
+      // setProfilesState(prev => ({ ...prev, profiles }));
+      // setError(null); // Clear any previous errors
+      
+      // Always fallback to localStorage for now
+      const localProfiles = loadProfilesFromLocalStorage();
+      console.log('📂 Loaded', localProfiles.length, 'profiles from localStorage');
+      setProfilesState(prev => ({ ...prev, profiles: localProfiles }));
+      setError(null);
     } catch (err) {
-      console.error('❌ Error loading profiles from Supabase:', err);
+      console.error('❌ Error loading profiles from localStorage:', err);
       
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      
-      if (errorMessage.includes('table does not exist')) {
-        setError('Database table not created. Please run the migration script.');
-        console.log('🔄 Falling back to localStorage due to missing table');
-      } else if (errorMessage.includes('not authenticated')) {
-        setError('Authentication required. Please sign in again.');
-        console.log('🔄 Falling back to localStorage due to auth issue');
-      } else {
-        setError(`Database error: ${errorMessage}`);
-        console.log('🔄 Falling back to localStorage due to error:', errorMessage);
-      }
-      
-      // Always fallback to localStorage
       const localProfiles = loadProfilesFromLocalStorage();
       console.log('📂 Loaded', localProfiles.length, 'profiles from localStorage fallback');
       setProfilesState(prev => ({ ...prev, profiles: localProfiles }));
@@ -176,21 +170,25 @@ export const useUserProfiles = () => {
     }
 
     try {
-      console.log('🔄 Calling ProfilesService.createProfile...');
-      const newProfile = await ProfilesService.createProfile(user.id, name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
-      console.log('✅ ProfilesService.createProfile succeeded:', newProfile);
+      // TODO: Temporarily disabled for deployment
+      console.log('🔄 ProfilesService temporarily disabled, creating local profile instead');
+      return createLocalProfile(name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
       
-      const updatedProfiles = [newProfile, ...profilesState.profiles];
-      setProfilesState(prev => ({
-        ...prev,
-        profiles: updatedProfiles
-      }));
+      // console.log('🔄 Calling ProfilesService.createProfile...');
+      // const newProfile = await ProfilesService.createProfile(user.id, name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
+      // console.log('✅ ProfilesService.createProfile succeeded:', newProfile);
       
-      // Also save to localStorage as backup
-      saveProfilesToLocalStorage(updatedProfiles);
-      
-      console.log('📦 Profile state updated, total profiles:', updatedProfiles.length);
-      return newProfile;
+      // const updatedProfiles = [newProfile, ...profilesState.profiles];
+      // setProfilesState(prev => ({
+      //   ...prev,
+      //   profiles: updatedProfiles
+      // }));
+      // 
+      // // Also save to localStorage as backup
+      // saveProfilesToLocalStorage(updatedProfiles);
+      // 
+      // console.log('📦 Profile state updated, total profiles:', updatedProfiles.length);
+      // return newProfile;
     } catch (err) {
       console.error('Error creating profile:', err);
       setError('Failed to create profile - falling back to localStorage');
@@ -250,17 +248,31 @@ export const useUserProfiles = () => {
         Object.entries(profileUpdates).filter(([, value]) => value !== undefined)
       );
 
-      let updatedProfile;
-      if (Object.keys(filteredUpdates).length > 0) {
-        // Only call updateProfile if there are actual profile fields to update
-        updatedProfile = await ProfilesService.updateProfile(profileId, filteredUpdates);
-      } else {
-        // If no profile fields to update, just find the existing profile
-        updatedProfile = profilesState.profiles.find(p => p.id === profileId);
-        if (!updatedProfile) {
-          throw new Error('Profile not found');
-        }
+      // TODO: Temporarily disabled for deployment
+      console.log('🔄 ProfilesService temporarily disabled, updating locally instead');
+      
+      let updatedProfile = profilesState.profiles.find(p => p.id === profileId);
+      if (!updatedProfile) {
+        throw new Error('Profile not found');
       }
+      
+      // Update locally
+      updatedProfile = {
+        ...updatedProfile,
+        ...filteredUpdates,
+        lastModified: Date.now()
+      };
+      
+      // if (Object.keys(filteredUpdates).length > 0) {
+      //   // Only call updateProfile if there are actual profile fields to update
+      //   updatedProfile = await ProfilesService.updateProfile(profileId, filteredUpdates);
+      // } else {
+      //   // If no profile fields to update, just find the existing profile
+      //   updatedProfile = profilesState.profiles.find(p => p.id === profileId);
+      //   if (!updatedProfile) {
+      //     throw new Error('Profile not found');
+      //   }
+      // }
       
       const updatedProfiles = profilesState.profiles.map(p => {
         if (p.id === profileId) {
@@ -286,7 +298,9 @@ export const useUserProfiles = () => {
 
   const deleteProfile = useCallback(async (profileId: string): Promise<void> => {
     try {
-      await ProfilesService.deleteProfile(profileId);
+      // TODO: Temporarily disabled for deployment
+      console.log('🔄 ProfilesService temporarily disabled, deleting locally instead');
+      // await ProfilesService.deleteProfile(profileId);
       setProfilesState(prev => ({
         ...prev,
         profiles: prev.profiles.filter(p => p.id !== profileId),
@@ -300,7 +314,9 @@ export const useUserProfiles = () => {
 
   const deleteMultipleProfiles = useCallback(async (profileIds: string[]): Promise<void> => {
     try {
-      await ProfilesService.deleteMultipleProfiles(profileIds);
+      // TODO: Temporarily disabled for deployment
+      console.log('🔄 ProfilesService temporarily disabled, deleting locally instead');
+      // await ProfilesService.deleteMultipleProfiles(profileIds);
       setProfilesState(prev => ({
         ...prev,
         profiles: prev.profiles.filter(p => !profileIds.includes(p.id)),
