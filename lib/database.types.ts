@@ -882,9 +882,9 @@ export interface SavedConfigurationWithProfile extends Database['public']['Table
 }
 
 export interface ComputationResultsData {
-  gridResults: any[]
-  resnormGroups: any[]
-  gridParameterArrays: any[]
+  gridResults: Record<string, unknown>[]
+  resnormGroups: Record<string, unknown>[]
+  gridParameterArrays: Record<string, unknown>[]
   performanceMetrics: {
     totalComputeTime: number
     averagePointTime: number

@@ -12,7 +12,7 @@ import ResnormMethodToggle from '../controls/ResnormMethodToggle';
 
 const ResnormMethodDemo: React.FC = () => {
   const [resnormConfig, setResnormConfig] = useState<ResnormConfig>({
-    method: ResnormMethod.MAE,
+    method: ResnormMethod.SSR,
     useRangeAmplification: false,
     useFrequencyWeighting: false
   });
@@ -112,7 +112,7 @@ const ResnormMethodDemo: React.FC = () => {
             </thead>
             <tbody>
               {comparisonResults.map(({ method, value }) => {
-                const maeValue = comparisonResults.find(r => r.method === ResnormMethod.MAE)?.value || 1;
+                const maeValue = comparisonResults.find(r => r.method === ResnormMethod.SSR)?.value || 1;
                 const relative = value / maeValue;
                 const isCurrent = method === resnormConfig.method;
                 

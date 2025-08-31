@@ -1,4 +1,7 @@
-import { CircuitParameters } from './parameters';
+import type { CircuitParameters } from './parameters';
+
+// Export important types
+export type { CircuitParameters };
 
 // Core application types
 export type VisualizationType = 'nyquist' | 'spider' | 'sensitivity' | 'residuals' | 'correlation';

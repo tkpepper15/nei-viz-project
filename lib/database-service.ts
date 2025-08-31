@@ -11,25 +11,92 @@
  */
 
 import { supabase } from './supabase'
-import { Database } from './database.types'
+import { Database, Json } from './database.types'
+import { CircuitParameters, ImpedancePoint } from '../app/components/circuit-simulator/types'
 
 // Type aliases for cleaner code
 type Tables = Database['public']['Tables']
-type UserSession = Tables['user_sessions']['Row']
 type UserSessionInsert = Tables['user_sessions']['Insert']
 type UserSessionUpdate = Tables['user_sessions']['Update']
-type TaggedModel = Tables['tagged_models']['Row']
 type TaggedModelInsert = Tables['tagged_models']['Insert']
-type ParameterExplorationSession = Tables['parameter_exploration_sessions']['Row']
 type ParameterExplorationSessionInsert = Tables['parameter_exploration_sessions']['Insert']
-type MLTrainingDataset = Tables['ml_training_datasets']['Row']
 type MLTrainingDatasetInsert = Tables['ml_training_datasets']['Insert']
-type MLModel = Tables['ml_models']['Row']
 type MLModelInsert = Tables['ml_models']['Insert']
-type VisualizationSnapshot = Tables['visualization_snapshots']['Row']
 type VisualizationSnapshotInsert = Tables['visualization_snapshots']['Insert']
-type ParameterOptimizationJob = Tables['parameter_optimization_jobs']['Row']
 type ParameterOptimizationJobInsert = Tables['parameter_optimization_jobs']['Insert']
+
+// Additional type definitions for better type safety
+export interface FilterSettings {
+  [key: string]: unknown
+}
+
+export interface DisplaySettings {
+  [key: string]: unknown
+}
+
+export interface PanelStates {
+  [key: string]: boolean | string | number
+}
+
+export interface SliderValues {
+  [key: string]: number
+}
+
+export interface CameraPosition {
+  x: number
+  y: number
+  z: number
+  rotation: { x: number; y: number; z: number }
+}
+
+export interface UserAnnotations {
+  [key: string]: unknown
+}
+
+export interface MLObjectives {
+  [key: string]: unknown
+}
+
+export interface MLConstraints {
+  [key: string]: unknown
+}
+
+export interface MLRecommendations {
+  [key: string]: unknown
+}
+
+export interface TrainingConfig {
+  [key: string]: unknown
+}
+
+export interface Hyperparameters {
+  [key: string]: number | string | boolean
+}
+
+export interface MLMetrics {
+  [key: string]: number | string | unknown
+}
+
+export interface ParameterBounds {
+  [key: string]: { min: number; max: number }
+}
+
+export interface OptimizationConstraints {
+  [key: string]: unknown
+}
+
+export interface FeatureEngineeringConfig {
+  [key: string]: unknown
+}
+
+export interface SamplingStrategy {
+  type: 'grid' | 'random' | 'latin_hypercube' | 'sobol'
+  [key: string]: unknown
+}
+
+export interface ParameterRanges {
+  [parameter: string]: { min: number; max: number; count?: number }
+}
 
 // Extended interfaces for better type safety
 export interface SessionEnvironment {
@@ -38,7 +105,7 @@ export interface SessionEnvironment {
   memoryLimit?: string
   cacheSize?: string
   debugMode?: boolean
-  customSettings?: Record<string, any>
+  customSettings?: Record<string, unknown>
 }
 
 export interface VisualizationSettings {
@@ -62,16 +129,16 @@ export interface PerformanceSettings {
 export interface TaggingContext {
   cameraPosition?: { x: number; y: number; z: number; rotation: { x: number; y: number; z: number } }
   currentZoom?: number
-  filterSettings?: any
+  filterSettings?: FilterSettings
   timestamp: string
-  sessionContext?: Record<string, any>
+  sessionContext?: Record<string, unknown>
 }
 
 export interface MLDatasetMetrics {
   featureImportance?: Record<string, number>
   correlationMatrix?: number[][]
-  dataDistribution?: Record<string, any>
-  outlierAnalysis?: any
+  dataDistribution?: Record<string, unknown>
+  outlierAnalysis?: Record<string, unknown>
   qualityScore: number
 }
 
@@ -92,9 +159,9 @@ export class SessionService {
       user_id: userId,
       session_name: sessionName,
       description,
-      environment_variables: environmentVariables || {},
-      visualization_settings: visualizationSettings || {},
-      performance_settings: performanceSettings || {}
+      environment_variables: (environmentVariables || {}) as Json,
+      visualization_settings: (visualizationSettings || {}) as Json,
+      performance_settings: (performanceSettings || {}) as Json
     }
 
     const { data, error } = await supabase
@@ -107,10 +174,17 @@ export class SessionService {
   }
 
   static async getActiveSession(userId: string) {
+    // Get the most recent active session directly instead of using RPC
     const { data, error } = await supabase
-      .rpc('get_active_user_session', { user_uuid: userId })
+      .from('user_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('last_accessed', { ascending: false })
+      .limit(1)
+      .single()
 
-    return { data: data?.[0] || null, error }
+    return { data: data || null, error }
   }
 
   static async updateSession(sessionId: string, updates: UserSessionUpdate) {
@@ -126,7 +200,12 @@ export class SessionService {
 
   static async updateSessionActivity(sessionId: string) {
     const { error } = await supabase
-      .rpc('update_session_activity', { session_uuid: sessionId })
+      .from('user_sessions')
+      .update({ 
+        last_accessed: new Date().toISOString(),
+        is_active: true 
+      })
+      .eq('id', sessionId)
 
     return { error }
   }
@@ -185,9 +264,9 @@ export class TaggedModelService {
       modelId: string
       tagName: string
       tagCategory?: 'user' | 'ml_generated' | 'optimal' | 'interesting'
-      circuitParameters: any
+      circuitParameters: CircuitParameters
       resnormValue?: number
-      impedanceSpectrum?: any
+      impedanceSpectrum?: ImpedancePoint[]
       taggingContext?: TaggingContext
       notes?: string
       mlRelevanceScore?: number
@@ -200,10 +279,10 @@ export class TaggedModelService {
       model_id: modelData.modelId,
       tag_name: modelData.tagName,
       tag_category: modelData.tagCategory || 'user',
-      circuit_parameters: modelData.circuitParameters,
+      circuit_parameters: modelData.circuitParameters as unknown as Json,
       resnorm_value: modelData.resnormValue,
-      impedance_spectrum: modelData.impedanceSpectrum,
-      tagging_context: modelData.taggingContext,
+      impedance_spectrum: modelData.impedanceSpectrum as unknown as Json,
+      tagging_context: modelData.taggingContext as unknown as Json,
       notes: modelData.notes,
       ml_relevance_score: modelData.mlRelevanceScore
     }
@@ -306,11 +385,11 @@ export class ParameterExplorationService {
     explorationData: {
       name: string
       type?: 'manual' | 'automated' | 'ml_guided'
-      parameterRanges: any
-      samplingStrategy: any
+      parameterRanges: ParameterRanges
+      samplingStrategy: SamplingStrategy
       totalCombinations?: number
-      mlObjectives?: any
-      mlConstraints?: any
+      mlObjectives?: MLObjectives
+      mlConstraints?: MLConstraints
     }
   ) {
     const data: ParameterExplorationSessionInsert = {
@@ -342,10 +421,10 @@ export class ParameterExplorationService {
       progressPercentage?: number
       status?: 'active' | 'completed' | 'paused' | 'failed'
       averageComputationTime?: string
-      mlRecommendations?: any
+      mlRecommendations?: MLRecommendations
     }
   ) {
-    const updates: any = { ...progress }
+    const updates: Record<string, unknown> = { ...progress }
     if (progress.status === 'completed') {
       updates.completed_at = new Date().toISOString()
     }
@@ -393,7 +472,7 @@ export class MLDatasetService {
       featureCount: number
       datasetType: 'regression' | 'classification' | 'optimization'
       targetVariable?: string
-      featureEngineeringConfig?: any
+      featureEngineeringConfig?: FeatureEngineeringConfig
       dataQualityScore?: number
     }
   ) {
@@ -510,12 +589,12 @@ export class MLModelService {
       modelType: string
       description?: string
       trainingDatasetId?: string
-      trainingConfig: any
-      hyperparameters: any
+      trainingConfig: TrainingConfig
+      hyperparameters: Hyperparameters
       modelPath: string
-      trainingMetrics?: any
-      validationMetrics?: any
-      testMetrics?: any
+      trainingMetrics?: MLMetrics
+      validationMetrics?: MLMetrics
+      testMetrics?: MLMetrics
       modelSizeBytes?: number
       trainingDuration?: string
     }
@@ -594,9 +673,9 @@ export class MLModelService {
   static async updateModelMetrics(
     modelId: string,
     metrics: {
-      trainingMetrics?: any
-      validationMetrics?: any
-      testMetrics?: any
+      trainingMetrics?: MLMetrics
+      validationMetrics?: MLMetrics
+      testMetrics?: MLMetrics
     }
   ) {
     const { data, error } = await supabase
@@ -626,13 +705,13 @@ export class VisualizationSnapshotService {
       name: string
       description?: string
       visualizationType: 'spider2d' | 'spider3d' | 'nyquist'
-      cameraPosition?: any
-      filterSettings?: any
-      displaySettings?: any
-      panelStates?: any
-      sliderValues?: any
+      cameraPosition?: CameraPosition
+      filterSettings?: FilterSettings
+      displaySettings?: DisplaySettings
+      panelStates?: PanelStates
+      sliderValues?: SliderValues
       selectedModels?: string[]
-      userAnnotations?: any
+      userAnnotations?: UserAnnotations
       isPublic?: boolean
       sharedWith?: string[]
     }
@@ -712,8 +791,8 @@ export class ParameterOptimizationService {
       name: string
       algorithm: 'genetic' | 'bayesian' | 'grid_search' | 'random_search'
       objectiveFunction: string
-      parameterBounds: any
-      constraints?: any
+      parameterBounds: ParameterBounds
+      constraints?: OptimizationConstraints
       maxIterations?: number
       convergenceTolerance?: number
       populationSize?: number
@@ -747,9 +826,9 @@ export class ParameterOptimizationService {
     jobId: string,
     progress: {
       currentIteration?: number
-      bestParameters?: any
+      bestParameters?: Record<string, number>
       bestObjectiveValue?: number
-      convergenceHistory?: any
+      convergenceHistory?: Record<string, unknown>
       progressPercentage?: number
       status?: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
       errorMessage?: string
@@ -757,7 +836,7 @@ export class ParameterOptimizationService {
       cpuHoursUsed?: number
     }
   ) {
-    const updates: any = { ...progress }
+    const updates: Record<string, unknown> = { ...progress }
     if (progress.status === 'completed' || progress.status === 'failed') {
       updates.completed_at = new Date().toISOString()
     }
@@ -918,7 +997,7 @@ export class DatabaseService {
       format?: 'json' | 'csv' | 'hdf5'
     } = {}
   ) {
-    const exportData: any = {
+    const exportData: Record<string, unknown> = {
       metadata: {
         userId,
         exportedAt: new Date().toISOString(),

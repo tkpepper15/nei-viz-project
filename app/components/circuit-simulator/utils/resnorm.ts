@@ -159,7 +159,7 @@ export const calculateResnormWithConfig = (
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
   frequency?: number,
-  config: ResnormConfig = { method: ResnormMethod.MAE }
+  config: ResnormConfig = { method: ResnormMethod.SSR }
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {

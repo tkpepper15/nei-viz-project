@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import Image from 'next/image';
 import { SpiderPlot } from './visualizations/SpiderPlot';
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
 import { ModelSnapshot, ResnormGroup } from './types';
@@ -216,13 +217,22 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       //   calculate_impedance_spectrum(userReferenceParams) : null;
       
       // Convert gridResults to ModelSnapshot format
-      return gridResults.map((result, index) => ({
+      return gridResults.map((result, index): ModelSnapshot => ({
         id: result.id?.toString() || `model-${index}`,
+        name: `Model ${index}`,
+        timestamp: Date.now(),
         parameters: result.parameters,
         resnorm: result.resnorm,
-        data: result.spectrum || [],
-        isReference: result.isReference || false,
-        color: '#10B981' // Default color - will be overridden by portion-based system
+        data: (result.spectrum || []).map(point => ({
+          real: point.real,
+          imaginary: point.imag,
+          frequency: point.freq,
+          magnitude: point.mag,
+          phase: point.phase
+        })),
+        color: '#10B981', // Default color - will be overridden by portion-based system
+        isVisible: true,
+        opacity: result.alpha || 1
       }));
     }
     
@@ -623,10 +633,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 <>
                   {shouldUseWorkerRendering && workerImageUrl ? (
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <img 
+                      <Image 
                         src={workerImageUrl} 
                         alt="Worker-rendered spider plot"
-                        className="max-w-full max-h-full object-contain"
+                        fill
+                        className="object-contain"
                         style={{ background: 'transparent' }}
                       />
                     </div>

@@ -126,7 +126,7 @@ export const SessionNavbar: React.FC = () => {
         {/* Tagged Models Indicator */}
         <div className="flex items-center space-x-1.5 text-xs text-gray-400">
           <TagIcon className="h-3.5 w-3.5" />
-          <span>Tagged: {sessionState.savedProfiles?.reduce((total, profile) => total + (profile.taggedModels?.length || 0), 0) || 0}</span>
+          <span>Tagged: {sessionState.savedProfiles?.length || 0}</span>
         </div>
 
         {/* Settings */}

@@ -1055,7 +1055,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     });
     
     return allResults;
-  }, [initializeWorkerPool]);
+  }, [initializeWorkerPool, initializeSharedData]);
 
   // Enhanced cancel computation with immediate force termination
   const cancelComputation = useCallback(() => {
