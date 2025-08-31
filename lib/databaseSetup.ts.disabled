@@ -20,7 +20,7 @@ export class DatabaseSetup {
         return {
           success: false,
           error: 'Connection failed',
-          details: connectionError
+          details: connectionError as unknown as Record<string, unknown>
         };
       }
       
@@ -60,7 +60,7 @@ export class DatabaseSetup {
       return {
         success: false,
         error: 'Connection test failed',
-        details: error
+        details: error as unknown as Record<string, unknown>
       };
     }
   }

@@ -2040,46 +2040,50 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Load tagged models from database for current user and session
   const loadTaggedModelsFromDatabase = useCallback(async () => {
-    if (!user || !sessionManagement.sessionState.sessionId) {
-      return;
-    }
+    // TODO: Temporarily disabled for deployment - re-enable after fixing database-service
+    console.log('Tagged models loading temporarily disabled for deployment');
+    return;
 
-    try {
-      // Import TaggedModelService dynamically
-      const { TaggedModelService } = await import('../../lib/database-service');
-      
-      const { data: dbTaggedModels, error } = await TaggedModelService.getTaggedModels(
-        user.id, 
-        sessionManagement.sessionState.sessionId
-      );
+    // if (!user || !sessionManagement.sessionState.sessionId) {
+    //   return;
+    // }
 
-      if (error) {
-        console.error('❌ Failed to load tagged models from database:', error);
-        return;
-      }
+    // try {
+    //   // Import TaggedModelService dynamically
+    //   const { TaggedModelService } = await import('../../lib/database-service');
+    //   
+    //   const { data: dbTaggedModels, error } = await TaggedModelService.getTaggedModels(
+    //     user.id, 
+    //     sessionManagement.sessionState.sessionId
+    //   );
 
-      if (dbTaggedModels && dbTaggedModels.length > 0) {
-        console.log(`🏷️ Loaded ${dbTaggedModels.length} tagged models from database`);
-        
-        // Convert database tagged models to local state format
-        const newTaggedModels = new Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>();
-        
-        dbTaggedModels.forEach(dbModel => {
-          newTaggedModels.set(dbModel.model_id, {
-            tagName: dbModel.tag_name,
-            profileId: savedProfilesState.selectedProfile || 'unknown',
-            resnormValue: dbModel.resnorm_value || 0,
-            taggedAt: new Date(dbModel.tagged_at).getTime(),
-            notes: dbModel.notes || undefined
-          });
-        });
+    //   if (error) {
+    //     console.error('❌ Failed to load tagged models from database:', error);
+    //     return;
+    //   }
 
-        setTaggedModels(newTaggedModels);
-        updateStatusMessage(`📊 Loaded ${dbTaggedModels.length} previously tagged models`);
-      }
-    } catch (error) {
-      console.error('❌ Error loading tagged models from database:', error);
-    }
+    //   if (dbTaggedModels && dbTaggedModels.length > 0) {
+    //     console.log(`🏷️ Loaded ${dbTaggedModels.length} tagged models from database`);
+    //     
+    //     // Convert database tagged models to local state format
+    //     const newTaggedModels = new Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>();
+    //     
+    //     dbTaggedModels.forEach(dbModel => {
+    //       newTaggedModels.set(dbModel.model_id, {
+    //         tagName: dbModel.tag_name,
+    //         profileId: savedProfilesState.selectedProfile || 'unknown',
+    //         resnormValue: dbModel.resnorm_value || 0,
+    //         taggedAt: new Date(dbModel.tagged_at).getTime(),
+    //         notes: dbModel.notes || undefined
+    //       });
+    //     });
+
+    //     setTaggedModels(newTaggedModels);
+    //     updateStatusMessage(`📊 Loaded ${dbTaggedModels.length} previously tagged models`);
+    //   }
+    // } catch (error) {
+    //   console.error('❌ Error loading tagged models from database:', error);
+    // }
   }, [user, sessionManagement.sessionState.sessionId, savedProfilesState.selectedProfile, updateStatusMessage]);
 
   // Load tagged models when user or session changes
@@ -2103,45 +2107,49 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
 
     try {
-      // Load tagged models from database for this user
-      const { TaggedModelService } = await import('../../lib/database-service');
+      // TODO: Temporarily disabled for deployment - re-enable after fixing database-service
+      console.log('Tagged models viewing temporarily disabled for deployment');
+      updateStatusMessage('Tagged models viewing temporarily disabled');
+      return;
       
-      const { data: dbTaggedModels, error } = await TaggedModelService.getTaggedModels(user.id);
+      // Load tagged models from database for this user
+      // const { TaggedModelService } = await import('../../lib/database-service');
+      // const { data: dbTaggedModels, error } = await TaggedModelService.getTaggedModels(user.id);
 
-      if (error) {
-        console.error('❌ Failed to load tagged models from database:', error);
-        updateStatusMessage('Failed to load tagged models from database');
-        return;
-      }
+      // if (error) {
+      //   console.error('❌ Failed to load tagged models from database:', error);
+      //   updateStatusMessage('Failed to load tagged models from database');
+      //   return;
+      // }
 
-      if (dbTaggedModels && dbTaggedModels.length > 0) {
-        // Switch to visualizer tab and load the tagged models
-        setVisualizationTab('visualizer');
-        
-        // Create a map for the visualization to highlight tagged models
-        const profileTaggedModels = new Map<string, string>();
-        dbTaggedModels.forEach(dbModel => {
-          profileTaggedModels.set(dbModel.model_id, dbModel.tag_name);
-        });
-        
-        // Update the local tagged models state for visualization
-        const newTaggedModels = new Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>();
-        dbTaggedModels.forEach(dbModel => {
-          newTaggedModels.set(dbModel.model_id, {
-            tagName: dbModel.tag_name,
-            profileId,
-            resnormValue: dbModel.resnorm_value || 0,
-            taggedAt: new Date(dbModel.tagged_at).getTime(),
-            notes: dbModel.notes || undefined
-          });
-        });
-        setTaggedModels(newTaggedModels);
-        
-        updateStatusMessage(`📊 Viewing ${dbTaggedModels.length} tagged models from database`);
-        console.log('🏷️ Loaded tagged models from database:', dbTaggedModels);
-      } else {
-        updateStatusMessage(`No tagged models found in database for "${profile.name}"`);
-      }
+      // if (dbTaggedModels && dbTaggedModels.length > 0) {
+      //   // Switch to visualizer tab and load the tagged models
+      //   setVisualizationTab('visualizer');
+      //   
+      //   // Create a map for the visualization to highlight tagged models
+      //   const profileTaggedModels = new Map<string, string>();
+      //   dbTaggedModels.forEach(dbModel => {
+      //     profileTaggedModels.set(dbModel.model_id, dbModel.tag_name);
+      //   });
+      //   
+      //   // Update the local tagged models state for visualization
+      //   const newTaggedModels = new Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>();
+      //   dbTaggedModels.forEach(dbModel => {
+      //     newTaggedModels.set(dbModel.model_id, {
+      //       tagName: dbModel.tag_name,
+      //       profileId,
+      //       resnormValue: dbModel.resnorm_value || 0,
+      //       taggedAt: new Date(dbModel.tagged_at).getTime(),
+      //       notes: dbModel.notes || undefined
+      //     });
+      //   });
+      //   setTaggedModels(newTaggedModels);
+      //   
+      //   updateStatusMessage(`📊 Viewing ${dbTaggedModels.length} tagged models from database`);
+      //   console.log('🏷️ Loaded tagged models from database:', dbTaggedModels);
+      // } else {
+      //   updateStatusMessage(`No tagged models found in database for "${profile.name}"`);
+      // }
     } catch (error) {
       console.error('❌ Error loading tagged models:', error);
       updateStatusMessage('Error loading tagged models');

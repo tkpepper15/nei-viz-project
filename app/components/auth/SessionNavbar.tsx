@@ -2,13 +2,21 @@
 
 import React, { useState } from 'react'
 import { useAuth } from './AuthProvider'
-import { useSimpleSessionManagement } from '../../hooks/useSimpleSessionManagement'
+// import { useSimpleSessionManagement } from '../../hooks/useSimpleSessionManagement' // Temporarily disabled for deployment
 import { CogIcon, PlusIcon, FolderIcon, TagIcon } from '@heroicons/react/24/outline'
 import { UserSelector } from './UserSelector'
 
 export const SessionNavbar: React.FC = () => {
   const { user } = useAuth()
-  const { sessionState, actions, isReady } = useSimpleSessionManagement()
+  // const { sessionState, actions, isReady } = useSimpleSessionManagement() // Temporarily disabled for deployment
+  const sessionState = { 
+    sessionName: null, 
+    savedProfiles: [], 
+    visualizationSettings: { visualizationType: 'spider3d' },
+    performanceSettings: {},
+    taggedModels: []
+  }; 
+  const isReady = false;
   const [showSessionMenu, setShowSessionMenu] = useState(false)
 
   if (!user) {

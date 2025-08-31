@@ -874,7 +874,18 @@ export interface CircuitParameters {
   frequency_range: [number, number] // [min, max] Hz
 }
 
-export interface SavedConfigurationWithProfile extends Database['public']['Tables']['saved_configurations']['Row'] {
+export interface SavedConfigurationWithProfile {
+  id: string
+  created_at: string
+  user_id: string
+  configuration_name: string
+  description: string | null
+  circuit_parameters: Json
+  session_environment: Json | null
+  visualization_settings: Json | null
+  performance_settings: Json | null
+  is_active: boolean
+  last_used: string | null
   user_profiles: {
     full_name: string | null
     username: string | null
