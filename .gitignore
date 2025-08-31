@@ -67,6 +67,7 @@ next-env.d.ts
 
 # Database check scripts (contain debugging info)
 check-database.js
+test-supabase-profiles.js
 
 # VSCode
 .vscode/*

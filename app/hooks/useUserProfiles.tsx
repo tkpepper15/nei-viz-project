@@ -66,7 +66,9 @@ export const useUserProfiles = () => {
       setProfilesState(prev => ({ ...prev, profiles }));
       setError(null);
     } catch (err) {
-      console.error('❌ Error loading profiles from Supabase:', err);
+      console.error('❌ Error loading profiles from Supabase:');
+      console.error('Error object:', err);
+      console.error('Error stringified:', JSON.stringify(err, null, 2));
       
       const localProfiles = loadProfilesFromLocalStorage();
       console.log('📂 Loaded', localProfiles.length, 'profiles from localStorage fallback');

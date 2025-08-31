@@ -54,7 +54,7 @@ export class ProfilesService {
     try {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { data: tableCheck, error: tableError } = await supabase
-        .from('user_profiles')
+        .from('saved_configurations')
         .select('count')
         .limit(1);
       
@@ -67,7 +67,7 @@ export class ProfilesService {
         });
         
         if (tableError.code === 'PGRST116' || tableError.message?.includes('does not exist')) {
-          throw new Error('user_profiles table does not exist - run database migration');
+          throw new Error('saved_configurations table does not exist - run database migration');
         }
         
         throw tableError;
@@ -87,7 +87,7 @@ export class ProfilesService {
       .from('saved_configurations')
       .select('*')
       .eq('user_id', userId)
-      .order('last_used', { ascending: false });
+      .order('updated_at', { ascending: false });
 
     console.log('📊 Query result:', { 
       hasData: !!data, 
@@ -96,11 +96,18 @@ export class ProfilesService {
     });
 
     if (error) {
-      console.error('❌ Error fetching user profiles:', {
+      console.error('❌ Error fetching user profiles from saved_configurations table:');
+      console.error('Full error object:', JSON.stringify(error, null, 2));
+      console.error('Error details:', {
         message: error.message,
         code: error.code,
         hint: error.hint,
         details: error.details
+      });
+      console.error('Query details:', {
+        table: 'saved_configurations',
+        userId: userId,
+        orderBy: 'updated_at'
       });
       throw error;
     }
@@ -204,7 +211,7 @@ export class ProfilesService {
   private static convertDatabaseProfileToSavedProfile(dbProfile: Record<string, unknown>): SavedProfile {
     return {
       id: dbProfile.id as string,
-      name: (dbProfile.configuration_name || dbProfile.name) as string,
+      name: dbProfile.name as string,
       description: dbProfile.description as string,
       groundTruthParams: dbProfile.circuit_parameters as CircuitParameters,
       gridSize: dbProfile.grid_size as number,
