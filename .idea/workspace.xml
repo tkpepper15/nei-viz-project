@@ -5,21 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.npmrc" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/DatabaseDiagnostics.tsx" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/app/components/auth/SessionNavbar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/auth/SessionNavbar.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/hooks/useSessionManagement.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useSessionManagement.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/hooks/useSimpleSessionManagement.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/hooks/useUserProfiles.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useUserProfiles.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/database-service.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/database.types.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/database.types.ts" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/databaseSetup.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/ml-data-interface.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/profilesService.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/session-database-service.ts" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/tsconfig.json" beforeDir="false" afterPath="$PROJECT_DIR$/tsconfig.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/supabase.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/supabase.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vercel.json" beforeDir="false" afterPath="$PROJECT_DIR$/vercel.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

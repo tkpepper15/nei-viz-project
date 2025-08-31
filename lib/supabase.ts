@@ -221,12 +221,13 @@ export const getUserSessions = async (userId: string) => {
   return { data, error }
 }
 
-export const getActiveSession = async (userId: string) => {
-  const { data, error } = await supabase
-    .rpc('get_active_user_session', { user_uuid: userId })
-  
-  return { data: data?.[0] || null, error }
-}
+// TODO: Temporarily disabled for deployment 
+// export const getActiveSession = async (userId: string) => {
+//   const { data, error } = await supabase
+//     .rpc('get_active_user_session', { user_uuid: userId })
+//   
+//   return { data: data?.[0] || null, error }
+// }
 
 export const createSession = async (sessionData: Database['public']['Tables']['user_sessions']['Insert']) => {
   const { data, error } = await supabase
