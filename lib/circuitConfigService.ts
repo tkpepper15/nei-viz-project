@@ -5,6 +5,52 @@ import { supabase } from './supabase';
 import { CircuitParameters } from '../app/components/circuit-simulator/types/parameters';
 import { Json } from './database.types';
 
+// UI Settings interfaces for comprehensive state persistence
+export interface UISettings {
+  // Tab and panel states
+  activeTab: 'visualizer' | 'math' | 'data' | 'activity';
+  splitPaneHeight: number; // Bottom panel height percentage
+  
+  // Visualization settings
+  opacityLevel: number;
+  opacityExponent: number;
+  logScalar: number;
+  visualizationMode: 'color' | 'opacity';
+  backgroundColor: 'transparent' | 'white' | 'black';
+  showGroundTruth: boolean;
+  includeLabels: boolean;
+  maxPolygons: number;
+  
+  // Performance settings
+  useSymmetricGrid: boolean;
+  adaptiveLimit: boolean;
+  maxMemoryUsage: number;
+  
+  // Reference model settings
+  referenceModelVisible: boolean;
+  manuallyHidden: boolean;
+  
+  // Multi-select and interaction states
+  isMultiSelectMode: boolean;
+  selectedCircuits: string[];
+  
+  // Window and panel positions (for future modal/window support)
+  windowPositions?: {
+    [key: string]: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+  };
+  
+  // Sidebar and toolbox states
+  sidebarCollapsed?: boolean;
+  toolboxPositions?: {
+    [key: string]: { x: number; y: number };
+  };
+}
+
 // Circuit Configuration interfaces
 export interface CircuitConfiguration {
   id: string;
@@ -22,6 +68,7 @@ export interface CircuitConfiguration {
   totalPoints?: number;
   validPoints?: number;
   computationResults?: unknown;
+  uiSettings?: UISettings; // NEW: UI settings persistence
   createdAt: string;
   updatedAt: string;
 }
@@ -34,6 +81,7 @@ export interface CreateCircuitConfigRequest {
   minFreq: number;
   maxFreq: number;
   numPoints: number;
+  uiSettings?: UISettings; // NEW: Optional UI settings for new configs
 }
 
 // Database row interface (matches actual schema)
@@ -53,6 +101,7 @@ interface CircuitConfigRow {
   total_points?: number | null;
   valid_points?: number | null;
   computation_results?: Json | null;
+  ui_settings?: Json | null; // NEW: UI settings storage
   created_at: string;
   updated_at: string;
 }
@@ -118,7 +167,8 @@ export class CircuitConfigService {
           max_freq: config.maxFreq,
           num_points: config.numPoints,
           is_computed: false,
-          is_public: false
+          is_public: false,
+          ui_settings: config.uiSettings ? config.uiSettings as unknown as Json : null
         })
         .select()
         .single();
@@ -148,6 +198,7 @@ export class CircuitConfigService {
       totalPoints?: number;
       validPoints?: number;
       computationResults?: unknown;
+      uiSettings?: UISettings;
     }>
   ): Promise<CircuitConfiguration> {
     console.log('🔄 Updating circuit configuration:', configId);
@@ -178,6 +229,7 @@ export class CircuitConfigService {
       if (updates.totalPoints !== undefined) mappedUpdates.total_points = updates.totalPoints;
       if (updates.validPoints !== undefined) mappedUpdates.valid_points = updates.validPoints;
       if (updates.computationResults !== undefined) mappedUpdates.computation_results = updates.computationResults as unknown as Json;
+      if (updates.uiSettings !== undefined) mappedUpdates.ui_settings = updates.uiSettings as unknown as Json;
       
       mappedUpdates.updated_at = new Date().toISOString();
 
@@ -279,6 +331,35 @@ export class CircuitConfigService {
   }
 
   /**
+   * Update only UI settings for a configuration (lightweight auto-save)
+   */
+  static async updateUISettings(configId: string, uiSettings: UISettings): Promise<boolean> {
+    console.log('🔄 Auto-saving UI settings for configuration:', configId);
+
+    try {
+      const { error } = await (supabase as any)
+        .from('circuit_configurations')
+        .update({
+          ui_settings: uiSettings as unknown as Json,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', configId);
+
+      if (error) {
+        console.error('❌ Error auto-saving UI settings:', error);
+        return false;
+      }
+
+      console.log('✅ UI settings auto-saved successfully');
+      return true;
+
+    } catch (error) {
+      console.error('❌ Exception in updateUISettings:', error);
+      return false;
+    }
+  }
+
+  /**
    * Convert database row to CircuitConfiguration interface
    */
   private static convertDatabaseRowToCircuitConfig(row: CircuitConfigRow): CircuitConfiguration {
@@ -298,6 +379,7 @@ export class CircuitConfigService {
       totalPoints: row.total_points || undefined,
       validPoints: row.valid_points || undefined,
       computationResults: row.computation_results,
+      uiSettings: row.ui_settings ? row.ui_settings as unknown as UISettings : undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };
