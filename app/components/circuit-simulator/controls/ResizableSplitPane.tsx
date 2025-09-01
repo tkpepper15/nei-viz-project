@@ -9,6 +9,7 @@ interface ResizableSplitPaneProps {
   minBottomHeight?: number;
   className?: string;
   resizerClassName?: string;
+  onSplitChange?: (bottomHeight: number) => void; // NEW: Callback for position changes
 }
 
 export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
@@ -17,7 +18,8 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
   minTopHeight = 200,
   minBottomHeight = 150,
   className = '',
-  resizerClassName = ''
+  resizerClassName = '',
+  onSplitChange
 }) => {
   const [bottomHeight, setBottomHeight] = useState(defaultSplitHeight);
   const [isDragging, setIsDragging] = useState(false);
@@ -53,6 +55,11 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
       );
       
       setBottomHeight(constrainedHeight);
+      
+      // Notify parent component of change
+      if (onSplitChange) {
+        onSplitChange(constrainedHeight);
+      }
     });
   }, [isDragging, minTopHeight, minBottomHeight]);
 

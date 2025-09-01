@@ -14,6 +14,7 @@ import { useComputationState } from './circuit-simulator/hooks/useComputationSta
 import { useUserProfiles } from '../hooks/useUserProfiles';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useCircuitConfigurations } from '../hooks/useCircuitConfigurations';
+import { useUISettingsManager } from '../hooks/useUISettingsManager';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
@@ -47,16 +48,40 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const {
     configurations: circuitConfigurations, // ENABLED: For sidebar display
     activeConfigId,
-    // activeConfiguration, // Not used directly
-    loading: configLoading,
-    // error: configError, // Not used
+    activeConfiguration, // NOW USED: For UI settings restoration
     createConfiguration,
     updateConfiguration, // NEEDED: For handleSaveProfile
     deleteConfiguration, // ENABLED: For profile deletion
     deleteMultipleConfigurations, // ENABLED: For bulk deletion
-    setActiveConfiguration,
-    hasConfigurations
-  } = useCircuitConfigurations(sessionManagement.sessionState.userId || undefined);
+    setActiveConfiguration
+  } = useCircuitConfigurations(
+    sessionManagement.sessionState.userId || undefined,
+    sessionManagement.sessionState.currentCircuitConfigId
+  );
+
+  // UI Settings management with auto-save
+  const {
+    uiSettings,
+    setActiveTab,
+    setSplitPaneHeight, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setOpacityLevel, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setOpacityExponent,
+    setLogScalar, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setVisualizationMode, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setBackgroundColor, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setShowGroundTruth, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setIncludeLabels, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setMaxPolygons, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setReferenceModelVisible, // eslint-disable-line @typescript-eslint/no-unused-vars
+    setManuallyHidden,
+    setIsMultiSelectMode,
+    setSelectedCircuits,
+    forceSave // eslint-disable-line @typescript-eslint/no-unused-vars
+  } = useUISettingsManager({
+    configId: activeConfigId,
+    initialSettings: activeConfiguration?.uiSettings,
+    autoSaveEnabled: true
+  });
 
   // User profiles (for backward compatibility - will be phased out)
   const { profilesState: savedProfilesState, actions: profileActions } = useUserProfiles();
@@ -208,7 +233,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     };
   }, []);
 
-  const [visualizationTab, setVisualizationTab] = useState<'visualizer' | 'math' | 'data' | 'activity'>('visualizer');
+  // Visualization tab is now managed by UI settings
+  const visualizationTab = uiSettings.activeTab;
+  const setVisualizationTab = setActiveTab;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
   
@@ -223,11 +250,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [visualizationTab, resnormGroups.length, lastComputedResults, restoreComputationState]);
   
-  // Multi-select state for circuits
-  const [selectedCircuits, setSelectedCircuits] = useState<string[]>([]);
-  const [isMultiSelectMode, setIsMultiSelectMode] = useState<boolean>(false);
+  // Multi-select state for circuits is now managed by UI settings
+  const selectedCircuits = uiSettings.selectedCircuits;
+  const isMultiSelectMode = uiSettings.isMultiSelectMode;
   // Track if reference model was manually hidden
-  const [manuallyHidden, setManuallyHidden] = useState<boolean>(false);
+  // Manually hidden state is now managed by UI settings
+  const manuallyHidden = uiSettings.manuallyHidden;
   // Configuration name for saving profiles
   const [configurationName, setConfigurationName] = useState<string>('');
   
@@ -241,11 +269,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // Visualization settings - these are now passed to child components but setters not used
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [opacityLevel, setOpacityLevel] = useState<number>(0.7);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [logScalar, setLogScalar] = useState<number>(1.0);
-  // Add opacity exponent state for spider plot and data table
-  const [opacityExponent, setOpacityExponent] = useState<number>(5);
+  // Opacity level is now managed by UI settings
+  const opacityLevel = uiSettings.opacityLevel;
+  // Log scalar and opacity exponent are now managed by UI settings
+  const logScalar = uiSettings.logScalar; // eslint-disable-line @typescript-eslint/no-unused-vars
+  const opacityExponent = uiSettings.opacityExponent;
   
   // Visualization settings state
   const [visualizationSettings] = useState<{
@@ -351,6 +379,30 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     frequency_range: [0.1, 100000]
   });
   
+  // Helper function to generate unique circuit names
+  const generateUniqueCircuitName = useCallback((baseName: string): string => {
+    if (!circuitConfigurations) return baseName;
+    
+    const existingNames = circuitConfigurations.map(config => config.name.toLowerCase());
+    const baseNameLower = baseName.toLowerCase();
+    
+    // If the base name doesn't exist, return it
+    if (!existingNames.includes(baseNameLower)) {
+      return baseName;
+    }
+    
+    // Find the next available number
+    let counter = 1;
+    let uniqueName = `${baseName} (${counter})`;
+    
+    while (existingNames.includes(uniqueName.toLowerCase())) {
+      counter++;
+      uniqueName = `${baseName} (${counter})`;
+    }
+    
+    return uniqueName;
+  }, [circuitConfigurations]);
+  
   // Function to create a new circuit with standard configuration
   const handleNewCircuit = useCallback(async () => {
     // Clear any existing results
@@ -384,20 +436,22 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       minute: '2-digit',
       hour12: false 
     });
-    const newCircuitName = `New Circuit ${timestamp}`;
-    setConfigurationName(newCircuitName);
+    const baseCircuitName = `New Circuit ${timestamp}`;
+    const uniqueCircuitName = generateUniqueCircuitName(baseCircuitName);
+    setConfigurationName(uniqueCircuitName);
     
     // Automatically create and select the new circuit profile
     try {
       console.log('🆕 Creating new circuit profile automatically...');
       const newProfileId = await handleSaveProfile(
-        newCircuitName, 
-        'Last action: New circuit configuration created'
+        uniqueCircuitName, 
+        'Last action: New circuit configuration created',
+        true  // forceNew: true to ensure a new circuit is created
       );
       
       if (newProfileId) {
         console.log('✅ New circuit profile created:', newProfileId);
-        updateStatusMessage(`New circuit "${newCircuitName}" created and selected - ready to customize and compute`);
+        updateStatusMessage(`New circuit "${uniqueCircuitName}" created and selected - ready to customize and compute`);
       } else {
         console.error('❌ Failed to create new circuit profile');
         updateStatusMessage('New circuit created but failed to save profile - you can save manually');
@@ -406,7 +460,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       console.error('❌ Error creating new circuit profile:', error);
       updateStatusMessage('New circuit created - profile creation failed, you can save manually');
     }
-  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName]);
+  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName]);
   
   // Compute grid function
   const handleCompute = useCallback(async () => {
@@ -589,11 +643,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   const handleSelectCircuit = useCallback((configId: string) => {
     if (isMultiSelectMode) {
-      setSelectedCircuits(prev => 
-        prev.includes(configId) 
-          ? prev.filter(id => id !== configId)
-          : [...prev, configId]
-      );
+      const newSelectedCircuits = selectedCircuits.includes(configId) 
+        ? selectedCircuits.filter(id => id !== configId)
+        : [...selectedCircuits, configId];
+      setSelectedCircuits(newSelectedCircuits);
     } else {
       // Normal single selection behavior
       // Clear existing grid results when switching configurations
@@ -624,7 +677,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         updateStatusMessage(`Loaded configuration: ${config.name} - Previous grid data cleared, ready to compute`);
       }
     }
-  }, [isMultiSelectMode, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage]);
+  }, [isMultiSelectMode, selectedCircuits, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage, setIsMultiSelectMode, setSelectedCircuits]);
   
   const handleBulkDelete = useCallback(async () => {
     if (selectedCircuits.length === 0) return;
@@ -869,51 +922,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [user, authLoading]);
 
-  // Auto-create default circuit configuration when user has none (only once)
+  // Synchronize configurationName with activeConfiguration.name
   useEffect(() => {
-    const createDefaultConfig = async () => {
-      // Guard against multiple creation attempts
-      if (!sessionManagement.sessionState.userId || 
-          configLoading || 
-          hasConfigurations ||
-          sessionManagement.sessionState.isLoading) {
-        return;
-      }
-
-      console.log('🔧 No circuit configurations found, creating default...');
-      
-      const defaultConfig = {
-        name: 'Default Circuit Configuration',
-        description: 'Automatically created default configuration',
-        circuitParameters: {
-          Rsh: 5005,
-          Ra: 5005,
-          Ca: 0.00002505,
-          Rb: 5005,
-          Cb: 0.00002505,
-          frequency_range: [0.1, 100000] as [number, number]
-        },
-        gridSize: 9,
-        minFreq: 0.1,
-        maxFreq: 100000,
-        numPoints: 100
-      };
-
-      const newConfig = await createConfiguration(defaultConfig);
-      
-      if (newConfig) {
-        console.log('✅ Default circuit configuration created:', newConfig.id);
-        // Set it as active in session
-        await sessionManagement.actions.setActiveCircuitConfig(newConfig.id);
-        updateStatusMessage('Default circuit configuration created');
-      } else {
-        console.error('❌ Failed to create default circuit configuration');
-        updateStatusMessage('Failed to create circuit configuration');
-      }
-    };
-
-    createDefaultConfig();
-  }, [sessionManagement.sessionState.userId, sessionManagement.sessionState.isLoading, configLoading, hasConfigurations, createConfiguration, sessionManagement.actions, updateStatusMessage]);
+    if (activeConfiguration && activeConfiguration.name !== configurationName) {
+      console.log('🔄 Syncing configuration name:', activeConfiguration.name);
+      setConfigurationName(activeConfiguration.name);
+    }
+  }, [activeConfiguration, configurationName]);
 
   // Synchronize session's active circuit config with local state
   useEffect(() => {
@@ -2036,8 +2051,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     // Create new configuration (either force new, no active config, or auto-save failed)
     console.log('🆕 Creating new circuit configuration...');
     try {
+      // Ensure unique name for new configurations
+      const baseName = name || 'New Circuit Configuration';
+      const uniqueName = generateUniqueCircuitName(baseName);
+      
       const newConfig = await createConfiguration({
-        name: name || 'New Circuit Configuration',
+        name: uniqueName,
         description: description || 'Circuit configuration saved from simulator',
         circuitParameters: parameters,
         gridSize,
@@ -2062,7 +2081,33 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       updateStatusMessage(`Error saving configuration "${name}": ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
-  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, activeConfigId, createConfiguration, updateConfiguration, sessionManagement]);
+  }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, activeConfigId, createConfiguration, updateConfiguration, sessionManagement, generateUniqueCircuitName]);
+
+  // Handle configuration name changes with auto-save
+  const handleConfigurationNameChange = useCallback(async (newName: string) => {
+    setConfigurationName(newName);
+    
+    // If there's an active configuration and the name is not empty, auto-update the configuration
+    if (activeConfigId && activeConfiguration && newName.trim() && newName.trim() !== activeConfiguration.name) {
+      try {
+        const success = await updateConfiguration(activeConfigId, {
+          name: newName.trim(),
+          description: activeConfiguration.description,
+          circuitParameters: parameters,
+          gridSize,
+          minFreq,
+          maxFreq,
+          numPoints
+        });
+        
+        if (success) {
+          console.log('✅ Configuration name updated automatically');
+        }
+      } catch (error) {
+        console.error('❌ Failed to auto-update configuration name:', error);
+      }
+    }
+  }, [activeConfigId, activeConfiguration, parameters, gridSize, minFreq, maxFreq, numPoints, updateConfiguration]);
 
 
 
@@ -2395,6 +2440,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               </button>
             )}
           </div>
+          
           
           {/* Expand button - positioned to appear over the logo when hovered */}
           {leftNavCollapsed && (
@@ -3092,7 +3138,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       onSaveProfile={handleSaveProfile}
                       isComputing={isComputingGrid}
                       configurationName={configurationName}
-                      onConfigurationNameChange={setConfigurationName}
+                      onConfigurationNameChange={handleConfigurationNameChange}
                       selectedProfileId={savedProfilesState.selectedProfile}
                     />
                   </div>

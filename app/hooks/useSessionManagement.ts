@@ -33,7 +33,7 @@ export interface SessionActions {
   }) => Promise<boolean>
   
   // NEW: Set active circuit configuration
-  setActiveCircuitConfig: (configId: string) => Promise<void>
+  setActiveCircuitConfig: (configId: string | null) => Promise<void>
 }
 
 export const useSessionManagement = () => {
@@ -235,7 +235,7 @@ export const useSessionManagement = () => {
   }, [sessionState.userId, sessionState.sessionId])
 
   // NEW: Set active circuit configuration for current session
-  const setActiveCircuitConfig = useCallback(async (configId: string): Promise<void> => {
+  const setActiveCircuitConfig = useCallback(async (configId: string | null): Promise<void> => {
     console.log('🔄 Setting active circuit configuration:', configId);
 
     if (!sessionState.sessionId) {

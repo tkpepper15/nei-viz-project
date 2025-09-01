@@ -10,7 +10,7 @@ interface CircuitConfigurationsState {
   error: string | null;
 }
 
-export const useCircuitConfigurations = (userId?: string) => {
+export const useCircuitConfigurations = (userId?: string, sessionConfigId?: string | null) => {
   const [state, setState] = useState<CircuitConfigurationsState>({
     configurations: [],
     activeConfigId: null,
@@ -37,19 +37,30 @@ export const useCircuitConfigurations = (userId?: string) => {
       console.log('🔄 Loading circuit configurations for user:', userId);
       const configs = await CircuitConfigService.getUserCircuitConfigurations(userId);
       
-      setState(prev => ({
-        ...prev,
-        configurations: configs,
-        // Auto-select first configuration as active if none is selected
-        activeConfigId: prev.activeConfigId || (configs.length > 0 ? configs[0].id : null),
-        loading: false
-      }));
+      setState(prev => {
+        // Determine active config - prioritize session config, then previous state
+        let activeConfigId = null;
+        if (sessionConfigId && configs.find(c => c.id === sessionConfigId)) {
+          activeConfigId = sessionConfigId;
+          console.log(`🔄 Restoring active config from session: ${sessionConfigId}`);
+        } else if (prev.activeConfigId && configs.find(c => c.id === prev.activeConfigId)) {
+          activeConfigId = prev.activeConfigId;
+          console.log(`🔄 Maintaining previous active config: ${prev.activeConfigId}`);
+        }
+
+        return {
+          ...prev,
+          configurations: configs,
+          activeConfigId,
+          loading: false
+        };
+      });
 
       console.log(`✅ Loaded ${configs.length} circuit configurations`);
       
-      // If there's no active config but we have configurations, set the first one as active
-      if (configs.length > 0 && !state.activeConfigId) {
-        console.log(`🔄 Auto-setting first configuration as active: ${configs[0].id}`);
+      // Don't auto-create configurations on reload
+      if (configs.length === 0) {
+        console.log('📋 No configurations found - user will need to create one manually');
       }
 
     } catch (error) {
@@ -60,9 +71,9 @@ export const useCircuitConfigurations = (userId?: string) => {
         error: error instanceof Error ? error.message : 'Failed to load configurations'
       }));
     }
-  }, [userId]);
+  }, [userId, sessionConfigId]);
 
-  // Load configurations when userId changes
+  // Load configurations when userId or sessionConfigId changes
   useEffect(() => {
     loadConfigurations();
   }, [loadConfigurations]);
