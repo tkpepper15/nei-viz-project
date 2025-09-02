@@ -6,6 +6,10 @@ import { ModelSnapshot } from '../types';
 interface ResnormDisplayProps {
   models: ModelSnapshot[]; // All available models for spectrum analysis
   onResnormRangeChange?: (minResnorm: number, maxResnorm: number) => void; // Callback for range selection
+  currentResnorm?: number | null; // Current resnorm being navigated for highlighting
+  onResnormSelect?: (resnorm: number) => void; // Callback for clicking on specific resnorm value
+  taggedModels?: Map<string, string>; // Map of model id to tag name
+  tagColors?: string[]; // Array of colors for tagged models
 }
 
 // Navigation state for granular model selection
@@ -18,7 +22,11 @@ interface NavigationState {
 
 const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ 
   models, 
-  onResnormRangeChange
+  onResnormRangeChange,
+  currentResnorm = null,
+  onResnormSelect,
+  taggedModels = new Map(),
+  tagColors = ['#FF6B9D', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8E8', '#F8C471', '#82E0AA', '#85C1E9']
 }) => {
 
   // Spectrum interaction state
@@ -298,7 +306,85 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
       ctx.fillText(hoveredResnorm.toExponential(2), hoverX, margin.top - 15);
     }
     
-  }, [spectrumData, selectedRange, hoveredResnorm, models]);
+    // Current resnorm highlighting (from 3D navigation)
+    if (currentResnorm !== null && currentResnorm >= spectrumData.minResnorm && currentResnorm <= spectrumData.maxResnorm) {
+      const currentX = margin.left + ((currentResnorm - spectrumData.minResnorm) / spectrumData.resnormRange) * chartWidth;
+      
+      // Draw gold vertical line for current resnorm
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      
+      ctx.beginPath();
+      ctx.moveTo(currentX, margin.top - 5);
+      ctx.lineTo(currentX, margin.top + chartHeight + 5);
+      ctx.stroke();
+      
+      // Current resnorm value with background
+      ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      const currentText = currentResnorm.toExponential(2);
+      const textMetrics = ctx.measureText(currentText);
+      ctx.fillRect(currentX - textMetrics.width/2 - 4, margin.top - 25, textMetrics.width + 8, 16);
+      
+      ctx.fillStyle = '#000000';
+      ctx.fillText(currentText, currentX, margin.top - 12);
+      
+      // Current position indicator dot
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(currentX, margin.top + chartHeight/2, 6, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    
+    // Tagged models indicators
+    if (taggedModels.size > 0 && spectrumData) {
+      const taggedModelIds = Array.from(taggedModels.keys());
+      taggedModelIds.forEach((modelId, index) => {
+        const taggedModel = models.find(m => m.id === modelId);
+        if (taggedModel && taggedModel.resnorm) {
+          const tagResnorm = taggedModel.resnorm;
+          if (tagResnorm >= spectrumData.minResnorm && tagResnorm <= spectrumData.maxResnorm) {
+            const tagX = margin.left + ((tagResnorm - spectrumData.minResnorm) / spectrumData.resnormRange) * chartWidth;
+            const tagColor = tagColors[index % tagColors.length];
+            
+            // Draw vertical line for tagged model
+            ctx.strokeStyle = tagColor;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.8;
+            ctx.setLineDash([]);
+            
+            ctx.beginPath();
+            ctx.moveTo(tagX, margin.top);
+            ctx.lineTo(tagX, margin.top + chartHeight);
+            ctx.stroke();
+            
+            // Draw tagged model indicator dot
+            ctx.fillStyle = tagColor;
+            ctx.globalAlpha = 1.0;
+            ctx.beginPath();
+            ctx.arc(tagX, margin.top + chartHeight + 15, 5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Draw tag name below
+            const tagName = taggedModels.get(modelId) || '';
+            ctx.fillStyle = tagColor;
+            ctx.font = 'bold 9px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(tagName, tagX, margin.top + chartHeight + 30);
+          }
+        }
+      });
+    }
+    
+  }, [spectrumData, selectedRange, hoveredResnorm, models, currentResnorm, taggedModels, tagColors]);
   
   // Handle mouse interactions for crop-style handles
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -316,6 +402,12 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
     
     const relativeX = Math.max(0, Math.min(chartWidth, x - marginLeft));
     const resnormValue = spectrumData.minResnorm + (relativeX / chartWidth) * spectrumData.resnormRange;
+
+    // Handle double-click for resnorm selection (direct navigation)
+    if (e.detail === 2 && onResnormSelect) {
+      onResnormSelect(resnormValue);
+      return;
+    }
     
     // Calculate handle positions
     const startX = ((selectedRange.min - spectrumData.minResnorm) / spectrumData.resnormRange) * chartWidth;

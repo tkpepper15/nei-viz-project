@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Image from 'next/image';
 import { SpiderPlot } from './visualizations/SpiderPlot';
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
@@ -168,6 +168,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // State for resnorm range filtering
   const [selectedResnormRange, setSelectedResnormRange] = useState<{min: number; max: number} | null>(null);
   
+  // State for current resnorm navigation and model highlighting
+  const [currentResnorm, setCurrentResnorm] = useState<number | null>(null);
+  const [highlightedModelId, setHighlightedModelId] = useState<string | null>(null);
+  
   // State for tagged models - convert parent prop to local Map format
   const localTaggedModels = useMemo(() => {
     if (!taggedModels) return new Map<string, string>();
@@ -185,6 +189,20 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Handle resnorm range change from ResnormDisplay
   const handleResnormRangeChange = useCallback((min: number, max: number) => {
     setSelectedResnormRange({ min, max });
+  }, []);
+
+  // Handle current resnorm change from 3D view hover
+  const handleCurrentResnormChange = useCallback((resnorm: number | null) => {
+    setCurrentResnorm(resnorm);
+  }, []);
+
+  // Handle resnorm selection (shift-click in 3D view or double-click in histogram)
+  // This will be defined after modelsWithUpdatedResnorm to avoid dependency issues
+  const handleResnormSelectRef = useRef<((resnorm: number) => void) | null>(null);
+
+  // Handle tagged model selection for highlighting
+  const handleTaggedModelSelect = useCallback((modelId: string) => {
+    setHighlightedModelId(prevId => prevId === modelId ? null : modelId);
   }, []);
 
   // Handle model tagging - delegate to parent component
@@ -277,6 +295,31 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     if (!modelsWithUpdatedResnorm.length) return [];
     return [...modelsWithUpdatedResnorm].sort((a, b) => (a.resnorm || Infinity) - (b.resnorm || Infinity));
   }, [modelsWithUpdatedResnorm]);
+
+  // Define handleResnormSelect after modelsWithUpdatedResnorm is available
+  const handleResnormSelect = useCallback((resnorm: number) => {
+    setCurrentResnorm(resnorm);
+    
+    // Calculate a more intelligent range size based on the overall resnorm distribution
+    const allResnorms = modelsWithUpdatedResnorm.map(m => m.resnorm || 0).filter(r => r > 0);
+    if (allResnorms.length === 0) return;
+    
+    allResnorms.sort((a, b) => a - b);
+    const totalRange = allResnorms[allResnorms.length - 1] - allResnorms[0];
+    const dynamicRangeSize = Math.max(totalRange * 0.05, 0.001); // 5% of total range or minimum 0.001
+    
+    // Create a focused range centered on the selected resnorm value
+    const newMin = Math.max(allResnorms[0], resnorm - dynamicRangeSize / 2);
+    const newMax = Math.min(allResnorms[allResnorms.length - 1], resnorm + dynamicRangeSize / 2);
+    
+    setSelectedResnormRange({ 
+      min: newMin, 
+      max: newMax 
+    });
+  }, [modelsWithUpdatedResnorm]);
+
+  // Update the ref for use in components that need it earlier
+  handleResnormSelectRef.current = handleResnormSelect;
 
   // Set active snapshot to the best model for ResnormDisplay
   useEffect(() => {
@@ -686,6 +729,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         resnormRange={selectedResnormRange}
                         onModelTag={handleModelTag}
                         taggedModels={localTaggedModels}
+                        currentResnorm={currentResnorm}
+                        onResnormSelect={handleResnormSelect}
+                        onCurrentResnormChange={handleCurrentResnormChange}
+                        highlightedModelId={highlightedModelId}
+                        selectedResnormRange={selectedResnormRange}
                       />
                       )}
                     </div>
@@ -873,17 +921,30 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     <h4 className="text-sm font-medium text-neutral-200 mb-2">Tagged Models ({localTaggedModels.size})</h4>
                     <div className="space-y-2 max-h-32 overflow-y-auto">
                       {taggedModelsDisplayData.map(({ modelId, tagName, taggedModel, color }) => (
-                        <div key={modelId} className="flex items-center justify-between text-xs">
+                        <div key={modelId} className={`flex items-center justify-between text-xs rounded px-2 py-1 transition-colors cursor-pointer ${
+                          highlightedModelId === modelId ? 'bg-cyan-600/30 border border-cyan-400' : 'hover:bg-neutral-600/50'
+                        }`}
+                        onClick={() => handleTaggedModelSelect(modelId)}
+                        title="Click to highlight in 3D view"
+                        >
                           <div className="flex items-center gap-2">
                             <div 
                               className="w-3 h-3 rounded-full" 
                               style={{ backgroundColor: color }}
                             />
                             <span className="text-neutral-200">{tagName}</span>
+                            {taggedModel && (
+                              <span className="text-neutral-400">
+                                (resnorm: {taggedModel.resnorm?.toFixed(4) || 'N/A'})
+                              </span>
+                            )}
                           </div>
                           <button
-                            onClick={() => handleModelTag(taggedModel!, '')}
-                            className="text-neutral-400 hover:text-neutral-200 px-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleModelTag(taggedModel!, '');
+                            }}
+                            className="text-neutral-400 hover:text-neutral-200 px-1 rounded hover:bg-neutral-500"
                             title="Remove tag"
                           >
                             ×
@@ -991,6 +1052,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       <ResnormDisplay
                         models={visibleModels}
                         onResnormRangeChange={handleResnormRangeChange}
+                        currentResnorm={currentResnorm}
+                        onResnormSelect={handleResnormSelect}
+                        taggedModels={localTaggedModels}
+                        tagColors={tagColors}
                       />
                     </div>
                   </div>

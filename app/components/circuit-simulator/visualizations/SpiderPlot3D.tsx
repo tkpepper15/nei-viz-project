@@ -21,6 +21,11 @@ interface SpiderPlot3DProps {
   resnormRange?: { min: number; max: number } | null; // New: filter models by resnorm range
   onModelTag?: (model: ModelSnapshot, tag: string) => void; // Callback for tagging models
   taggedModels?: Map<string, string>; // Map of model id to tag name
+  currentResnorm?: number | null; // Current resnorm value being navigated
+  onResnormSelect?: (resnorm: number) => void; // Callback for shift-click resnorm selection
+  onCurrentResnormChange?: (resnorm: number | null) => void; // Callback when user hovers over resnorm levels
+  highlightedModelId?: string | null; // ID of model to highlight (for tagged model selection)
+  selectedResnormRange?: { min: number; max: number } | null; // Currently selected range in histogram
 }
 
 // Navigation removed - now handled by resnorm distribution section
@@ -111,6 +116,11 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   resnormRange = null,
   onModelTag,
   taggedModels = new Map(),
+  currentResnorm = null,
+  onResnormSelect,
+  onCurrentResnormChange,
+  highlightedModelId = null,
+  selectedResnormRange = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -282,7 +292,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         return {
           x: Math.cos(angle) * radius,
           y: Math.sin(angle) * radius,
-          z: zHeight
+          z: zHeight,
+          color: color,
+          opacity: Math.max(0.2, 1.0 - normalizedResnorm * 0.7),
+          model: model
         };
       });
 
@@ -468,6 +481,90 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.restore();
   }, [project3D, camera.scale, paramKeys]);
 
+  // Draw ground truth cross-section line through the entire resnorm spectrum
+  const drawGroundTruthCrossSection = React.useCallback((ctx: CanvasRenderingContext2D) => {
+    if (!referenceModel || !filteredModels.length) return;
+
+    ctx.save();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.8;
+    ctx.setLineDash([6, 3]);
+
+    // Calculate the full resnorm range from all filtered models
+    const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
+    if (resnorms.length === 0) return;
+
+    // Get ground truth parameter positions (same calculation as in convert3DPolygons)
+    const params = paramKeys;
+    const paramRanges = {
+      Rsh: PARAMETER_RANGES.Rsh,
+      Ra: PARAMETER_RANGES.Ra,
+      Rb: PARAMETER_RANGES.Rb,
+      Ca: PARAMETER_RANGES.Ca,
+      Cb: PARAMETER_RANGES.Cb
+    };
+
+    // Calculate ground truth vertices at different Z levels throughout the resnorm spectrum
+    const numLevels = 20; // Number of levels to draw the continuous line
+    const groundTruthVertices = Array.from({ length: numLevels }, (_, levelIndex) => {
+      // Calculate Z height for this level
+      const normalizedZ = levelIndex / (numLevels - 1);
+      const zHeight = normalizedZ * 5.0 * resnormSpread; // Match the Z scaling from convert3DPolygons
+
+      // Calculate ground truth parameter positions at this Z level
+      return params.map((param, i) => {
+        const value = referenceModel.parameters[param as keyof typeof referenceModel.parameters] as number;
+        const range = paramRanges[param as keyof typeof paramRanges];
+        
+        // Normalize parameter value to 0-1 range (logarithmic) - same as convert3DPolygons
+        const logMin = Math.log10(range.min);
+        const logMax = Math.log10(range.max);
+        const logValue = Math.log10(Math.max(range.min, Math.min(range.max, value)));
+        const normalizedValue = (logValue - logMin) / (logMax - logMin);
+        
+        // Calculate radar position (pentagon) - same as convert3DPolygons
+        const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
+        const radius = normalizedValue * 2.0;
+        
+        return {
+          x: Math.cos(angle) * radius,
+          y: Math.sin(angle) * radius,
+          z: zHeight,
+          color: '#FFFFFF',
+          opacity: 1,
+          model: referenceModel
+        };
+      });
+    });
+
+    // Draw vertical lines connecting ground truth vertices at each parameter position
+    for (let paramIndex = 0; paramIndex < params.length; paramIndex++) {
+      ctx.beginPath();
+      let pathStarted = false;
+
+      for (let levelIndex = 0; levelIndex < numLevels; levelIndex++) {
+        const vertex = groundTruthVertices[levelIndex][paramIndex];
+        const projected = project3D(vertex);
+
+        if (projected.visible) {
+          if (!pathStarted) {
+            ctx.moveTo(projected.x, projected.y);
+            pathStarted = true;
+          } else {
+            ctx.lineTo(projected.x, projected.y);
+          }
+        }
+      }
+
+      if (pathStarted) {
+        ctx.stroke();
+      }
+    }
+
+    ctx.restore();
+  }, [referenceModel, filteredModels, resnormSpread, paramKeys, project3D]);
+
   // Draw 3D polygon wireframe with depth lines and adaptive styling
   const draw3DPolygon = React.useCallback((ctx: CanvasRenderingContext2D, polygon: Polygon3D) => {
     const projectedVertices = polygon.vertices
@@ -482,9 +579,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const avgDepth = projectedVertices.reduce((sum, p) => sum + p.projected.depth, 0) / projectedVertices.length;
     const depthFactor = Math.max(0.3, Math.min(1.0, 10 / avgDepth)); // Closer = more visible
     
-    // Check if this model is hovered or tagged
+    // Check if this model is hovered, tagged, or highlighted
     const isHovered = hoveredModel?.id === polygon.model.id;
     const isTagged = taggedModels.has(polygon.model.id);
+    const isHighlighted = highlightedModelId === polygon.model.id;
     const tagName = taggedModels.get(polygon.model.id);
     
     // Draw vertical lines from base to polygon (depth indicators) with adaptive styling
@@ -508,11 +606,15 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const baseOpacity = Math.max(0.5, polygon.opacity * depthFactor);
     const baseLineWidth = Math.max(1, 2 * depthFactor * camera.scale);
     
-    // Enhanced styling for hovered/tagged models
+    // Enhanced styling for hovered/tagged/highlighted models
     if (isHovered) {
       ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.3);
       ctx.lineWidth = baseLineWidth * 2;
       ctx.strokeStyle = '#FFD700'; // Gold highlight for hover
+    } else if (isHighlighted) {
+      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.4);
+      ctx.lineWidth = baseLineWidth * 2.5;
+      ctx.strokeStyle = '#00FFFF'; // Cyan highlight for selected model
     } else if (isTagged) {
       ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.2);
       ctx.lineWidth = baseLineWidth * 1.5;
@@ -537,6 +639,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (isHovered) {
       ctx.fillStyle = '#FFD700';
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.6) * depthFactor);
+    } else if (isHighlighted) {
+      ctx.fillStyle = '#00FFFF';
+      ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.7) * depthFactor);
     } else if (isTagged) {
       ctx.fillStyle = '#FF6B9D';
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.5) * depthFactor);
@@ -546,7 +651,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     }
     
     const baseDotSize = Math.max(1.5, 3 * depthFactor * camera.scale);
-    const dotSize = isHovered ? baseDotSize * 1.5 : (isTagged ? baseDotSize * 1.2 : baseDotSize);
+    const dotSize = isHovered ? baseDotSize * 1.5 : 
+                    (isHighlighted ? baseDotSize * 2 : 
+                     (isTagged ? baseDotSize * 1.2 : baseDotSize));
     
     projectedOnly.forEach(vertex => {
       ctx.beginPath();
@@ -554,24 +661,60 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.fill();
     });
     
-    // Draw tag label if model is tagged
+    // Draw tag label if model is tagged - positioned outside the radar like parameter labels
     if (isTagged && tagName) {
+      // Find the vertex with the maximum radius to position the label outside
       const centerX = projectedOnly.reduce((sum, v) => sum + v.x, 0) / projectedOnly.length;
       const centerY = projectedOnly.reduce((sum, v) => sum + v.y, 0) / projectedOnly.length;
       
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-      ctx.font = 'bold 10px Arial';
-      const textWidth = ctx.measureText(tagName).width;
-      ctx.fillRect(centerX - textWidth/2 - 3, centerY - 8, textWidth + 6, 14);
-      
-      ctx.fillStyle = '#FFFFFF';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(tagName, centerX, centerY);
+      // Calculate direction from center to furthest vertex
+      const screenCenter = project3D({ x: 0, y: 0, z: polygon.zHeight, color: '#000000', opacity: 1, model: polygon.model });
+      if (screenCenter.visible) {
+        const dirX = centerX - screenCenter.x;
+        const dirY = centerY - screenCenter.y;
+        const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
+        
+        if (dirLength > 0) {
+          // Position label outside the polygon in the direction of the polygon center
+          const labelDistance = Math.max(80, dirLength + 40); // Position well outside
+          const labelX = screenCenter.x + (dirX / dirLength) * labelDistance;
+          const labelY = screenCenter.y + (dirY / dirLength) * labelDistance;
+          
+          // Draw enhanced label background
+          ctx.font = 'bold 11px Arial';
+          const textWidth = ctx.measureText(tagName).width;
+          const backgroundWidth = textWidth + 12;
+          const backgroundHeight = 20;
+          
+          ctx.fillStyle = 'rgba(255, 107, 157, 0.9)'; // Pink background for tagged models
+          ctx.fillRect(labelX - backgroundWidth/2, labelY - backgroundHeight/2, backgroundWidth, backgroundHeight);
+          ctx.strokeStyle = '#FF6B9D';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(labelX - backgroundWidth/2, labelY - backgroundHeight/2, backgroundWidth, backgroundHeight);
+          
+          // Draw tag name
+          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(tagName, labelX, labelY);
+          
+          // Draw connecting line from polygon to label
+          ctx.strokeStyle = '#FF6B9D';
+          ctx.lineWidth = 1;
+          ctx.globalAlpha = 0.6;
+          ctx.setLineDash([2, 2]);
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY);
+          ctx.lineTo(labelX - (dirX / dirLength) * (backgroundWidth/2 + 5), labelY - (dirY / dirLength) * (backgroundHeight/2 + 5));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1.0;
+        }
+      }
     }
 
     ctx.restore();
-  }, [project3D, camera.scale, hoveredModel, taggedModels]);
+  }, [project3D, camera.scale, hoveredModel, taggedModels, highlightedModelId]);
 
   // Draw enhanced 3D radar labels with intelligent value markers (min/max/median only)
   const draw3DRadarLabels = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -828,6 +971,166 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
     }
+
+    // Draw selected resnorm range cylinder if provided
+    if (selectedResnormRange && selectedResnormRange.min >= minResnorm && selectedResnormRange.max <= maxResnorm) {
+      const normalizedMinResnorm = (selectedResnormRange.min - minResnorm) / (maxResnorm - minResnorm);
+      const normalizedMaxResnorm = (selectedResnormRange.max - minResnorm) / (maxResnorm - minResnorm);
+      const minZ = normalizedMinResnorm * zAxisHeight;
+      const maxZ = normalizedMaxResnorm * zAxisHeight;
+      
+      // Draw resnorm range cylinder
+      const cylinderRadius = 2.1; // Slightly larger than parameter pentagon
+      const numSegments = 24; // Reduced for better performance
+      const cylinderHeight = maxZ - minZ;
+      
+      // Only draw cylinder if the height is significant
+      if (cylinderHeight > 0.1) {
+        const numZLevels = Math.max(3, Math.min(15, Math.floor(cylinderHeight * 5))); // Adaptive detail based on height
+        
+        ctx.strokeStyle = '#FFD700'; // Gold highlight color
+        ctx.lineWidth = Math.max(1, 1.5 * camera.scale);
+        ctx.globalAlpha = 0.5;
+        ctx.setLineDash([]);
+        
+        // Draw top and bottom circular sections (more prominent)
+        for (const z of [minZ, maxZ]) {
+          ctx.globalAlpha = 0.6;
+          ctx.lineWidth = Math.max(1, 2 * camera.scale);
+          ctx.beginPath();
+          for (let i = 0; i <= numSegments; i++) {
+            const angle = (i / numSegments) * 2 * Math.PI;
+            const x = Math.cos(angle) * cylinderRadius;
+            const y = Math.sin(angle) * cylinderRadius;
+            
+            const point = project3D({ x, y, z, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+            if (point.visible) {
+              if (i === 0) {
+                ctx.moveTo(point.x, point.y);
+              } else {
+                ctx.lineTo(point.x, point.y);
+              }
+            }
+          }
+          ctx.stroke();
+        }
+        
+        // Draw middle horizontal sections (lighter)
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = Math.max(1, 1 * camera.scale);
+        for (let level = 1; level < numZLevels; level++) {
+          const zProgress = level / numZLevels;
+          const z = minZ + cylinderHeight * zProgress;
+          
+          ctx.beginPath();
+          for (let i = 0; i <= numSegments; i++) {
+            const angle = (i / numSegments) * 2 * Math.PI;
+            const x = Math.cos(angle) * cylinderRadius;
+            const y = Math.sin(angle) * cylinderRadius;
+            
+            const point = project3D({ x, y, z, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+            if (point.visible) {
+              if (i === 0) {
+                ctx.moveTo(point.x, point.y);
+              } else {
+                ctx.lineTo(point.x, point.y);
+              }
+            }
+          }
+          ctx.stroke();
+        }
+        
+        // Draw vertical lines connecting the circular sections
+        ctx.globalAlpha = 0.4;
+        ctx.lineWidth = Math.max(1, 1.5 * camera.scale);
+        for (let i = 0; i < numSegments; i += 6) { // Draw every 6th vertical line to avoid clutter
+          const angle = (i / numSegments) * 2 * Math.PI;
+          const x = Math.cos(angle) * cylinderRadius;
+          const y = Math.sin(angle) * cylinderRadius;
+          
+          const bottomPoint = project3D({ x, y, z: minZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+          const topPoint = project3D({ x, y, z: maxZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+          
+          if (bottomPoint.visible && topPoint.visible) {
+            ctx.beginPath();
+            ctx.moveTo(bottomPoint.x, bottomPoint.y);
+            ctx.lineTo(topPoint.x, topPoint.y);
+            ctx.stroke();
+          }
+        }
+      }
+      
+      // Draw range labels
+      ctx.globalAlpha = 1.0;
+      const centerZ = (minZ + maxZ) / 2;
+      const centerPoint = project3D({ x: coreX + 2.5, y: coreY, z: centerZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (centerPoint.visible) {
+        const fontSize = Math.max(9, 11 * camera.scale);
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+        const rangeText = `Range: ${selectedResnormRange.min < 1 ? selectedResnormRange.min.toFixed(3) : selectedResnormRange.min.toFixed(2)} - ${selectedResnormRange.max < 1 ? selectedResnormRange.max.toFixed(3) : selectedResnormRange.max.toFixed(2)}`;
+        const textWidth = ctx.measureText(rangeText).width;
+        ctx.fillRect(centerPoint.x - 4, centerPoint.y - fontSize/2 - 2, textWidth + 8, fontSize + 4);
+        
+        ctx.fillStyle = '#000000';
+        ctx.fillText(rangeText, centerPoint.x, centerPoint.y);
+      }
+    }
+
+    // Draw current resnorm highlight if provided (for hover)
+    if (currentResnorm !== null && currentResnorm >= minResnorm && currentResnorm <= maxResnorm) {
+      const normalizedCurrentResnorm = (currentResnorm - minResnorm) / (maxResnorm - minResnorm);
+      const currentZ = normalizedCurrentResnorm * zAxisHeight;
+      
+      // Draw highlighting cross-section plane (thinner than cylinder)
+      const highlightRadius = 2.0;
+      const numSegments = 32;
+      
+      ctx.strokeStyle = '#00FFFF'; // Cyan highlight color for hover
+      ctx.lineWidth = Math.max(2, 3 * camera.scale);
+      ctx.globalAlpha = 0.8;
+      ctx.setLineDash([4, 4]); // Dashed line for hover
+      
+      // Draw circular highlight at current resnorm level
+      ctx.beginPath();
+      for (let i = 0; i <= numSegments; i++) {
+        const angle = (i / numSegments) * 2 * Math.PI;
+        const x = Math.cos(angle) * highlightRadius;
+        const y = Math.sin(angle) * highlightRadius;
+        
+        const point = project3D({ x, y, z: currentZ, color: '#00FFFF', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (point.visible) {
+          if (i === 0) {
+            ctx.moveTo(point.x, point.y);
+          } else {
+            ctx.lineTo(point.x, point.y);
+          }
+        }
+      }
+      ctx.stroke();
+      ctx.setLineDash([]); // Reset dash pattern
+      
+      // Draw current resnorm indicator in center
+      const centerPoint = project3D({ x: coreX, y: coreY, z: currentZ, color: '#00FFFF', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (centerPoint.visible) {
+        ctx.fillStyle = '#00FFFF';
+        ctx.globalAlpha = 1.0;
+        ctx.beginPath();
+        ctx.arc(centerPoint.x, centerPoint.y, Math.max(4, 6 * camera.scale), 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Add current resnorm value label
+        const fontSize = Math.max(10, 12 * camera.scale);
+        ctx.font = `bold ${fontSize}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#000000';
+        const labelText = currentResnorm < 1 ? currentResnorm.toFixed(3) : currentResnorm.toFixed(2);
+        ctx.fillText(labelText, centerPoint.x, centerPoint.y);
+      }
+    }
     
     // Draw resnorm value labels positioned inside the core at different Z heights
     const fontSize = Math.max(10, Math.min(14, 12 * camera.scale));
@@ -894,7 +1197,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     
     
     ctx.restore();
-  }, [filteredModels, project3D, camera.scale, resnormSpread]);
+  }, [filteredModels, project3D, camera.scale, resnormSpread, currentResnorm, selectedResnormRange]);
 
 
   // Draw parameter values list with clean table formatting
@@ -1044,6 +1347,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw 3D radar chart grid
     draw3DRadarGrid(ctx);
 
+    // Draw ground truth cross-section line (before polygons for proper layering)
+    drawGroundTruthCrossSection(ctx);
+
     // Sort polygons by average Z-depth for proper rendering order
     const sortedPolygons = [...convert3DPolygons].sort((a, b) => {
       return b.zHeight - a.zHeight; // Front to back for proper transparency
@@ -1051,7 +1357,6 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
     // Render each 3D radar polygon
     sortedPolygons.forEach(polygon => {
-      // @ts-expect-error - Complex type incompatibility with Polygon3D vertices
       draw3DPolygon(ctx, polygon);
     });
 
@@ -1135,37 +1440,49 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw orientation cube
     drawOrientationCube(ctx);
 
-  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawOrientationCube, paramKeys]);
+  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, drawGroundTruthCrossSection, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawOrientationCube, paramKeys]);
 
   // Professional 3D navigation handlers (Blender/Onshape-style) with model selection
   const handleMouseDown = (e: React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickY = e.clientY - rect.top;
+    
+    // Check for shift-click resnorm selection
+    if (e.button === 0 && e.shiftKey && onResnormSelect) {
+      const selectedResnorm = findResnormAtPoint(clickX, clickY);
+      if (selectedResnorm !== null) {
+        onResnormSelect(selectedResnorm);
+        return; // Don't start dragging
+      }
+    }
+    
     // Check for model selection on left click without modifiers
     if (e.button === 0 && !e.shiftKey && !e.ctrlKey && onModelTag) {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
-        
-        const clickedModel = findModelAtPoint(clickX, clickY);
-        if (clickedModel) {
-          // Show tag dialog
-          setShowTagDialog({
-            model: clickedModel,
-            x: e.clientX,
-            y: e.clientY
-          });
-          return; // Don't start dragging if we're showing tag dialog
-        }
+      const clickedModel = findModelAtPoint(clickX, clickY);
+      if (clickedModel) {
+        // Show tag dialog
+        setShowTagDialog({
+          model: clickedModel,
+          x: e.clientX,
+          y: e.clientY
+        });
+        return; // Don't start dragging if we're showing tag dialog
       }
     }
     
     // Determine interaction mode based on mouse button and modifiers
     let dragMode: NavigationMode = 'orbit';
-    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+    if (e.button === 1) {
       dragMode = 'pan';
     } else if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
       dragMode = 'zoom';
+    } else if (e.button === 0 && e.shiftKey) {
+      // For shift+left click that didn't hit a resnorm point, use pan mode
+      dragMode = 'pan';
     }
 
     setInteraction({
@@ -1177,8 +1494,50 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
   };
 
+  // Function to find resnorm level at a given screen position
+  const findResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
+    if (!filteredModels.length) return null;
+    
+    const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
+    const minResnorm = Math.min(...resnorms);
+    const maxResnorm = Math.max(...resnorms);
+    const zAxisHeight = 5.0 * resnormSpread;
+    
+    // Check multiple points along the central Z-axis and around it for better detection
+    const numTestPoints = 30;
+    const testRadiusRange = [0, 0.5, 1.0]; // Test at center and slightly around
+    let closestResnorm: number | null = null;
+    let minDistance = Infinity;
+    
+    for (const testRadius of testRadiusRange) {
+      for (let i = 0; i < numTestPoints; i++) {
+        const normalizedZ = i / (numTestPoints - 1);
+        const z = normalizedZ * zAxisHeight;
+        const resnormValue = minResnorm + normalizedZ * (maxResnorm - minResnorm);
+        
+        // Test center and points around it
+        for (let angle = 0; angle < (testRadius > 0 ? 8 : 1); angle++) {
+          const testAngle = (angle / 8) * 2 * Math.PI;
+          const testX = testRadius * Math.cos(testAngle);
+          const testY = testRadius * Math.sin(testAngle);
+          
+          const testPoint = project3D({ x: testX, y: testY, z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+          if (testPoint.visible) {
+            const distance = Math.sqrt(Math.pow(testPoint.x - screenX, 2) + Math.pow(testPoint.y - screenY, 2));
+            if (distance < 50 && distance < minDistance) { // Increased to 50 pixels
+              minDistance = distance;
+              closestResnorm = resnormValue;
+            }
+          }
+        }
+      }
+    }
+    
+    return closestResnorm;
+  }, [filteredModels, resnormSpread, project3D]);
+
   const handleMouseMove = (e: React.MouseEvent) => {
-    // Handle hover detection for model highlighting
+    // Handle hover detection for model highlighting and resnorm detection
     if (!interaction.isDragging) {
       const canvas = canvasRef.current;
       if (canvas) {
@@ -1188,6 +1547,14 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         
         const hoveredModelFound = findModelAtPoint(hoverX, hoverY);
         setHoveredModel(hoveredModelFound);
+        
+        // Check for resnorm level hovering - only if canvas is visible and has models
+        if (models.length > 0 && canvas.offsetParent !== null) {
+          const hoveredResnorm = findResnormAtPoint(hoverX, hoverY);
+          if (onCurrentResnormChange) {
+            onCurrentResnormChange(hoveredResnorm);
+          }
+        }
       }
       return;
     }
@@ -1237,6 +1604,15 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   };
 
   const handleMouseUp = () => {
+    setInteraction(prev => ({ ...prev, isDragging: false }));
+  };
+
+  const handleMouseLeave = () => {
+    // Clear hover states and stop dragging when mouse leaves the canvas
+    setHoveredModel(null);
+    if (onCurrentResnormChange) {
+      onCurrentResnormChange(null);
+    }
     setInteraction(prev => ({ ...prev, isDragging: false }));
   };
 
@@ -1347,7 +1723,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
         onWheel={handleWheel}
         onContextMenu={handleContextMenu}
         onFocus={() => canvasRef.current?.focus()}
@@ -1371,6 +1747,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
           <div className="bg-black bg-opacity-80 p-3 rounded text-white text-xs">
             <div className="space-y-1">
               <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
+              <div>Shift+Click: Select Resnorm Level</div>
               <div className="text-xs text-gray-400">R: Reset</div>
             </div>
           </div>
