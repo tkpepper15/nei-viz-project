@@ -2247,28 +2247,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [user, sessionManagement.isReady, activeConfigId, loadTaggedModelsFromDatabase]);
 
-  // Handle viewing tagged models for a specific configuration  
-  const handleViewTaggedModels = useCallback(async (configId: string) => {
-    const config = circuitConfigurations?.find(c => c.id === configId);
-    if (!config) {
-      updateStatusMessage('Configuration not found');
-      return;
-    }
-
-    if (!user) {
-      updateStatusMessage('Please sign in to view tagged models');
-      return;
-    }
-
-    // Switch to the configuration (this will automatically load tagged models via useEffect)
-    setActiveConfiguration(configId);
-    sessionManagement.actions.setActiveCircuitConfig(configId);
-    
-    // Switch to visualizer tab to show the tagged models
-    setVisualizationTab('visualizer');
-    
-    updateStatusMessage(`📊 Switched to configuration "${config.name}" - loading tagged models...`);
-  }, [circuitConfigurations, updateStatusMessage, user, setActiveConfiguration, sessionManagement.actions]);
 
   // Handle model tagging from visualization components
   const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string) => {
@@ -2674,7 +2652,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 }, 100);
               }
             }}
-            onViewTaggedModels={handleViewTaggedModels}
             isCollapsed={leftNavCollapsed}
                 />
           {/* End of Saved Profiles Section */}

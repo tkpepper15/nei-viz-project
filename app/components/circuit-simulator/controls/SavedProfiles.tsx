@@ -12,7 +12,6 @@ interface SavedProfilesProps {
   onEditProfile: (profileId: string, name: string, description?: string) => void;
   onEditParameters?: (profileId: string) => void;
   onComputeProfile: (profileId: string) => void;
-  onViewTaggedModels?: (profileId: string) => void;
   onCopyParams?: (profileId: string) => void;
   isCollapsed: boolean;
   onRestart?: () => void;
@@ -36,7 +35,6 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
   onEditProfile,
   onEditParameters,
   onComputeProfile,
-  onViewTaggedModels,
   onCopyParams,
   isCollapsed,
   onRestart: _onRestart, // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -205,7 +203,6 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
                 onEdit={() => setEditingProfile(profile)}
                 onEditParameters={onEditParameters ? () => onEditParameters(profile.id) : undefined}
                 onCompute={() => onComputeProfile(profile.id)}
-                onViewTaggedModels={onViewTaggedModels ? () => onViewTaggedModels(profile.id) : undefined}
                 onCopyParams={onCopyParams ? () => onCopyParams(profile.id) : undefined}
                 isMultiSelectMode={isMultiSelectMode}
                 isSelectedForDelete={selectedCircuits.includes(profile.id)}
