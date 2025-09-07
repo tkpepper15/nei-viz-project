@@ -95,6 +95,8 @@ interface CenterParameterPanelProps {
   configurationName?: string;
   onConfigurationNameChange?: (name: string) => void;
   selectedProfileId?: string | null; // To know if there's a current profile to update
+  maxComputationResults: number;
+  onMaxComputationResultsChange: (limit: number) => void;
   // Removed resnorm config props since method is fixed to SSR
 }
 
@@ -116,7 +118,9 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
   isComputing,
   configurationName = '',
   onConfigurationNameChange,
-  selectedProfileId
+  selectedProfileId,
+  maxComputationResults,
+  onMaxComputationResultsChange
   // Removed resnorm config params since method is fixed to SSR
 }) => {
   // Circuit parameter change handlers
@@ -132,7 +136,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
 
   // Visualization type handler
-  const handleVisualizationTypeChange = useCallback((type: 'spider2d' | 'spider3d' | 'nyquist') => {
+  const handleVisualizationTypeChange = useCallback((type: 'spider3d' | 'nyquist') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
@@ -209,7 +213,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
   // Grid size validation
   const gridSizeValid = useMemo(() => {
-    return validateParameter(gridSize, 2, 25);
+    return validateParameter(gridSize, 2, 30);
   }, [gridSize, validateParameter]);
 
   // Overall validation state
@@ -229,7 +233,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
       errors.push("Number of frequency points must be between 10 and 1000");
     }
     if (!gridSizeValid) {
-      errors.push("Grid size must be between 2 and 25 points");
+      errors.push("Grid size must be between 2 and 30 points");
     }
     
     return errors;
@@ -346,6 +350,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 />
               </div>
 
+
               {/* Grid Configuration */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Points per Parameter */}
@@ -361,13 +366,42 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                     value={gridSize}
                     onChange={onGridSizeChange}
                     min={2}
-                    max={25}
+                    max={30}
                     step={1}
                     showSlider={true}
                   />
                 </div>
 
-                {/* Group Portion */}
+                {/* Computation Result Limit */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium text-neutral-200">
+                      Max Results to Store
+                    </label>
+                    <div className="text-xs text-neutral-400">
+                      Top {maxComputationResults.toLocaleString()} kept
+                    </div>
+                  </div>
+                  <select
+                    value={maxComputationResults}
+                    onChange={(e) => onMaxComputationResultsChange(parseInt(e.target.value))}
+                    className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  >
+                    <option value={500}>500 (Ultra Fast)</option>
+                    <option value={1000}>1,000 (Fast)</option>
+                    <option value={2000}>2,000 (Balanced)</option>
+                    <option value={3000}>3,000 (Quality)</option>
+                    <option value={5000}>5,000 (High Quality)</option>
+                  </select>
+                  <div className="text-xs text-neutral-500">
+                    Higher limits find better results but use more memory
+                  </div>
+                </div>
+              </div>
+
+              {/* Visualization Controls */}
+              <div className="grid grid-cols-1 gap-6">
+                {/* Group Portion - moved from above */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-neutral-200">
@@ -458,11 +492,10 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   Visualization Type
                 </label>
                 <select
-                  value={staticRenderSettings.visualizationType}
-                  onChange={(e) => handleVisualizationTypeChange(e.target.value as 'spider2d' | 'spider3d' | 'nyquist')}
+                  value={staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' : 'spider3d'}
+                  onChange={(e) => handleVisualizationTypeChange(e.target.value as 'spider3d' | 'nyquist')}
                   className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 >
-                  <option value="spider2d">Spider 2D</option>
                   <option value="spider3d">Spider 3D</option>
                   <option value="nyquist">Nyquist Plot</option>
                 </select>

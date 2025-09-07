@@ -1,12 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Image from 'next/image';
-import { SpiderPlot } from './visualizations/SpiderPlot';
+// SpiderPlot 2D import removed - using only 3D visualization
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
 import { ModelSnapshot, ResnormGroup } from './types';
 import { GridParameterArrays, BackendMeshPoint } from './types';
 import { CircuitParameters } from './types/parameters';
 import { StaticRenderSettings } from './controls/StaticRenderControls';
-import { PerformanceSettings } from './controls/PerformanceControls';
 import { ResnormConfig, calculateResnormWithConfig, calculate_impedance_spectrum } from './utils/resnorm';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { calculateTimeConstants } from './math/utils';
@@ -15,7 +13,7 @@ import ResnormDisplay from './insights/ResnormDisplay';
 interface VisualizationSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
-  visualizationType: 'spider2d' | 'spider3d' | 'nyquist';
+  visualizationType: 'spider3d' | 'nyquist';
   resnormMatchingPortion?: number; // For fine-tuning resnorm grouping
 }
 
@@ -41,8 +39,6 @@ interface VisualizerTabProps {
   // Circuit parameter management
   groundTruthParams: CircuitParameters;
   
-  // Performance settings (unused in current simplified layout)
-  performanceSettings: PerformanceSettings;
   
   // Frequency configuration for Nyquist plot
   numPoints: number;
@@ -60,12 +56,13 @@ interface VisualizerTabProps {
   // Tagged models support
   taggedModels?: Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>;
   onModelTag?: (model: ModelSnapshot, tagName: string, profileId?: string) => void;
+  
 }
 
 export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   resnormGroups,
-  hiddenGroups,
-  opacityLevel,
+  hiddenGroups: _hiddenGroups, // eslint-disable-line @typescript-eslint/no-unused-vars
+  opacityLevel: _opacityLevel, // eslint-disable-line @typescript-eslint/no-unused-vars
   referenceModelId: _referenceModelId, // eslint-disable-line @typescript-eslint/no-unused-vars
   gridSize,
   onGridValuesGenerated: _onGridValuesGenerated, // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -74,7 +71,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Circuit parameters from parent
   userReferenceParams,
   // View control props
-  showLabels,
+  showLabels: _showLabels, // eslint-disable-line @typescript-eslint/no-unused-vars
   // Visualization settings callback
   onVisualizationSettingsChange,
   // Static render settings for visualization consistency
@@ -82,8 +79,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   onStaticRenderSettingsChange,
   // Circuit parameter management
   groundTruthParams,
-  // Performance settings (unused in current simplified layout)
-  performanceSettings: _performanceSettings, // eslint-disable-line @typescript-eslint/no-unused-vars
   
   // Frequency configuration for Nyquist plot
   numPoints: _numPoints, // eslint-disable-line @typescript-eslint/no-unused-vars
@@ -112,10 +107,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // const [resnormMatchingPortion] = useState<number>(25); // Removed - replaced with logarithmic selection
   // Use ground truth parameters from toolbox (userReferenceParams) or direct groundTruthParams
   const effectiveGroundTruthParams = userReferenceParams || groundTruthParams;
-  // Use visualization settings from static render settings
-  const visualizationType = staticRenderSettings.visualizationType;
-  const view3D = staticRenderSettings.visualizationType === 'spider3d';
-  const setVisualizationType = (type: 'spider2d' | 'spider3d' | 'nyquist') => {
+  // Use visualization settings from static render settings - defaulting to 3D only
+  const visualizationType = staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' : 'spider3d';
+  const view3D = visualizationType === 'spider3d';
+  const setVisualizationType = (type: 'spider3d' | 'nyquist') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
@@ -330,13 +325,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [sortedModels, activeSnapshot]);
   
-  // Rendering mode state with automatic selection (simplified since rendering engine controls removed)
-  const [renderingMode] = useState<'auto' | 'interactive' | 'tile'>('auto');
-  const [forceMode] = useState<boolean>(false);
+  // Rendering mode state - unused after removing 2D plot support  
+  // const [renderingMode] = useState<'auto' | 'interactive' | 'tile'>('auto');
+  // const [forceMode] = useState<boolean>(false);
   
   // Use external props if provided, otherwise use internal state
   // const currentZoomLevel = zoomLevel !== undefined ? zoomLevel : internalZoomLevel; // Unused after UI cleanup
-  const currentShowLabels = showLabels !== undefined ? showLabels : staticRenderSettings.includeLabels;
+  // const currentShowLabels = showLabels !== undefined ? showLabels : staticRenderSettings.includeLabels; // Unused after removing 2D plot
 
   // Notify parent of visualization settings changes
   useEffect(() => {
@@ -449,25 +444,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [topConfigurations, selectedNyquistConfig]);
 
-  // Automatic rendering mode selection based on dataset size
-  const actualRenderingMode = useMemo(() => {
-    if (renderingMode !== 'auto' || forceMode) {
-      return renderingMode === 'auto' ? 'interactive' : renderingMode;
-    }
-
-    const totalModels = (resnormGroups || [])
-      .filter((_, index) => !hiddenGroups.includes(index))
-      .reduce((sum, group) => sum + group.items.length, 0);
-
-    // Automatic selection thresholds
-    if (totalModels > 50000) {
-      return 'tile'; // Use tile-based for large datasets
-    } else if (totalModels > 10000) {
-      return 'tile'; // Use tile-based for medium-large datasets
-    } else {
-      return 'interactive'; // Use interactive for smaller datasets
-    }
-  }, [renderingMode, forceMode, resnormGroups, hiddenGroups]);
+  // Automatic rendering mode selection - unused after removing 2D plot
+  // const actualRenderingMode = useMemo(() => { ... }, [renderingMode, forceMode, resnormGroups, hiddenGroups]);
 
   // Performance metrics for display - removed unused after UI cleanup
   // Performance metrics removed after UI cleanup
@@ -520,82 +498,12 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     });
   }, [localTaggedModels, visibleModels, tagColors]);
 
-  // Enhanced worker-assisted rendering for extremely large datasets
-  const [isWorkerRendering, setIsWorkerRendering] = useState(false);
-  const [workerProgress, setWorkerProgress] = useState(0);
-  const [workerImageUrl, setWorkerImageUrl] = useState<string | null>(null);
+  // Enhanced worker-assisted rendering for extremely large datasets - unused after removing 2D plot
+  // const [isWorkerRendering, setIsWorkerRendering] = useState(false);
+  // const [workerProgress, setWorkerProgress] = useState(0);
+  // const [workerImageUrl, setWorkerImageUrl] = useState<string | null>(null);
 
-  // Determine if we should use worker-assisted rendering
-  const shouldUseWorkerRendering = useMemo(() => {
-    const WORKER_THRESHOLD = 100000; // Use workers for >100k models
-    return visibleModels.length > WORKER_THRESHOLD && actualRenderingMode === 'tile';
-  }, [visibleModels.length, actualRenderingMode]);
-
-  // Worker-assisted rendering function
-  const renderWithWorkers = useCallback(async () => {
-    if (!shouldUseWorkerRendering || isWorkerRendering) return;
-
-    setIsWorkerRendering(true);
-    setWorkerProgress(0);
-    setWorkerImageUrl(null);
-
-    try {
-      const { sharedWorkerStrategy } = await import('./utils/sharedWorkerStrategy');
-      
-      const config = sharedWorkerStrategy.getOptimalConfiguration(visibleModels.length, 'medium');
-      const estimate = sharedWorkerStrategy.estimateProcessingTime(visibleModels.length, config);
-      
-      console.log(`🚀 [VisualizerTab] Worker rendering ${visibleModels.length} models | Est. time: ${estimate.estimatedSeconds.toFixed(1)}s`);
-
-      // Use same rendering parameters as orchestrator
-      const renderParams = {
-        format: 'png' as const,
-        resolution: '1920x1080',
-        quality: 95,
-        includeLabels: true,
-        selectedGroups: [], // No longer using group-based selection
-        backgroundColor: 'transparent' as const,
-        opacityFactor: opacityLevel,
-        visualizationMode: 'color' as const,
-        opacityIntensity: 1.0
-      };
-
-      const imageUrl = await sharedWorkerStrategy.processSpiderPlotVisualization(
-        visibleModels,
-        renderParams,
-        config,
-        {
-          onProgress: (progress, message) => {
-            setWorkerProgress(progress * 100);
-            console.log(`🎨 [VisualizerTab] ${message} | Progress: ${(progress * 100).toFixed(1)}%`);
-          },
-          onComplete: () => {
-            console.log(`🎉 [VisualizerTab] Worker rendering completed`);
-          },
-          onError: (error) => {
-            console.error(`❌ [VisualizerTab] Worker rendering error: ${error}`);
-          }
-        }
-      );
-
-      setWorkerImageUrl(imageUrl);
-    } catch (error) {
-      console.error('Worker rendering failed:', error);
-    } finally {
-      setIsWorkerRendering(false);
-    }
-  }, [shouldUseWorkerRendering, isWorkerRendering, visibleModels, opacityLevel]);
-
-  // Auto-trigger worker rendering for very large datasets
-  useEffect(() => {
-    if (shouldUseWorkerRendering && !isWorkerRendering && !workerImageUrl) {
-      const timeout = setTimeout(() => {
-        renderWithWorkers();
-      }, 1000); // Delay to avoid immediate triggering on data changes
-      
-      return () => clearTimeout(timeout);
-    }
-  }, [shouldUseWorkerRendering, isWorkerRendering, workerImageUrl, renderWithWorkers]);
+  // Worker-assisted rendering removed after removing 2D plot support
 
   // Apply opacity strategy to visible models based on resnorm ranking
   const visibleModelsWithOpacity: ModelSnapshot[] = useMemo(() => {
@@ -656,10 +564,9 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
               {/* Visualization Type Selection */}
               <select
                 value={visualizationType}
-                onChange={(e) => setVisualizationType(e.target.value as 'spider2d' | 'spider3d' | 'nyquist')}
+                onChange={(e) => setVisualizationType(e.target.value as 'spider3d' | 'nyquist')}
                 className="px-3 py-1.5 text-sm bg-neutral-900 border border-neutral-600 rounded-md text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               >
-                <option value="spider2d">Spider 2D</option>
                 <option value="spider3d">Spider 3D</option>
                 <option value="nyquist">Nyquist Plot</option>
               </select>
@@ -671,96 +578,46 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
           <div className="flex-1 flex overflow-hidden">
             {/* Primary Visualization Area */}
             <div className="flex-1 relative bg-black">
-              {(visualizationType === 'spider2d' || visualizationType === 'spider3d') ? (
-                /* Spider Visualization */
-                <>
-                  {shouldUseWorkerRendering && workerImageUrl ? (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Image 
-                        src={workerImageUrl} 
-                        alt="Worker-rendered spider plot"
-                        fill
-                        className="object-contain"
-                        style={{ background: 'transparent' }}
-                      />
-                    </div>
-                  ) : shouldUseWorkerRendering && isWorkerRendering ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-300">
-                      <div className="text-lg font-medium mb-4">Rendering with Web Workers...</div>
-                      <div className="w-64 bg-neutral-700 rounded-full h-2 mb-2">
-                        <div 
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${workerProgress}%` }}
-                        ></div>
+              {visualizationType === 'spider3d' ? (
+                /* Spider 3D Visualization */
+                <div className="w-full h-full relative overflow-hidden">
+                  {isInitializing && visibleModelsWithOpacity.length > 0 ? (
+                    <div className="absolute inset-0 bg-black flex items-center justify-center">
+                      <div className="text-white text-lg flex items-center gap-3">
+                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span>Initializing 3D visualization...</span>
                       </div>
-                      <div className="text-sm">{workerProgress.toFixed(1)}%</div>
-                      <div className="text-xs text-neutral-400 mt-2">
-                        Processing {visibleModels.length.toLocaleString()} models across multiple workers
-                      </div>
-                    </div>
-                  ) : view3D ? (
-                    <div className="w-full h-full relative overflow-hidden">
-                      {isInitializing && visibleModelsWithOpacity.length > 0 ? (
-                        <div className="absolute inset-0 bg-black flex items-center justify-center">
-                          <div className="text-white text-lg flex items-center gap-3">
-                            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Initializing 3D visualization...</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <SpiderPlot3D
-                        models={visibleModelsWithOpacity}
-                        referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
-                          id: 'ground-truth',
-                          name: 'Ground Truth Reference',
-                          timestamp: Date.now(),
-                          parameters: effectiveGroundTruthParams,
-                          data: [],
-                          resnorm: 0,
-                          color: '#FFFFFF',
-                          isVisible: true,
-                          opacity: 1
-                        } : null}
-                        responsive={true} // Enable responsive sizing
-                        showControls={true}
-                        gridSize={gridSize}
-                        resnormSpread={staticRenderSettings.resnormSpread}
-                        useResnormCenter={staticRenderSettings.useResnormCenter}
-                        resnormRange={selectedResnormRange}
-                        onModelTag={handleModelTag}
-                        taggedModels={localTaggedModels}
-                        currentResnorm={currentResnorm}
-                        onResnormSelect={handleResnormSelect}
-                        onCurrentResnormChange={handleCurrentResnormChange}
-                        highlightedModelId={highlightedModelId}
-                        selectedResnormRange={selectedResnormRange}
-                      />
-                      )}
                     </div>
                   ) : (
-                    <>
-                      {isInitializing && visibleModelsWithOpacity.length > 0 ? (
-                        <div className="absolute inset-0 bg-black flex items-center justify-center z-10">
-                          <div className="text-white text-lg flex items-center gap-3">
-                            <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            <span>Initializing 2D visualization...</span>
-                          </div>
-                        </div>
-                      ) : null}
-                      <SpiderPlot
-                        meshItems={visibleModelsWithOpacity}
-                      opacityFactor={opacityLevel}
-                      maxPolygons={actualRenderingMode === 'tile' ? 1000000 : 100000}
-                      visualizationMode={'color'}
-                      gridSize={gridSize}
-                      includeLabels={currentShowLabels}
-                      backgroundColor="transparent"
-                      showGroundTruth={showGroundTruth}
-                      groundTruthParams={effectiveGroundTruthParams}
-                    />
-                    </>
+                    <SpiderPlot3D
+                    models={visibleModelsWithOpacity}
+                    referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
+                      id: 'ground-truth',
+                      name: 'Ground Truth Reference',
+                      timestamp: Date.now(),
+                      parameters: effectiveGroundTruthParams,
+                      data: [],
+                      resnorm: 0,
+                      color: '#FFFFFF',
+                      isVisible: true,
+                      opacity: 1
+                    } : null}
+                    responsive={true} // Enable responsive sizing
+                    showControls={true}
+                    gridSize={gridSize}
+                    resnormSpread={staticRenderSettings.resnormSpread}
+                    useResnormCenter={staticRenderSettings.useResnormCenter}
+                    resnormRange={selectedResnormRange}
+                    onModelTag={handleModelTag}
+                    taggedModels={localTaggedModels}
+                    currentResnorm={currentResnorm}
+                    onResnormSelect={handleResnormSelect}
+                    onCurrentResnormChange={handleCurrentResnormChange}
+                    highlightedModelId={highlightedModelId}
+                    selectedResnormRange={selectedResnormRange}
+                  />
                   )}
-                </>
+                </div>
               ) : (
                 /* Nyquist Plot Visualization - Single Circuit */
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -880,7 +737,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     Show reference parameters from toolbox
                   </p>
                 </div>
-                
                 
                 {/* Note: Resnorm distribution histogram moved to top-right overlay */}
                 

@@ -32,6 +32,11 @@ export interface SessionActions {
     isInteresting?: boolean
   }) => Promise<boolean>
   
+  untagModel: (untagData: {
+    modelId: string
+    circuitConfigId: string
+  }) => Promise<boolean>
+  
   // NEW: Set active circuit configuration
   setActiveCircuitConfig: (configId: string | null) => Promise<void>
 }
@@ -140,7 +145,7 @@ export const useSessionManagement = () => {
     notes?: string
     isInteresting?: boolean
   }): Promise<boolean> => {
-    console.log('🏷️ TagModel called with:', { 
+    console.log('TagModel called with:', { 
       circuitConfigId: modelData.circuitConfigId,
       modelId: modelData.modelId, 
       tagName: modelData.tagName,
@@ -151,22 +156,22 @@ export const useSessionManagement = () => {
     });
 
     // Debug: Let's also test basic Supabase connectivity
-    console.log('🔗 Testing basic Supabase connectivity...');
+    console.log('Testing basic Supabase connectivity...');
     try {
       const { supabase: testSupabase } = await import('../../lib/supabase');
       const { data: authUser, error: authError } = await testSupabase.auth.getUser();
-      console.log('🔗 Auth check:', { user: authUser?.user?.id, error: authError });
+      console.log('Auth check:', { user: authUser?.user?.id, error: authError });
     } catch (connectError) {
-      console.error('🔗 Supabase connection failed:', connectError);
+      console.error('Supabase connection failed:', connectError);
     }
 
     if (!sessionState.userId) {
-      console.error('❌ No userId available for tagging');
+      console.error('No userId available for tagging');
       return false;
     }
 
     if (!sessionState.sessionId) {
-      console.error('❌ No sessionId available for tagging');
+      console.error('No sessionId available for tagging');
       return false;
     }
 
@@ -198,8 +203,8 @@ export const useSessionManagement = () => {
       console.log('🔍 Table access test result:', { count: testData, error: testError });
 
       if (testError) {
-        console.error('❌ Table access test failed:', testError);
-        console.error('❌ Table test error details:', JSON.stringify(testError, null, 2));
+        console.error('Table access test failed:', testError);
+        console.error('Table test error details:', JSON.stringify(testError, null, 2));
         return false;
       }
 
@@ -211,9 +216,9 @@ export const useSessionManagement = () => {
       console.log('🏷️ Full Supabase response:', { data, error });
 
       if (error) {
-        console.error('❌ Supabase error tagging model:', error);
-        console.error('❌ Raw error object:', JSON.stringify(error, null, 2));
-        console.error('❌ Error details:', { 
+        console.error('Supabase error tagging model:', error);
+        console.error('Raw error object:', JSON.stringify(error, null, 2));
+        console.error('Error details:', { 
           message: error.message, 
           details: error.details, 
           hint: error.hint, 
@@ -222,10 +227,10 @@ export const useSessionManagement = () => {
         return false
       }
 
-      console.log('✅ Successfully tagged model:', data);
+      console.log('Successfully tagged model:', data);
       return true
     } catch (error) {
-      console.error('❌ Exception while tagging model:', error);
+      console.error('Exception while tagging model:', error);
       if (error instanceof Error) {
         console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
@@ -236,10 +241,10 @@ export const useSessionManagement = () => {
 
   // NEW: Set active circuit configuration for current session
   const setActiveCircuitConfig = useCallback(async (configId: string | null): Promise<void> => {
-    console.log('🔄 Setting active circuit configuration:', configId);
+    console.log('Setting active circuit configuration:', configId);
 
     if (!sessionState.sessionId) {
-      console.error('❌ No session ID available for setting circuit config');
+      console.error('No session ID available for setting circuit config');
       return;
     }
 
@@ -255,7 +260,7 @@ export const useSessionManagement = () => {
         .eq('id', sessionState.sessionId);
 
       if (error) {
-        console.error('❌ Error setting active circuit config:', error);
+        console.error('Error setting active circuit config:', error);
         return;
       }
 
@@ -265,15 +270,62 @@ export const useSessionManagement = () => {
         currentCircuitConfigId: configId
       }));
 
-      console.log('✅ Active circuit configuration set successfully');
+      console.log('Active circuit configuration set successfully');
 
     } catch (error) {
-      console.error('❌ Exception in setActiveCircuitConfig:', error);
+      console.error('Exception in setActiveCircuitConfig:', error);
     }
   }, [sessionState.sessionId]);
 
+  // Untag a model - remove tag from database
+  const untagModel = useCallback(async (untagData: {
+    modelId: string
+    circuitConfigId: string
+  }): Promise<boolean> => {
+    console.log('Removing tag for model:', { 
+      modelId: untagData.modelId,
+      circuitConfigId: untagData.circuitConfigId,
+      hasUserId: !!sessionState.userId,
+      hasSessionId: !!sessionState.sessionId
+    });
+
+    if (!sessionState.userId) {
+      console.error('No userId available for untagging');
+      return false;
+    }
+
+    if (!sessionState.sessionId) {
+      console.error('No sessionId available for untagging');
+      return false;
+    }
+
+    try {
+      const { supabase } = await import('../../lib/supabase');
+      
+      const { error } = await (supabase as any)
+        .from('tagged_models')
+        .delete()
+        .eq('model_id', untagData.modelId)
+        .eq('circuit_config_id', untagData.circuitConfigId)
+        .eq('user_id', sessionState.userId);
+
+      if (error) {
+        console.error('Error removing tagged model:', error);
+        return false;
+      }
+
+      console.log('Tagged model removed successfully');
+      return true;
+
+    } catch (error) {
+      console.error('Exception in untagModel:', error);
+      return false;
+    }
+  }, [sessionState.userId, sessionState.sessionId]);
+
   const actions: SessionActions = {
     tagModel,
+    untagModel,
     setActiveCircuitConfig
   }
 

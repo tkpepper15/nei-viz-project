@@ -10,6 +10,10 @@ import {
 import { ModelSnapshot, ImpedancePoint, ResnormGroup, PerformanceLog, PipelinePhase } from './circuit-simulator/types';
 import { CircuitParameters } from './circuit-simulator/types/parameters';
 import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/workerManager';
+import { useHybridComputeManager } from './circuit-simulator/utils/hybridComputeManager';
+import { ExtendedPerformanceSettings, DEFAULT_GPU_SETTINGS, DEFAULT_CPU_SETTINGS } from './circuit-simulator/types/gpuSettings';
+import { SettingsModal } from './settings/SettingsModal';
+import { SettingsButton } from './settings/SettingsButton';
 import { useComputationState } from './circuit-simulator/hooks/useComputationState';
 import { useUserProfiles } from '../hooks/useUserProfiles';
 import { useSessionManagement } from '../hooks/useSessionManagement';
@@ -87,7 +91,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const { profilesState: savedProfilesState, actions: profileActions } = useUserProfiles();
   
   // Initialize worker manager for parallel computation
-  const { computeGridParallel, cancelComputation } = useWorkerManager();
+  const cpuWorkerManager = useWorkerManager();
+  const hybridComputeManager = useHybridComputeManager(cpuWorkerManager);
+  const { cancelComputation } = cpuWorkerManager;
   
   // Add frequency control state - extended range for full Nyquist closure
   const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz for full low-frequency closure
@@ -105,6 +111,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // Performance settings for computation optimization
   const [performanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
+  const [extendedSettings, setExtendedSettings] = useState<ExtendedPerformanceSettings>({
+    useSymmetricGrid: true,
+    maxComputationResults: 5000,
+    gpuAcceleration: DEFAULT_GPU_SETTINGS,
+    cpuSettings: DEFAULT_CPU_SETTINGS
+  });
+  
+  // Settings modal state
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   
   // Use the new computation state hook
   const {
@@ -126,6 +141,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     maxVisualizationPoints,
     isUserControlledLimits,
     calculateEffectiveVisualizationLimit,
+    maxComputationResults, setMaxComputationResults,
     resnormGroups, setResnormGroups,
     hiddenGroups, setHiddenGroups,
     logMessages,
@@ -450,14 +466,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       );
       
       if (newProfileId) {
-        console.log('✅ New circuit profile created:', newProfileId);
+        console.log('New circuit profile created:', newProfileId);
         updateStatusMessage(`New circuit "${uniqueCircuitName}" created and selected - ready to customize and compute`);
       } else {
-        console.error('❌ Failed to create new circuit profile');
+        console.error('Failed to create new circuit profile');
         updateStatusMessage('New circuit created but failed to save profile - you can save manually');
       }
     } catch (error) {
-      console.error('❌ Error creating new circuit profile:', error);
+      console.error('Error creating new circuit profile:', error);
       updateStatusMessage('New circuit created - profile creation failed, you can save manually');
     }
   }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName]);
@@ -497,13 +513,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           );
           
           if (preComputeProfileId) {
-            console.log('✅ Pre-compute profile created:', preComputeProfileId);
+            console.log('Pre-compute profile created:', preComputeProfileId);
             updateStatusMessage(`Profile "${preComputeName}" created - starting computation...`);
           } else {
             console.log('⚠️ Pre-compute profile creation failed - proceeding with computation anyway');
           }
         } catch (error) {
-          console.error('❌ Pre-compute profile creation error:', error);
+          console.error('Pre-compute profile creation error:', error);
           updateStatusMessage('Profile creation failed - proceeding with computation...');
         }
       }
@@ -515,13 +531,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       updateStatusMessage(`Starting grid computation with ${gridSize}x${gridSize} grid...`);
 
-      const results = await computeGridParallel(
+      const hybridResult = await hybridComputeManager.computeGridHybrid(
         parameters,
         gridSize,
         minFreq,
         maxFreq,
         numPoints,
         performanceSettings,
+        extendedSettings,
         resnormConfig,
         (progress) => {
           setComputationProgress(progress);
@@ -532,8 +549,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         (error) => {
           setGridError(error);
           updateStatusMessage(`Computation error: ${error}`);
-        }
+        },
+        maxComputationResults
       );
+      
+      const results = hybridResult.results;
 
       if (results && results.length > 0) {
         // Process results - results is directly an array, not an object with topResults
@@ -563,7 +583,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         };
         setGridParameterArrays(gridArrays);
 
-        console.log('✅ Computation successful:', {
+        console.log('Computation successful:', {
           processedResultsLength: processedResults.length,
           sampleResult: processedResults[0]
         });
@@ -628,7 +648,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [
     isComputingGrid, gridSize, parameters, minFreq, maxFreq, numPoints, 
-    performanceSettings, resnormConfig, computeGridParallel, 
+    performanceSettings, resnormConfig, hybridComputeManager.computeGridHybrid, 
     setIsComputingGrid, setGridError, setComputationProgress, setComputationSummary,
     setGridResults, setGridResultsWithIds, setTotalGridPoints, setActualComputedPoints,
     setGridParameterArrays, savedProfilesState.selectedProfile, profileActions,
@@ -925,7 +945,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Synchronize configurationName with activeConfiguration.name
   useEffect(() => {
     if (activeConfiguration && activeConfiguration.name !== configurationName) {
-      console.log('🔄 Syncing configuration name:', activeConfiguration.name);
+      console.log('Syncing configuration name:', activeConfiguration.name);
       setConfigurationName(activeConfiguration.name);
     }
   }, [activeConfiguration, configurationName]);
@@ -937,21 +957,21 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       // Case 1: Session has config but local state doesn't - sync to local
       if (sessionConfigId && !activeConfigId) {
-        console.log('🔄 Syncing session config to local state:', sessionConfigId);
+        console.log('Syncing session config to local state:', sessionConfigId);
         setActiveConfiguration(sessionConfigId);
         return;
       }
       
       // Case 2: Local has config but session doesn't - sync to session
       if (activeConfigId && !sessionConfigId) {
-        console.log('🔄 Syncing local config to session:', activeConfigId);
+        console.log('Syncing local config to session:', activeConfigId);
         await sessionManagement.actions.setActiveCircuitConfig(activeConfigId);
         return;
       }
       
       // Case 3: Both exist but differ - session wins (it's the source of truth)
       if (sessionConfigId && activeConfigId && sessionConfigId !== activeConfigId) {
-        console.log('🔄 Resolving config mismatch - session wins:', sessionConfigId);
+        console.log('Resolving config mismatch - session wins:', sessionConfigId);
         setActiveConfiguration(sessionConfigId);
         return;
       }
@@ -1222,8 +1242,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       const profileGroundTruthParams = profile.groundTruthParams;
       
       // CRITICAL: Enforce safety limits to prevent crashes
-      const WORKER_MAX_GRID_SIZE = 20; // Hard limit from grid-worker.js
-      const WORKER_MAX_TOTAL_POINTS = 10000000; // 10M points hard limit
+      const WORKER_MAX_GRID_SIZE = 30; // Matches UI validation limit
+      const WORKER_MAX_TOTAL_POINTS = 25000000; // 25M points hard limit (30^5 = 24.3M)
       
       const totalPoints = Math.pow(profileGridSize, 5);
       
@@ -1239,7 +1259,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       // Additional safety check for very large grids
       const estimatedMemoryMB = (totalPoints * 800) / (1024 * 1024); // ~800 bytes per model
-      if (estimatedMemoryMB > 2000) { // 2GB memory limit
+      if (estimatedMemoryMB > 4000) { // 4GB memory limit for high-end configurations
         console.warn(`Profile "${profile.name}" estimated memory usage ${estimatedMemoryMB.toFixed(0)}MB exceeds safe limits`);
         updateStatusMessage(`Profile "${profile.name}" memory requirements too high - using synthetic data...`);
         
@@ -1266,13 +1286,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       // Use the worker to generate mesh data with timeout protection
       const gridResults = await Promise.race([
-        computeGridParallel(
+        hybridComputeManager.computeGridHybrid(
           profileGroundTruthParams,
           safeGridSize,
           profileMinFreq,
           profileMaxFreq,
           profileNumPoints,
           conservativeSettings,
+          extendedSettings,
           resnormConfig,
           (progress) => {
             // Update status with progress
@@ -1283,7 +1304,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           (error) => {
             console.error('Profile generation error:', error);
             throw new Error(`Worker error: ${error}`);
-          }
+          },
+          maxComputationResults
         ),
         // 5 minute timeout to prevent infinite hangs
         new Promise<never>((_, reject) => 
@@ -1291,12 +1313,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         )
       ]);
       
-      if (!gridResults || gridResults.length === 0) {
+      if (!gridResults || gridResults.results.length === 0) {
         throw new Error('No grid results generated');
       }
       
       // Convert BackendMeshPoint to ModelSnapshot format and sample if needed
-      const modelSnapshots: ModelSnapshot[] = gridResults.map((result, index) => {
+      const modelSnapshots: ModelSnapshot[] = gridResults.results.map((result, index) => {
         const ter = (result.parameters.Rsh * (result.parameters.Ra + result.parameters.Rb)) / 
                    (result.parameters.Rsh + result.parameters.Ra + result.parameters.Rb);
         
@@ -1348,7 +1370,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         return [];
       }
     }
-  }, [computeGridParallel, updateStatusMessage, generateSyntheticProfileData, resnormConfig]);
+  }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig]);
 
   // Updated grid computation using Web Workers for parallel processing
   const handleComputeRegressionMesh = useCallback(async () => {
@@ -1442,7 +1464,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           // Enhanced logging for large dataset computations
           if (progress.mainThreadLoad === 'high') {
             if (progress.streamingBatch && progress.streamingBatch % 2 === 0) {
-              updateStatusMessage(`🔄 [BATCH ${progress.streamingBatch}] ${progress.message || 'Processing large dataset...'}`);
+              updateStatusMessage(`[BATCH ${progress.streamingBatch}] ${progress.message || 'Processing large dataset...'}`);
             }
           } else {
             // Throttle status message updates for better performance
@@ -1454,9 +1476,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           // Regular progress updates with enhanced detail
           if (progress.message) {
             // Add visual indicators for different progress types
-            const icon = progress.type === 'MATHEMATICAL_OPERATION' ? '📊' : 
-                        progress.type === 'WORKER_STATUS' ? '⚙️' : 
-                        progress.type === 'GENERATION_PROGRESS' ? '🧮' : '🔄';
+            const icon = progress.type === 'MATHEMATICAL_OPERATION' ? '[MATH]' : 
+                        progress.type === 'WORKER_STATUS' ? '[WORK]' : 
+                        progress.type === 'GENERATION_PROGRESS' ? '[GEN]' : '[PROC]';
             updateStatusMessage(`${icon} ${progress.message}`);
           }
           
@@ -1526,17 +1548,21 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       };
 
       // Run the parallel computation
-      const results = await computeGridParallel(
+      const hybridResult = await hybridComputeManager.computeGridHybrid(
         parameters,
         gridSize,
         minFreq,
         maxFreq,
         numPoints,
         performanceSettings,
+        extendedSettings,
         resnormConfig,
         handleProgress,
-        handleError
+        handleError,
+        maxComputationResults
       );
+
+      const results = hybridResult.results;
 
       if (results.length === 0) {
         throw new Error('No results returned from computation');
@@ -1842,7 +1868,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, computeGridParallel, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, parameters, isUserControlledLimits, performanceSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, profileActions, configurationName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, hybridComputeManager.computeGridHybrid, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, parameters, isUserControlledLimits, performanceSettings, extendedSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, profileActions, configurationName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1976,12 +2002,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       resetComputationState();
       profileActions.setPendingComputeProfile(null);
-      updateStatusMessage('✅ Computation cancelled successfully');
+      updateStatusMessage('Computation cancelled successfully');
     } catch (error) {
       console.error('Error cancelling computation:', error);
-      updateStatusMessage('❌ Error cancelling computation');
+      updateStatusMessage('Error cancelling computation');
     }
   }, [cancelComputation, setIsComputingGrid, resetComputationState, updateStatusMessage, profileActions]);
+
 
   // Handler for saving circuit configurations (replaces legacy profile saving)
 
@@ -2250,7 +2277,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Handle model tagging from visualization components
   const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string) => {
-    console.log('🏷️ HandleModelTag called:', {
+    console.log('HandleModelTag called:', {
       modelId: model.id,
       tagName,
       hasUser: !!user,
@@ -2279,9 +2306,48 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
 
     try {
-      // Use session management's tagModel function for proper database integration
+      // Handle tag deletion (empty tagName)
+      if (!tagName || tagName.trim() === '') {
+        console.log('Removing tag for model:', model.id);
+        
+        // Find the tagged model to delete from database
+        const currentTag = taggedModels.get(model.id);
+        if (currentTag) {
+          // Use session management to remove tag
+          const success = await sessionManagement.actions.untagModel({
+            modelId: model.id,
+            circuitConfigId: activeConfigId
+          });
+
+          if (success) {
+            console.log('Model tag removed successfully');
+            updateStatusMessage('Model tag removed');
+            
+            // Update local state
+            setTaggedModels(prev => {
+              const newMap = new Map(prev);
+              newMap.delete(model.id);
+              return newMap;
+            });
+          } else {
+            console.error('Failed to remove model tag');
+            updateStatusMessage('Failed to remove tag');
+          }
+        } else {
+          // Just remove from local state if not in database
+          setTaggedModels(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(model.id);
+            return newMap;
+          });
+          updateStatusMessage('Tag removed');
+        }
+        return;
+      }
+
+      // Handle tag creation/update
       const success = await sessionManagement.actions.tagModel({
-        circuitConfigId: activeConfigId, // NEW: Required field
+        circuitConfigId: activeConfigId,
         modelId: model.id,
         tagName,
         tagCategory: 'user',
@@ -2292,15 +2358,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       });
 
       if (success) {
-        console.log('✅ Model tagged successfully via session management');
-        updateStatusMessage(`✅ Model tagged as "${tagName}" and saved to database`);
+        console.log('Model tagged successfully via session management');
+        updateStatusMessage(`Model tagged as "${tagName}" and saved to database`);
         
         // Update local tagged models state for immediate UI feedback
         setTaggedModels(prev => {
           const newMap = new Map(prev);
           newMap.set(model.id, {
             tagName,
-            profileId: activeConfigId, // FIXED: Use activeConfigId instead of currentProfileId
+            profileId: activeConfigId,
             resnormValue: model.resnorm || 0,
             taggedAt: Date.now(),
             notes: `Tagged from visualization at ${new Date().toLocaleString()}`
@@ -2308,8 +2374,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           return newMap;
         });
       } else {
-        console.error('❌ Failed to tag model via session management');
-        console.log('🔍 Session state debug:', {
+        console.error('Failed to tag model via session management');
+        console.log('Session state debug:', {
           isReady: sessionManagement.isReady,
           hasError: sessionManagement.hasError,
           sessionState: sessionManagement.sessionState
@@ -2317,10 +2383,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         updateStatusMessage('Failed to tag model - session not ready or authentication issue');
       }
     } catch (error) {
-      console.error('❌ Error during model tagging:', error);
+      console.error('Error during model tagging:', error);
       updateStatusMessage(`Failed to tag model: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [activeConfigId, updateStatusMessage, user, sessionManagement]);
+  }, [activeConfigId, updateStatusMessage, user, sessionManagement, taggedModels]);
 
   // Handle static render job creation
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2821,13 +2887,23 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               </div>
             )}
             
-            {/* User Profile */}
-            {user && (
-              <UserProfile 
-                user={user}
-                onSignOut={() => signOut()}
-              />
-            )}
+            {/* Settings and User Profile */}
+            <div className="flex items-center space-x-2">
+              <SettingsButton onClick={() => setSettingsModalOpen(true)} />
+              {user ? (
+                <UserProfile 
+                  user={user}
+                  onSignOut={() => signOut()}
+                />
+              ) : (
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Sign In
+                </button>
+              )}
+            </div>
             
           </div>
         </header>
@@ -3086,7 +3162,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     staticRenderSettings={staticRenderSettings}
                     onStaticRenderSettingsChange={setStaticRenderSettings}
                     groundTruthParams={parameters}
-                    performanceSettings={performanceSettings}
                     numPoints={numPoints}
                     resnormConfig={resnormConfig}
                     groupPortion={staticRenderSettings.groupPortion}
@@ -3117,6 +3192,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       configurationName={configurationName}
                       onConfigurationNameChange={handleConfigurationNameChange}
                       selectedProfileId={savedProfilesState.selectedProfile}
+                      maxComputationResults={maxComputationResults}
+                      onMaxComputationResultsChange={setMaxComputationResults}
                     />
                   </div>
                 </div>
@@ -3137,6 +3214,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         onDismiss={() => setComputationSummary(null)}
       />
 
+
+      {/* Settings Modal */}
+      <SettingsModal
+        isOpen={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        onSettingsChange={setExtendedSettings}
+      />
 
       {/* Authentication Modal */}
       <AuthModal 

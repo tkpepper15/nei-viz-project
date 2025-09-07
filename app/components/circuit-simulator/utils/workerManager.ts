@@ -29,6 +29,9 @@ export interface WorkerProgress {
   throttleDelay?: number;
   mainThreadLoad?: 'low' | 'medium' | 'high';
   adaptiveChunkSize?: number;
+  // Progressive refinement fields
+  progressiveResults?: BackendMeshPoint[];
+  bestResnormSoFar?: number;
 }
 
 export interface WorkerResult {
@@ -54,7 +57,8 @@ export interface UseWorkerManagerReturn {
     performanceSettings: PerformanceSettings,
     resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    maxComputationResults?: number
   ) => Promise<BackendMeshPoint[]>;
   cancelComputation: () => void;
   isComputing: boolean;
@@ -87,26 +91,26 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     
     console.log(`Worker allocation: ${totalPoints} points, ${cores} cores, ~${memoryMB}MB memory`);
     
-    // Ultra-conservative allocation for very large datasets to prevent stalls
+    // Aggressive parallelism for massive datasets - we want the best results fast
+    if (totalPoints > 1000000) {
+      console.log('Massive dataset detected - using maximum parallelism for best results');
+      return Math.min(cores, 8); // Use all available cores for massive datasets
+    }
     if (totalPoints > 500000) {
-      console.log('🔴 Massive dataset detected - using minimal workers to prevent stalls');
-      return Math.min(2, cores); // Only 2 workers for massive datasets
+      console.log('Very large dataset - high parallelism');
+      return Math.min(cores - 1, 6); // High parallelism for large datasets
     }
     if (totalPoints > 200000) {
-      console.log('🟠 Very large dataset - conservative worker allocation');
-      return Math.min(3, cores); // Conservative for very large
-    }
-    if (totalPoints > 100000) {
-      console.log('🟡 Large dataset - moderate worker allocation');
-      return Math.min(4, cores); // Moderate for large
+      console.log('Large dataset - full worker allocation');
+      return Math.min(cores - 1, 5); // Full workers for large datasets
     }
     if (totalPoints > 50000) {
-      console.log('🟢 Medium dataset - standard worker allocation');
+      console.log('Medium dataset - standard worker allocation');
       return Math.min(cores - 1, 4); // Standard for medium
     }
     
-    console.log('🔵 Small dataset - full worker allocation');
-    return Math.min(cores, 6); // Full allocation for small datasets
+    console.log('Small dataset - moderate worker allocation');
+    return Math.min(cores, 4); // Moderate allocation for small datasets
   }, []);
 
   // Enhanced worker pool management
@@ -145,10 +149,10 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       worker.isIdle = true;
       worker.taskId = null;
       
-      // Clear any timeouts for this task
-      const timeout = workerTimeoutsRef.current.get(taskId);
-      if (timeout) {
-        clearTimeout(timeout);
+      // Clear any heartbeat intervals for this task
+      const interval = workerTimeoutsRef.current.get(taskId);
+      if (interval) {
+        clearInterval(interval as NodeJS.Timeout);
         workerTimeoutsRef.current.delete(taskId);
       }
     }
@@ -158,8 +162,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
   const forceTerminateAllWorkers = useCallback(() => {
     console.log('Force terminating all workers and cleaning up resources...');
     
-    // Clear all timeouts
-    workerTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+    // Clear all heartbeat intervals
+    workerTimeoutsRef.current.forEach(interval => clearInterval(interval as NodeJS.Timeout));
     workerTimeoutsRef.current.clear();
     
     // Reject all active promises
@@ -293,20 +297,46 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     return chunks;
   }, []);
 
-  // Generate frequencies array
+  // Mathematical optimization caches (from performance_fixes.md)
+  const freqCache = useRef(new Map<string, Float64Array>());
+  const omegaCache = useRef(new Map<number, number>());
+  
+  // Cached omega calculation to avoid repeated 2πf calculations
+  const getOmega = useCallback((freq: number): number => {
+    let omega = omegaCache.current.get(freq);
+    if (omega === undefined) {
+      omega = 2 * Math.PI * freq;
+      omegaCache.current.set(freq, omega);
+    }
+    return omega;
+  }, []);
+  
+  // Generate frequencies array with caching and typed arrays
   const generateFrequencies = useCallback((minFreq: number, maxFreq: number, numPoints: number): number[] => {
-    const frequencies: number[] = [];
+    // Create stable cache key
+    const key = `${minFreq}|${maxFreq}|${numPoints}`;
+    const cached = freqCache.current.get(key);
+    if (cached) {
+      console.log(`📋 Using cached frequency sweep: ${key}`);
+      return Array.from(cached); // Convert back to regular array for compatibility
+    }
+    
+    // Generate new frequency sweep using typed array for performance
+    const frequencies = new Float64Array(numPoints);
     const logMin = Math.log10(minFreq);
     const logMax = Math.log10(maxFreq);
     const logStep = (logMax - logMin) / (numPoints - 1);
 
     for (let i = 0; i < numPoints; i++) {
       const logValue = logMin + i * logStep;
-      const frequency = Math.pow(10, logValue);
-      frequencies.push(frequency);
+      frequencies[i] = Math.pow(10, logValue);
     }
 
-    return frequencies;
+    // Cache the typed array
+    freqCache.current.set(key, frequencies);
+    console.log(`🔧 Generated and cached frequency sweep: ${key}`);
+    
+    return Array.from(frequencies); // Return regular array for compatibility
   }, []);
 
   // Calculate reference spectrum on main thread (single computation)
@@ -317,7 +347,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     const { Rsh, Ra, Ca, Rb, Cb } = params;
     
     return frequencies.map(freq => {
-      const omega = 2 * Math.PI * freq;
+      const omega = getOmega(freq);
       
       // Za = Ra/(1+jωRaCa)
       const za_denom = 1 + Math.pow(omega * Ra * Ca, 2);
@@ -344,7 +374,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         phase
       };
     });
-  }, []);
+  }, [getOmega]);
 
   // Main computation function
   const computeGridParallel = useCallback(async (
@@ -356,7 +386,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     performanceSettings: PerformanceSettings,
     resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
-    onError: (error: string) => void
+    onError: (error: string) => void,
+    maxComputationResults: number = 5000
   ): Promise<BackendMeshPoint[]> => {
     
     if (isComputingRef.current) {
@@ -413,39 +444,30 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         workerCount
       });
       
-      // Anti-stall chunk sizing strategy based on insights from AskJS discussion
-      let chunkSize: number;
+      // Optimized chunk sizing based on performance_fixes.md recommendations
+      const calcOptimalChunkSize = (totalPoints: number): number => {
+        // Target 40-80 chunks total for optimal worker utilization
+        const targetChunks = Math.min(Math.max(Math.floor(totalPoints / 5000), 40), 80);
+        const rawSize = Math.ceil(totalPoints / targetChunks);
+        
+        // Cap per chunk to prevent memory issues, but allow larger chunks for efficiency
+        const cappedSize = Math.min(20_000, Math.max(1_000, rawSize));
+        
+        // For massive datasets (3.2M models), use smaller chunks to enable progress reporting
+        if (totalPoints > 1_000_000) {
+          return Math.min(cappedSize, 5_000); // Max 5K for massive grids
+        } else if (totalPoints > 500_000) {
+          return Math.min(cappedSize, 8_000); // Max 8K for large grids  
+        }
+        
+        return cappedSize;
+      };
       
-      // Ultra-conservative sizing to prevent halfway stalls
-      if (totalPoints > 500000) {
-        chunkSize = 500; // Micro-chunks for massive datasets
-        console.log('🔴 Using micro-chunks (500) for massive dataset to prevent stalls');
-      } else if (totalPoints > 200000) {
-        chunkSize = 800; // Very small chunks to prevent stalls
-        console.log('🟠 Using very small chunks (800) for very large dataset');
-      } else if (totalPoints > 100000) {
-        chunkSize = 1200; // Small chunks for large datasets
-        console.log('🟡 Using small chunks (1200) for large dataset');
-      } else if (totalPoints > 50000) {
-        chunkSize = 1800; // Medium chunks
-        console.log('🟢 Using medium chunks (1800) for medium dataset');
-      } else if (totalPoints > 25000) {
-        chunkSize = 2500; // Larger chunks for smaller datasets
-      } else {
-        chunkSize = Math.ceil(totalPoints / workerCount); // Dynamic for very small datasets
-      }
+      const chunkSize = calcOptimalChunkSize(totalPoints);
+      const totalChunks = Math.ceil(totalPoints / chunkSize);
       
-      // Safety cap based on worker count to prevent memory overload
-      const maxChunkSize = Math.floor(15000 / workerCount); // Very conservative limit
-      chunkSize = Math.min(chunkSize, maxChunkSize);
-      
-      console.log(`Final chunk size: ${chunkSize}, Total chunks: ${Math.ceil(totalPoints / chunkSize)}`);
-      
-      // Additional memory pressure prevention
-      if (totalPoints > 100000 && chunkSize > 1000) {
-        chunkSize = 1000;
-        console.log('🚨 Force-limited chunk size to 1000 for large dataset anti-stall protection');
-      }
+      console.log(`📊 Optimized chunking: ${chunkSize} points/chunk, ${totalChunks} total chunks, ${workerCount} workers`);
+      console.log(`📈 Expected chunks per worker: ${Math.ceil(totalChunks / workerCount)}`)
 
       onProgress({
         type: 'COMPUTATION_START',
@@ -483,7 +505,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           resnormConfig,
           onProgress,
           onError,
-          groundTruthParams
+          groundTruthParams,
+          maxComputationResults
         );
       }
 
@@ -571,18 +594,21 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
       // Process chunks with streaming results and anti-stall protection
       const processChunksWithStreaming = async () => {
-        const streamedResults: BackendMeshPoint[] = [];
+        let streamedResults: BackendMeshPoint[] = [];
         
-        // Ultra-conservative concurrency to prevent stalls
+        // Aggressive concurrency for maximum performance - we want the best results
         let maxConcurrentChunks: number;
-        if (totalPoints > 200000) {
-          maxConcurrentChunks = 1; // Sequential processing for very large datasets
-          console.log('🔴 Using sequential processing to prevent stalls');
+        if (totalPoints > 1000000) {
+          maxConcurrentChunks = Math.min(workerCount, 6); // Full parallelism for massive datasets
+          console.log('Using maximum concurrency for massive dataset - we want the best results');
+        } else if (totalPoints > 200000) {
+          maxConcurrentChunks = Math.min(workerCount, 4); // High concurrency for large datasets
+          console.log('Using high concurrency for large dataset');
         } else if (totalPoints > 100000) {
-          maxConcurrentChunks = 2; // Minimal concurrency for large datasets
-          console.log('🟡 Using minimal concurrency (2) for large dataset');
+          maxConcurrentChunks = Math.min(workerCount, 3); // Moderate concurrency
+          console.log('Using moderate concurrency for medium dataset');
         } else {
-          maxConcurrentChunks = Math.min(workerCount, 3); // Standard for smaller datasets
+          maxConcurrentChunks = Math.min(workerCount, 2); // Standard for smaller datasets
         }
         
         let totalProcessedCount = 0;
@@ -613,24 +639,44 @@ export function useWorkerManager(): UseWorkerManagerReturn {
             return new Promise<WorkerResult>((resolve, reject) => {
               // Add this promise's reject function to active promises for cancellation
               const cleanup = () => {
+                // Clear heartbeat interval
+                clearInterval(heartbeatInterval);
                 worker.removeEventListener('message', handleMessage);
                 returnWorkerToPool(taskId);
                 activePromisesRef.current.delete(cleanup);
+                // Clear heartbeat from timeout map
+                workerTimeoutsRef.current.delete(taskId);
                 reject(new Error('Computation cancelled'));
               };
               activePromisesRef.current.add(cleanup);
               
-              // Set worker timeout to prevent indefinite hanging
-              const timeoutMs = totalPoints > 100000 ? 300000 : 180000; // 5min for large, 3min for smaller
-              const timeout = setTimeout(() => {
-                console.warn(`Worker timeout for task ${taskId} after ${timeoutMs}ms`);
-                worker.removeEventListener('message', handleMessage);
-                returnWorkerToPool(taskId);
-                activePromisesRef.current.delete(cleanup);
-                reject(new Error(`Worker timeout after ${timeoutMs}ms`));
-              }, timeoutMs);
+              // Heartbeat system instead of long timeouts (from performance_fixes.md)
+              const HEARTBEAT_MS = 15_000; // 15 second heartbeat
+              let lastHeartbeat = Date.now();
               
-              workerTimeoutsRef.current.set(taskId, timeout);
+              // Send periodic heartbeats to keep worker alive
+              const heartbeatInterval = setInterval(() => {
+                try {
+                  worker.postMessage({ type: 'ping' });
+                  // Check if worker is responsive
+                  if (Date.now() - lastHeartbeat > HEARTBEAT_MS * 2) {
+                    console.warn(`Worker ${taskId} not responding to heartbeats`);
+                    worker.removeEventListener('message', handleMessage);
+                    returnWorkerToPool(taskId);
+                    activePromisesRef.current.delete(cleanup);
+                    reject(new Error(`Worker heartbeat timeout after ${HEARTBEAT_MS * 2}ms`));
+                  }
+                } catch (error) {
+                  console.warn(`Heartbeat failed for worker ${taskId}:`, error);
+                  worker.removeEventListener('message', handleMessage);
+                  returnWorkerToPool(taskId);
+                  activePromisesRef.current.delete(cleanup);
+                  reject(new Error(`Worker heartbeat failed`));
+                }
+              }, HEARTBEAT_MS);
+              
+              // Store heartbeat for cleanup
+              workerTimeoutsRef.current.set(taskId, heartbeatInterval as NodeJS.Timeout);
 
               const handleMessage = (e: MessageEvent) => {
                 const { type, data } = e.data;
@@ -641,9 +687,22 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                 }
 
             switch (type) {
+                  case 'pong':
+                    // Worker is alive, update heartbeat
+                    lastHeartbeat = Date.now();
+                    break;
+                    
                   case 'CHUNK_PROGRESS':
                     const progressPercent = 10 + (totalProcessedCount / totalPoints) * 90;
                     const chunkPercent = Math.round((data.chunkProgress || 0) * 100);
+                    
+                    // Progressive refinement: accumulate best results from all chunks
+                    if (data.currentBestResults && data.currentBestResults.length > 0) {
+                      streamedResults.push(...data.currentBestResults);
+                      // Keep only the best overall results
+                      streamedResults.sort((a, b) => a.resnorm - b.resnorm);
+                      streamedResults = streamedResults.slice(0, 2000); // Keep top 2000 progressive results
+                    }
                     
                     // More aggressive throttling for large datasets  
                     const shouldUpdate = totalPoints > 100000 ? 
@@ -651,6 +710,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                       (chunkPercent % 10 === 0 || data.chunkProgress === 1);
                       
                     if (shouldUpdate) {
+                      const bestResnormSoFar = streamedResults.length > 0 ? streamedResults[0].resnorm : null;
                       onProgress({
                         type: 'STREAMING_UPDATE',
                         chunkIndex: data.chunkIndex,
@@ -660,7 +720,10 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                         total: totalPoints,
                         overallProgress: progressPercent,
                         phase: 'impedance_calculation',
-                        message: `Streaming batch ${Math.floor(batchStart / maxConcurrentChunks) + 1}: Processing chunk ${chunkIndex + 1}/${chunks.length} (${streamedResults.length} models computed)`,
+                        message: `Streaming batch ${Math.floor(batchStart / maxConcurrentChunks) + 1}: Processing chunk ${chunkIndex + 1}/${chunks.length} (${streamedResults.length} models computed, best: ${bestResnormSoFar?.toExponential(3) || 'N/A'})`,
+                        // Progressive refinement data
+                        progressiveResults: streamedResults.slice(0, 500), // Send top 500 for immediate visualization
+                        bestResnormSoFar: bestResnormSoFar ?? undefined,
                         operation: 'Streaming computation',
                         streamingBatch: Math.floor(batchStart / maxConcurrentChunks) + 1,
                         mainThreadLoad: totalPoints > 100000 ? 'high' : totalPoints > 50000 ? 'medium' : 'low'
@@ -672,7 +735,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     worker.removeEventListener('message', handleMessage);
                     returnWorkerToPool(taskId);
                     activePromisesRef.current.delete(cleanup);
-                    clearTimeout(timeout);
+                    clearInterval(heartbeatInterval);
+                    workerTimeoutsRef.current.delete(taskId);
                     
                     // Immediately convert and stream results to prevent memory accumulation
                     const chunkResults: BackendMeshPoint[] = [
@@ -745,7 +809,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     worker.removeEventListener('message', handleMessage);
                     returnWorkerToPool(taskId);
                     activePromisesRef.current.delete(cleanup);
-                    clearTimeout(timeout);
+                    clearInterval(heartbeatInterval);
+                    workerTimeoutsRef.current.delete(taskId);
                     reject(new Error(data.message));
                     break;
             }
@@ -757,7 +822,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
             worker.removeEventListener('message', handleMessage);
             returnWorkerToPool(taskId);
             activePromisesRef.current.delete(cleanup);
-            clearTimeout(timeout);
+            clearInterval(heartbeatInterval);
+            workerTimeoutsRef.current.delete(taskId);
             reject(new Error(`Worker error: ${error.message}`));
           };
 
@@ -769,7 +835,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                   chunkIndex,
                   totalChunks: chunks.length,
                   resnormConfig,
-                  taskId
+                  taskId,
+                  maxComputationResults // Add configurable result limit
                 }
               });
             });
@@ -859,7 +926,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void,
-    groundTruthParams: CircuitParameters
+    groundTruthParams: CircuitParameters,
+    maxComputationResults: number = 5000
   ): Promise<BackendMeshPoint[]> => {
     
     const totalPoints = Math.pow(gridSize, 5);
@@ -979,7 +1047,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     chunkIndex: totalProcessed,
                     totalChunks: -1, // Unknown for streaming
                     referenceSpectrum,
-                    resnormConfig
+                    resnormConfig,
+                    maxComputationResults
                   }
                 });
               });
@@ -1059,7 +1128,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
   // Enhanced cancel computation with immediate force termination
   const cancelComputation = useCallback(() => {
-    console.log('🛑 Cancel computation triggered - force terminating all workers');
+    console.log('Cancel computation triggered - force terminating all workers');
     
     cancelTokenRef.current.cancelled = true;
     isComputingRef.current = false;

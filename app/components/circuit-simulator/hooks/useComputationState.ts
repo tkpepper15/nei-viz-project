@@ -29,6 +29,9 @@ export const useComputationState = () => {
   const [userVisualizationPercentage, setUserVisualizationPercentage] = useState<number>(100); // Default 100%
   const [maxVisualizationPoints, setMaxVisualizationPoints] = useState<number>(1000000); // 1M max
   const [isUserControlledLimits, setIsUserControlledLimits] = useState<boolean>(false);
+  
+  // User-controlled computation result limits
+  const [maxComputationResults, setMaxComputationResults] = useState<number>(5000); // Top N results to keep during computation
 
   // Resnorm groups for analysis
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
@@ -117,11 +120,21 @@ export const useComputationState = () => {
       const avgSpectrumSize = 20 * 40; // bytes per spectrum point (rough estimate)
       const estimatedMemory = totalComputed * (500 + avgSpectrumSize) / 1024 / 1024; // MB
       
-      // Much more aggressive limits - prioritize user experience over conservative memory management
-      if (estimatedMemory > 2000) return 250000; // 2GB -> 250K points
-      if (estimatedMemory > 1000) return 500000; // 1GB -> 500K points  
-      if (estimatedMemory > 500) return 750000;  // 500MB -> 750K points
-      if (estimatedMemory > 200) return 1000000; // 200MB -> 1M points (our max)
+      // Enhanced limits for parameter experimentation (focused on top models)
+      if (totalComputed > 1000000) {
+        // For massive grids (1M+ models), show top few thousand only  
+        const displayLimit = Math.min(5000, Math.max(1000, Math.floor(totalComputed * 0.002))); // 0.2% of total
+        console.log(`Massive grid detected: ${totalComputed.toLocaleString()} models computed, displaying top ${displayLimit.toLocaleString()} (${(displayLimit/totalComputed*100).toFixed(3)}%)`);
+        return displayLimit;
+      } else if (estimatedMemory > 2000) {
+        return 250000; // 2GB -> 250K points
+      } else if (estimatedMemory > 1000) {
+        return 500000; // 1GB -> 500K points  
+      } else if (estimatedMemory > 500) {
+        return 750000;  // 500MB -> 750K points
+      } else if (estimatedMemory > 200) {
+        return 1000000; // 200MB -> 1M points (our max)
+      }
       return Math.min(1000000, totalComputed); // Default to 1M max
     }
     
@@ -173,6 +186,10 @@ export const useComputationState = () => {
     isUserControlledLimits,
     setIsUserControlledLimits,
     calculateEffectiveVisualizationLimit,
+    
+    // User-controlled computation limits
+    maxComputationResults,
+    setMaxComputationResults,
 
     // Resnorm groups
     resnormGroups,

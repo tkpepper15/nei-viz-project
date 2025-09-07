@@ -57,7 +57,7 @@ export const ToolboxSidebar: React.FC<ToolboxSidebarProps> = ({
   onEditProfile
 }) => {
   const visualizationType = staticRenderSettings.visualizationType;
-  const setVisualizationType = (type: 'spider2d' | 'spider3d' | 'nyquist') => {
+  const setVisualizationType = (type: 'spider3d' | 'nyquist') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
@@ -108,15 +108,14 @@ export const ToolboxSidebar: React.FC<ToolboxSidebarProps> = ({
         {/* Visualization Type - Compact */}
         <div className="bg-neutral-800/50 rounded-lg p-3">
           <label className="text-xs font-medium text-neutral-300 mb-2 block">View</label>
-          <div className="grid grid-cols-3 gap-1 text-xs">
+          <div className="grid grid-cols-2 gap-1 text-xs">
             {[
-              { value: 'spider2d', label: '2D' },
               { value: 'spider3d', label: '3D' },
               { value: 'nyquist', label: 'Nyq' }
             ].map(option => (
               <button
                 key={option.value}
-                onClick={() => setVisualizationType(option.value as 'spider2d' | 'spider3d' | 'nyquist')}
+                onClick={() => setVisualizationType(option.value as 'spider3d' | 'nyquist')}
                 className={`px-2 py-1 rounded text-center transition-colors ${
                   visualizationType === option.value
                     ? 'bg-blue-600 text-white'
