@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { ModelSnapshot } from '../types';
-import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad } from '../types/parameters';
+import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad, CircuitParameters } from '../types/parameters';
 
 // 3D Spider Plot Props
 interface SpiderPlot3DProps {
@@ -214,6 +214,24 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   
   // Tagging state
   const [isTagging, setIsTagging] = useState<boolean>(false);
+  
+  // Separate visual and computational resnorm states
+  const [visualResnorm, setVisualResnorm] = useState<number | null>(null); // For smooth UI interpolation only
+  const [isModelSelected, setIsModelSelected] = useState<boolean>(false);
+  
+  // Refs for debounced computational updates
+  const lastComputationalResnorm = useRef<number | null>(null);
+  const computationalUpdateThreshold = 0.005; // Only update parent for significant changes
+  
+  // High-performance throttling for ultra-smooth interactions
+  const lastMouseMoveTime = useRef<number>(0);
+  const lastDragTime = useRef<number>(0);
+  const mouseMoveThrottleMs = 10; // ~100fps for balanced performance and smoothness
+  const dragThrottleMs = 3; // ~333fps for buttery-smooth rotation
+  
+  // Performance optimization refs
+  const lastRenderTime = useRef<number>(0);
+  const renderThrottleMs = 16; // ~60fps cap for smooth rendering
   
 
   // Filter models based on spectrum navigation and resnorm range
@@ -610,7 +628,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (isHovered) {
       ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.3);
       ctx.lineWidth = baseLineWidth * 2;
-      ctx.strokeStyle = '#FFD700'; // Gold highlight for hover
+      ctx.strokeStyle = '#FFFF00'; // Yellow highlight for hover
     } else if (isHighlighted) {
       ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.4);
       ctx.lineWidth = baseLineWidth * 2.5;
@@ -637,7 +655,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
 
     // Draw vertices as adaptive-sized dots with highlighting
     if (isHovered) {
-      ctx.fillStyle = '#FFD700';
+      ctx.fillStyle = '#FFFF00';
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.6) * depthFactor);
     } else if (isHighlighted) {
       ctx.fillStyle = '#00FFFF';
@@ -798,146 +816,313 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.restore();
   }, [project3D, camera.scale, circuitParams]);
 
-  // Draw modern 3D orientation cube with dynamic positioning
-  const drawOrientationCube = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const cubeSize = Math.max(60, 80 * camera.scale); // Increased size
-    const margin = 10; // Small margin from edge
-    const cubeX = actualWidth - cubeSize - margin;
-    const cubeY = margin; // Position at top-right corner
+  // Refs for caching crosshair model lookups
+  const lastResnormRef = useRef<number | null>(null);
+  const lastModelRef = useRef<ModelSnapshot | null>(null);
+
+  // Find nearest discrete grid model for computational accuracy
+  const findNearestGridModel = useCallback((resnorm: number): ModelSnapshot | null => {
+    if (!filteredModels.length) return null;
+    
+    let closestModel: ModelSnapshot | null = null;
+    let closestDistance = Infinity;
+    
+    filteredModels.forEach(model => {
+      const modelResnorm = model.resnorm || 0;
+      const distance = Math.abs(modelResnorm - resnorm);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestModel = model;
+      }
+    });
+    
+    return closestModel;
+  }, [filteredModels]);
+
+  // Find nearest actual model for polygon highlighting during crosshair movement
+  const findNearestActualModel = useCallback((resnorm: number): ModelSnapshot | null => {
+    if (!filteredModels.length) return null;
+    
+    // Use cached result if resnorm hasn't changed significantly
+    const resnormThreshold = 0.01;
+    if (lastResnormRef.current !== null && lastModelRef.current !== null &&
+        Math.abs(lastResnormRef.current - resnorm) < resnormThreshold) {
+      return lastModelRef.current;
+    }
+    
+    let closestModel: ModelSnapshot | null = null;
+    let closestDistance = Infinity;
+    
+    // Find the actual polygon model closest to the crosshair resnorm
+    filteredModels.forEach(model => {
+      const modelResnorm = model.resnorm || 0;
+      const distance = Math.abs(modelResnorm - resnorm);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestModel = model;
+      }
+    });
+    
+    // Cache the result for performance
+    lastResnormRef.current = resnorm;
+    lastModelRef.current = closestModel;
+    
+    return closestModel;
+  }, [filteredModels]);
+  
+  // Smooth parameter interpolation for visual display only
+  const getInterpolatedParameters = useCallback((resnorm: number): CircuitParameters | null => {
+    if (!filteredModels.length) return null;
+    
+    // Find the two closest models for interpolation
+    const sortedModels = [...filteredModels].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+    
+    // Find bounding models
+    let lowerModel: ModelSnapshot | null = null;
+    let upperModel: ModelSnapshot | null = null;
+    
+    for (let i = 0; i < sortedModels.length - 1; i++) {
+      const currentResnorm = sortedModels[i].resnorm || 0;
+      const nextResnorm = sortedModels[i + 1].resnorm || 0;
+      
+      if (resnorm >= currentResnorm && resnorm <= nextResnorm) {
+        lowerModel = sortedModels[i];
+        upperModel = sortedModels[i + 1];
+        break;
+      }
+    }
+    
+    // If no bounds found, use nearest model
+    if (!lowerModel || !upperModel) {
+      const nearest = findNearestGridModel(resnorm);
+      return nearest?.parameters || null;
+    }
+    
+    // Interpolate parameters between bounds
+    const lowerResnorm = lowerModel.resnorm || 0;
+    const upperResnorm = upperModel.resnorm || 0;
+    const t = (resnorm - lowerResnorm) / (upperResnorm - lowerResnorm);
+    
+    const interpolated: CircuitParameters = {
+      Rsh: lowerModel.parameters.Rsh + t * (upperModel.parameters.Rsh - lowerModel.parameters.Rsh),
+      Ra: lowerModel.parameters.Ra + t * (upperModel.parameters.Ra - lowerModel.parameters.Ra),
+      Rb: lowerModel.parameters.Rb + t * (upperModel.parameters.Rb - lowerModel.parameters.Rb),
+      Ca: lowerModel.parameters.Ca + t * (upperModel.parameters.Ca - lowerModel.parameters.Ca),
+      Cb: lowerModel.parameters.Cb + t * (upperModel.parameters.Cb - lowerModel.parameters.Cb),
+      frequency_range: lowerModel.parameters.frequency_range // Use same frequency range
+    };
+    
+    return interpolated;
+  }, [filteredModels, findNearestGridModel]);
+  
+  // Memoized crosshair model with reduced computational overhead
+  const crosshairModel = useMemo((): ModelSnapshot | null => {
+    const activeResnorm = isModelSelected ? currentResnorm : visualResnorm;
+    if (!activeResnorm || !filteredModels.length) return null;
+    
+    // Early return if no significant change in resnorm
+    const threshold = 0.001;
+    
+    if (lastResnormRef.current && Math.abs(lastResnormRef.current - activeResnorm) < threshold) {
+      return lastModelRef.current;
+    }
+    
+    // Create synthetic model with interpolated parameters for smooth visuals
+    const interpolatedParams = getInterpolatedParameters(activeResnorm);
+    if (!interpolatedParams) {
+      // Fallback to nearest discrete model if interpolation fails
+      const nearest = findNearestGridModel(activeResnorm);
+      lastResnormRef.current = activeResnorm;
+      lastModelRef.current = nearest;
+      return nearest;
+    }
+    
+    // Create synthetic model for smooth visual display
+    const syntheticModel: ModelSnapshot = {
+      id: `interpolated_${activeResnorm.toFixed(6)}`,
+      name: `Interpolated Model`,
+      timestamp: Date.now(),
+      parameters: interpolatedParams,
+      data: [], // Empty data since this is visual-only
+      resnorm: activeResnorm,
+      color: '#00FFFF',
+      isVisible: true,
+      opacity: 0.8
+    };
+    
+    lastResnormRef.current = activeResnorm;
+    lastModelRef.current = syntheticModel;
+    return syntheticModel;
+  }, [isModelSelected, currentResnorm, visualResnorm, getInterpolatedParameters, findNearestGridModel, filteredModels.length]);
+
+  // Draw pentagonal outline showing current crosshair model, grid, and ground truth
+  const drawPentagonalOutline = React.useCallback((ctx: CanvasRenderingContext2D) => {
+    const panelWidth = Math.max(120, 140 * camera.scale);
+    const panelHeight = Math.max(120, 140 * camera.scale);
+    const margin = 15;
+    const panelX = actualWidth - panelWidth - margin;
+    const panelY = margin;
     
     ctx.save();
     
-    // Draw cube background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-    ctx.fillRect(cubeX - 10, cubeY - 5, cubeSize + 20, cubeSize + 20);
+    // Draw panel background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.fillRect(panelX - 10, panelY - 5, panelWidth + 20, panelHeight + 20);
     ctx.strokeStyle = '#666666';
     ctx.lineWidth = 1;
-    ctx.strokeRect(cubeX - 10, cubeY - 5, cubeSize + 20, cubeSize + 20);
+    ctx.strokeRect(panelX - 10, panelY - 5, panelWidth + 20, panelHeight + 20);
     
-    // Define cube vertices in local space
-    const cubeVertices = [
-      { x: -1, y: -1, z: -1 }, // 0
-      { x:  1, y: -1, z: -1 }, // 1
-      { x:  1, y:  1, z: -1 }, // 2
-      { x: -1, y:  1, z: -1 }, // 3
-      { x: -1, y: -1, z:  1 }, // 4
-      { x:  1, y: -1, z:  1 }, // 5
-      { x:  1, y:  1, z:  1 }, // 6
-      { x: -1, y:  1, z:  1 }  // 7
-    ];
+    // Pentagon center and radius
+    const centerX = panelX + panelWidth / 2;
+    const centerY = panelY + panelHeight / 2;
+    const radius = Math.min(panelWidth, panelHeight) / 3;
     
-    // Project cube vertices with current rotation
-    const projectedCubeVertices = cubeVertices.map(vertex => {
-      // Apply same rotation as main view
-      const rad = (deg: number) => (deg * Math.PI) / 180;
-      const cos = Math.cos;
-      const sin = Math.sin;
-      
-      const rx = rad(rotation.x);
-      const ry = rad(rotation.y);
-      const rz = rad(rotation.z);
-      
-      let x = vertex.x;
-      let y = vertex.y;
-      let z = vertex.z;
-      
-      // Z rotation
-      const x1 = x * cos(rz) - y * sin(rz);
-      const y1 = x * sin(rz) + y * cos(rz);
-      x = x1; y = y1;
-      
-      // Y rotation
-      const x2 = x * cos(ry) + z * sin(ry);
-      const z2 = -x * sin(ry) + z * cos(ry);
-      x = x2; z = z2;
-      
-      // X rotation
-      const y3 = y * cos(rx) - z * sin(rx);
-      const z3 = y * sin(rx) + z * cos(rx);
-      y = y3; z = z3;
-      
-      // Scale and position for cube display
-      const scale = 15;
-      return {
-        x: cubeX + cubeSize/2 + x * scale,
-        y: cubeY + cubeSize/2 - y * scale,
-        z: z
-      };
-    });
+    // Get parameter configuration
+    const params = paramKeys;
     
-    // Define cube faces with colors
-    const faces = [
-      { indices: [0, 1, 2, 3], color: '#FF6B6B', label: '-Z' }, // Front face
-      { indices: [4, 7, 6, 5], color: '#4ECDC4', label: '+Z' }, // Back face
-      { indices: [0, 4, 5, 1], color: '#45B7D1', label: '-Y' }, // Bottom face
-      { indices: [3, 2, 6, 7], color: '#96CEB4', label: '+Y' }, // Top face
-      { indices: [0, 3, 7, 4], color: '#FFEAA7', label: '-X' }, // Left face
-      { indices: [1, 5, 6, 2], color: '#DDA0DD', label: '+X' }  // Right face
-    ];
-    
-    // Sort faces by average Z depth
-    const sortedFaces = faces.map(face => ({
-      ...face,
-      avgZ: face.indices.reduce((sum, i) => sum + projectedCubeVertices[i].z, 0) / face.indices.length
-    })).sort((a, b) => a.avgZ - b.avgZ);
-    
-    // Draw faces
-    sortedFaces.forEach(face => {
-      const vertices = face.indices.map(i => projectedCubeVertices[i]);
+    // Helper function to draw pentagon outline
+    const drawPentagon = (centerX: number, centerY: number, values: number[], color: string, lineWidth: number, isDashed = false) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lineWidth;
+      if (isDashed) {
+        ctx.setLineDash([4, 4]);
+      } else {
+        ctx.setLineDash([]);
+      }
       
-      ctx.fillStyle = face.color;
-      ctx.globalAlpha = 0.7;
+      const vertices = params.map((param, i) => {
+        const paramRange = PARAMETER_RANGES[param as keyof typeof PARAMETER_RANGES];
+        const value = values[i];
+        
+        // Normalize parameter value to 0-1 range (logarithmic)
+        const logMin = Math.log10(paramRange.min);
+        const logMax = Math.log10(paramRange.max);
+        const logValue = Math.log10(Math.max(paramRange.min, Math.min(paramRange.max, value)));
+        const normalizedValue = (logValue - logMin) / (logMax - logMin);
+        
+        // Calculate pentagon position (flipped 180 degrees to match 3D spider plot parameter arrangements)
+        const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2 + Math.PI;
+        const vertexRadius = normalizedValue * radius;
+        
+        return {
+          x: centerX + Math.cos(angle) * vertexRadius,
+          y: centerY + Math.sin(angle) * vertexRadius
+        };
+      });
+      
+      // Draw pentagon
       ctx.beginPath();
       ctx.moveTo(vertices[0].x, vertices[0].y);
       for (let i = 1; i < vertices.length; i++) {
         ctx.lineTo(vertices[i].x, vertices[i].y);
       }
       ctx.closePath();
-      ctx.fill();
-      
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 1.0;
       ctx.stroke();
+      
+      // Draw vertices as dots
+      ctx.fillStyle = color;
+      const dotSize = lineWidth / 2 + 1;
+      vertices.forEach(vertex => {
+        ctx.beginPath();
+        ctx.arc(vertex.x, vertex.y, dotSize, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+      
+      ctx.setLineDash([]); // Reset dash
+    };
+    
+    // Use the memoized crosshair model
+    
+    // Draw outer pentagon boundary (max values)
+    const maxValues = params.map(param => PARAMETER_RANGES[param as keyof typeof PARAMETER_RANGES].max);
+    drawPentagon(centerX, centerY, maxValues, '#333333', 1);
+    
+    // Draw ground truth pentagon if available
+    if (referenceModel?.parameters) {
+      const gtValues = params.map(param => referenceModel.parameters[param as keyof typeof referenceModel.parameters] as number);
+      drawPentagon(centerX, centerY, gtValues, '#FFFFFF', 2, true);
+    }
+    
+    // Draw crosshair model pentagon (dynamic based on crosshair position)
+    if (crosshairModel && crosshairModel.parameters) {
+      const crosshairValues = params.map(param => (crosshairModel.parameters as any)[param as keyof CircuitParameters] as number); // eslint-disable-line @typescript-eslint/no-explicit-any
+      const crosshairColor = isModelSelected ? '#FFFF00' : '#00FFFF'; // Yellow when locked, Cyan when scrolling
+      const lineWidth = isModelSelected ? 3 : 2;
+      drawPentagon(centerX, centerY, crosshairValues, crosshairColor, lineWidth);
+    } else if (gridSize && gridSize > 1) {
+      // Fallback to grid pentagon if no crosshair model
+      const gridValues = params.map(param => {
+        const range = PARAMETER_RANGES[param as keyof typeof PARAMETER_RANGES];
+        const logMin = Math.log10(range.min);
+        const logMax = Math.log10(range.max);
+        const logMid = (logMin + logMax) / 2;
+        return Math.pow(10, logMid);
+      });
+      drawPentagon(centerX, centerY, gridValues, '#666666', 1);
+    }
+    
+    // Draw parameter labels around the pentagon
+    ctx.fillStyle = '#CCCCCC';
+    ctx.font = '9px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    
+    params.forEach((param, i) => {
+      const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2 + Math.PI;
+      const labelRadius = radius + 25;
+      const labelX = centerX + Math.cos(angle) * labelRadius;
+      const labelY = centerY + Math.sin(angle) * labelRadius;
+      
+      ctx.fillText(param, labelX, labelY);
     });
     
-    // Draw axis lines
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 1.0;
+    // Draw legend with dynamic crosshair indicator
+    ctx.textAlign = 'left';
+    ctx.font = '8px Arial';
+    let legendY = panelY + panelHeight - 45; // More space for additional legend item
     
-    // X axis (red)
-    const xStart = { x: cubeX + cubeSize/2, y: cubeY + cubeSize/2, z: 0 };
-    ctx.strokeStyle = '#FF4444';
+    // Crosshair model indicator
+    if (crosshairModel && crosshairModel.parameters) {
+      const crosshairColor = isModelSelected ? '#FFFF00' : '#00FFFF';
+      ctx.strokeStyle = crosshairColor;
+      ctx.lineWidth = isModelSelected ? 3 : 2;
+      ctx.beginPath();
+      ctx.moveTo(panelX, legendY);
+      ctx.lineTo(panelX + 8, legendY);
+      ctx.stroke();
+      ctx.fillStyle = '#CCCCCC';
+      const labelText = isModelSelected ? 'Selected' : 'Crosshair';
+      ctx.fillText(labelText, panelX + 12, legendY + 1);
+      legendY += 12;
+    }
+    
+    // Ground truth indicator (if available)
+    if (referenceModel?.parameters) {
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(panelX, legendY);
+      ctx.lineTo(panelX + 8, legendY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#CCCCCC';
+      ctx.fillText('Truth', panelX + 12, legendY + 1);
+      legendY += 12;
+    }
+    
+    // Boundary indicator
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(xStart.x, xStart.y);
-    ctx.lineTo(xStart.x + 20, xStart.y);
+    ctx.moveTo(panelX, legendY);
+    ctx.lineTo(panelX + 8, legendY);
     ctx.stroke();
-    
-    // Y axis (green)
-    ctx.strokeStyle = '#44FF44';
-    ctx.beginPath();
-    ctx.moveTo(xStart.x, xStart.y);
-    ctx.lineTo(xStart.x, xStart.y - 20);
-    ctx.stroke();
-    
-    // Z axis (blue)
-    ctx.strokeStyle = '#4444FF';
-    ctx.beginPath();
-    ctx.moveTo(xStart.x, xStart.y);
-    ctx.lineTo(xStart.x + 10, xStart.y + 10);
-    ctx.stroke();
-    
-    // Draw axis labels
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '10px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('X', xStart.x + 25, xStart.y + 3);
-    ctx.fillText('Y', xStart.x - 3, xStart.y - 25);
-    ctx.fillText('Z', xStart.x + 15, xStart.y + 20);
+    ctx.fillStyle = '#CCCCCC';
+    ctx.fillText('Max', panelX + 12, legendY + 1);
     
     ctx.restore();
-  }, [actualWidth, rotation, camera.scale]);
+  }, [actualWidth, referenceModel, paramKeys, gridSize, camera.scale, crosshairModel, isModelSelected]);
 
   // Draw resnorm labels inside the core of the 3D spider plot
   const drawResnormAxis = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -972,98 +1157,51 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.setLineDash([]);
     }
 
-    // Draw selected resnorm range cylinder if provided
+    // Draw selected resnorm range highlight (simplified - no cylindrical grid)
     if (selectedResnormRange && selectedResnormRange.min >= minResnorm && selectedResnormRange.max <= maxResnorm) {
       const normalizedMinResnorm = (selectedResnormRange.min - minResnorm) / (maxResnorm - minResnorm);
       const normalizedMaxResnorm = (selectedResnormRange.max - minResnorm) / (maxResnorm - minResnorm);
       const minZ = normalizedMinResnorm * zAxisHeight;
       const maxZ = normalizedMaxResnorm * zAxisHeight;
       
-      // Draw resnorm range cylinder
-      const cylinderRadius = 2.1; // Slightly larger than parameter pentagon
-      const numSegments = 24; // Reduced for better performance
-      const cylinderHeight = maxZ - minZ;
+      // Draw simplified range indicators at center axis
+      const rangeHeight = maxZ - minZ;
       
-      // Only draw cylinder if the height is significant
-      if (cylinderHeight > 0.1) {
-        const numZLevels = Math.max(3, Math.min(15, Math.floor(cylinderHeight * 5))); // Adaptive detail based on height
-        
-        ctx.strokeStyle = '#FFD700'; // Gold highlight color
-        ctx.lineWidth = Math.max(1, 1.5 * camera.scale);
-        ctx.globalAlpha = 0.5;
+      if (rangeHeight > 0.1) {
+        ctx.strokeStyle = '#FFFF00'; // Yellow highlight color
+        ctx.lineWidth = Math.max(2, 3 * camera.scale);
+        ctx.globalAlpha = 0.8;
         ctx.setLineDash([]);
         
-        // Draw top and bottom circular sections (more prominent)
-        for (const z of [minZ, maxZ]) {
-          ctx.globalAlpha = 0.6;
-          ctx.lineWidth = Math.max(1, 2 * camera.scale);
-          ctx.beginPath();
-          for (let i = 0; i <= numSegments; i++) {
-            const angle = (i / numSegments) * 2 * Math.PI;
-            const x = Math.cos(angle) * cylinderRadius;
-            const y = Math.sin(angle) * cylinderRadius;
-            
-            const point = project3D({ x, y, z, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (point.visible) {
-              if (i === 0) {
-                ctx.moveTo(point.x, point.y);
-              } else {
-                ctx.lineTo(point.x, point.y);
-              }
-            }
-          }
-          ctx.stroke();
-        }
+        // Draw vertical range line at center
+        const bottomPoint = project3D({ x: coreX, y: coreY, z: minZ, color: '#FFFF00', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+        const topPoint = project3D({ x: coreX, y: coreY, z: maxZ, color: '#FFFF00', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
         
-        // Draw middle horizontal sections (lighter)
-        ctx.globalAlpha = 0.3;
-        ctx.lineWidth = Math.max(1, 1 * camera.scale);
-        for (let level = 1; level < numZLevels; level++) {
-          const zProgress = level / numZLevels;
-          const z = minZ + cylinderHeight * zProgress;
+        if (bottomPoint.visible && topPoint.visible) {
+          ctx.beginPath();
+          ctx.moveTo(bottomPoint.x, bottomPoint.y);
+          ctx.lineTo(topPoint.x, topPoint.y);
+          ctx.stroke();
+          
+          // Add range end markers
+          ctx.fillStyle = '#FFFF00';
+          ctx.globalAlpha = 1.0;
+          const markerSize = Math.max(3, 4 * camera.scale);
           
           ctx.beginPath();
-          for (let i = 0; i <= numSegments; i++) {
-            const angle = (i / numSegments) * 2 * Math.PI;
-            const x = Math.cos(angle) * cylinderRadius;
-            const y = Math.sin(angle) * cylinderRadius;
-            
-            const point = project3D({ x, y, z, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-            if (point.visible) {
-              if (i === 0) {
-                ctx.moveTo(point.x, point.y);
-              } else {
-                ctx.lineTo(point.x, point.y);
-              }
-            }
-          }
-          ctx.stroke();
-        }
-        
-        // Draw vertical lines connecting the circular sections
-        ctx.globalAlpha = 0.4;
-        ctx.lineWidth = Math.max(1, 1.5 * camera.scale);
-        for (let i = 0; i < numSegments; i += 6) { // Draw every 6th vertical line to avoid clutter
-          const angle = (i / numSegments) * 2 * Math.PI;
-          const x = Math.cos(angle) * cylinderRadius;
-          const y = Math.sin(angle) * cylinderRadius;
+          ctx.arc(bottomPoint.x, bottomPoint.y, markerSize, 0, 2 * Math.PI);
+          ctx.fill();
           
-          const bottomPoint = project3D({ x, y, z: minZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-          const topPoint = project3D({ x, y, z: maxZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-          
-          if (bottomPoint.visible && topPoint.visible) {
-            ctx.beginPath();
-            ctx.moveTo(bottomPoint.x, bottomPoint.y);
-            ctx.lineTo(topPoint.x, topPoint.y);
-            ctx.stroke();
-          }
+          ctx.beginPath();
+          ctx.arc(topPoint.x, topPoint.y, markerSize, 0, 2 * Math.PI);
+          ctx.fill();
         }
       }
       
       // Draw range labels
       ctx.globalAlpha = 1.0;
       const centerZ = (minZ + maxZ) / 2;
-      const centerPoint = project3D({ x: coreX + 2.5, y: coreY, z: centerZ, color: '#FFD700', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      const centerPoint = project3D({ x: coreX + 2.5, y: coreY, z: centerZ, color: '#FFFF00', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
       if (centerPoint.visible) {
         const fontSize = Math.max(9, 11 * camera.scale);
         ctx.font = `bold ${fontSize}px Arial`;
@@ -1079,56 +1217,75 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
     }
 
-    // Draw current resnorm highlight if provided (for hover)
-    if (currentResnorm !== null && currentResnorm >= minResnorm && currentResnorm <= maxResnorm) {
-      const normalizedCurrentResnorm = (currentResnorm - minResnorm) / (maxResnorm - minResnorm);
+    // Draw smooth crosshair resnorm highlight (visual interpolation only)
+    const activeVisualResnorm = isModelSelected ? currentResnorm : visualResnorm;
+    if (activeVisualResnorm !== null && activeVisualResnorm >= minResnorm && activeVisualResnorm <= maxResnorm) {
+      const normalizedCurrentResnorm = (activeVisualResnorm - minResnorm) / (maxResnorm - minResnorm);
       const currentZ = normalizedCurrentResnorm * zAxisHeight;
       
-      // Draw highlighting cross-section plane (thinner than cylinder)
-      const highlightRadius = 2.0;
-      const numSegments = 32;
+      // Different styling for selected vs smooth scrolling
+      const isLocked = isModelSelected;
+      ctx.strokeStyle = isLocked ? '#FFFF00' : '#00FFFF'; // Yellow when locked, Cyan when scrolling
+      ctx.lineWidth = Math.max(2, isLocked ? 4 : 3 * camera.scale);
+      ctx.globalAlpha = isLocked ? 1.0 : 0.7;
+      ctx.setLineDash(isLocked ? [] : [4, 4]); // Solid when locked, dashed when scrolling
       
-      ctx.strokeStyle = '#00FFFF'; // Cyan highlight color for hover
-      ctx.lineWidth = Math.max(2, 3 * camera.scale);
-      ctx.globalAlpha = 0.8;
-      ctx.setLineDash([4, 4]); // Dashed line for hover
+      // Draw 5-prong crosshair aligned with pentagon parameter directions
+      const crosshairLength = 1.8; // Slightly larger crosshair
       
-      // Draw circular highlight at current resnorm level
-      ctx.beginPath();
-      for (let i = 0; i <= numSegments; i++) {
-        const angle = (i / numSegments) * 2 * Math.PI;
-        const x = Math.cos(angle) * highlightRadius;
-        const y = Math.sin(angle) * highlightRadius;
-        
-        const point = project3D({ x, y, z: currentZ, color: '#00FFFF', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (point.visible) {
-          if (i === 0) {
-            ctx.moveTo(point.x, point.y);
-          } else {
-            ctx.lineTo(point.x, point.y);
+      // Calculate center point once for performance
+      const centerPoint = project3D({ x: 0, y: 0, z: currentZ, color: ctx.strokeStyle, opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      
+      if (centerPoint.visible) {
+        // Draw 5 prongs pointing to each parameter direction
+        for (let i = 0; i < 5; i++) {
+          // Calculate angle for each parameter (matching pentagon layout)
+          const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2 + Math.PI;
+          
+          // Calculate prong endpoints
+          const prongX = Math.cos(angle) * crosshairLength;
+          const prongY = Math.sin(angle) * crosshairLength;
+          
+          // Draw prong from center to parameter direction
+          const prongPoint = project3D({ x: prongX, y: prongY, z: currentZ, color: ctx.strokeStyle, opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+          
+          if (prongPoint.visible) {
+            ctx.beginPath();
+            ctx.moveTo(centerPoint.x, centerPoint.y);
+            ctx.lineTo(prongPoint.x, prongPoint.y);
+            ctx.stroke();
           }
         }
+        
+        // Add center dot
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.globalAlpha = 1.0;
+        const dotSize = isLocked ? 4 : 3;
+        ctx.beginPath();
+        ctx.arc(centerPoint.x, centerPoint.y, dotSize, 0, 2 * Math.PI);
+        ctx.fill();
       }
-      ctx.stroke();
+      
       ctx.setLineDash([]); // Reset dash pattern
       
-      // Draw current resnorm indicator in center
-      const centerPoint = project3D({ x: coreX, y: coreY, z: currentZ, color: '#00FFFF', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-      if (centerPoint.visible) {
-        ctx.fillStyle = '#00FFFF';
-        ctx.globalAlpha = 1.0;
-        ctx.beginPath();
-        ctx.arc(centerPoint.x, centerPoint.y, Math.max(4, 6 * camera.scale), 0, 2 * Math.PI);
-        ctx.fill();
-        
-        // Add current resnorm value label
-        const fontSize = Math.max(10, 12 * camera.scale);
+      // Add resnorm value label next to crosshair
+      const labelPoint = project3D({ x: crosshairLength + 0.5, y: 0, z: currentZ, color: ctx.strokeStyle, opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (labelPoint.visible) {
+        const fontSize = Math.max(9, 10 * camera.scale);
         ctx.font = `bold ${fontSize}px Arial`;
-        ctx.textAlign = 'center';
+        ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#000000';
-        const labelText = currentResnorm < 1 ? currentResnorm.toFixed(3) : currentResnorm.toFixed(2);
-        ctx.fillText(labelText, centerPoint.x, centerPoint.y);
+        
+        const labelText = activeVisualResnorm < 1 ? activeVisualResnorm.toFixed(3) : activeVisualResnorm.toFixed(2);
+        
+        // Background for label
+        const textWidth = ctx.measureText(labelText).width;
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(labelPoint.x - 2, labelPoint.y - fontSize/2 - 1, textWidth + 4, fontSize + 2);
+        
+        // Label text
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fillText(labelText, labelPoint.x, labelPoint.y);
       }
     }
     
@@ -1197,7 +1354,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     
     
     ctx.restore();
-  }, [filteredModels, project3D, camera.scale, resnormSpread, currentResnorm, selectedResnormRange]);
+  }, [filteredModels, project3D, camera.scale, resnormSpread, currentResnorm, selectedResnormRange, isModelSelected, visualResnorm]);
 
 
   // Draw parameter values list with clean table formatting
@@ -1319,8 +1476,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.restore();
   }, [actualHeight, circuitParams, gridSize]);
 
-  // Render 3D visualization with enhanced smoothness
+  // Throttled 3D rendering for optimal performance
   const render3D = React.useCallback(() => {
+    const currentTime = performance.now();
+    if (currentTime - lastRenderTime.current < renderThrottleMs) {
+      return; // Skip render if too frequent
+    }
+    lastRenderTime.current = currentTime;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -1437,10 +1599,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw parameter values list
     drawParameterValuesList(ctx);
     
-    // Draw orientation cube
-    drawOrientationCube(ctx);
+    // Draw pentagonal outline
+    drawPentagonalOutline(ctx);
 
-  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, drawGroundTruthCrossSection, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawOrientationCube, paramKeys]);
+  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, drawGroundTruthCrossSection, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawPentagonalOutline, paramKeys]);
 
   // Professional 3D navigation handlers (Blender/Onshape-style) with model selection
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1451,13 +1613,34 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
     
-    // Check for shift-click resnorm selection
-    if (e.button === 0 && e.shiftKey && onResnormSelect) {
+    // Check for shift-click resnorm selection (locks crosshair)
+    if (e.button === 0 && e.shiftKey) {
       const selectedResnorm = findResnormAtPoint(clickX, clickY);
       if (selectedResnorm !== null) {
-        onResnormSelect(selectedResnorm);
+        // Lock crosshair to the discrete selected resnorm
+        setIsModelSelected(true);
+        setVisualResnorm(selectedResnorm);
+        // Always send discrete resnorm for computational accuracy
+        const nearestModel = findNearestGridModel(selectedResnorm);
+        const discreteResnorm = nearestModel?.resnorm || selectedResnorm;
+        if (onResnormSelect) {
+          onResnormSelect(discreteResnorm);
+        }
         return; // Don't start dragging
       }
+    }
+    
+    // Check for ctrl-click to unlock crosshair (free scrolling mode)
+    if (e.button === 0 && e.ctrlKey && !e.shiftKey) {
+      // Unlock crosshair for free scrolling
+      setIsModelSelected(false);
+      setVisualResnorm(null);
+      // Clear computational state
+      lastComputationalResnorm.current = null;
+      if (onCurrentResnormChange) {
+        onCurrentResnormChange(null);
+      }
+      return; // Don't start dragging
     }
     
     // Check for model selection on left click without modifiers
@@ -1478,11 +1661,14 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     let dragMode: NavigationMode = 'orbit';
     if (e.button === 1) {
       dragMode = 'pan';
-    } else if (e.button === 2 || (e.button === 0 && e.ctrlKey)) {
+    } else if (e.button === 2) {
       dragMode = 'zoom';
     } else if (e.button === 0 && e.shiftKey) {
       // For shift+left click that didn't hit a resnorm point, use pan mode
       dragMode = 'pan';
+    } else if (e.button === 0 && e.altKey) {
+      // Use Alt+left click for zoom instead of Ctrl+left click
+      dragMode = 'zoom';
     }
 
     setInteraction({
@@ -1494,8 +1680,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
   };
 
-  // Function to find resnorm level at a given screen position
-  const findResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
+  // Precise crosshair detection with strict alignment validation
+  const findSmoothResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
     if (!filteredModels.length) return null;
     
     const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
@@ -1503,38 +1689,61 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const maxResnorm = Math.max(...resnorms);
     const zAxisHeight = 5.0 * resnormSpread;
     
-    // Check multiple points along the central Z-axis and around it for better detection
-    const numTestPoints = 30;
-    const testRadiusRange = [0, 0.5, 1.0]; // Test at center and slightly around
-    let closestResnorm: number | null = null;
-    let minDistance = Infinity;
+    let bestResnormMatch: number | null = null;
+    let minDistanceToAxis = Infinity;
     
-    for (const testRadius of testRadiusRange) {
-      for (let i = 0; i < numTestPoints; i++) {
-        const normalizedZ = i / (numTestPoints - 1);
-        const z = normalizedZ * zAxisHeight;
-        const resnormValue = minResnorm + normalizedZ * (maxResnorm - minResnorm);
+    // Balanced precision for smooth performance
+    const numTestPoints = 75; // Optimized for performance while maintaining smoothness
+    const testAngles = 1; // Single central axis for direct resnorm mapping
+    
+    for (let i = 0; i < numTestPoints; i++) {
+      const normalizedZ = i / (numTestPoints - 1);
+      const z = normalizedZ * zAxisHeight;
+      const resnormValue = minResnorm + normalizedZ * (maxResnorm - minResnorm);
+      
+      // Test points along central Z-axis for direct resnorm mapping
+      for (let angle = 0; angle < testAngles; angle++) {
+        const testX = 0; // Central axis
+        const testY = 0; // Central axis
         
-        // Test center and points around it
-        for (let angle = 0; angle < (testRadius > 0 ? 8 : 1); angle++) {
-          const testAngle = (angle / 8) * 2 * Math.PI;
-          const testX = testRadius * Math.cos(testAngle);
-          const testY = testRadius * Math.sin(testAngle);
-          
-          const testPoint = project3D({ x: testX, y: testY, z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-          if (testPoint.visible) {
-            const distance = Math.sqrt(Math.pow(testPoint.x - screenX, 2) + Math.pow(testPoint.y - screenY, 2));
-            if (distance < 50 && distance < minDistance) { // Increased to 50 pixels
-              minDistance = distance;
-              closestResnorm = resnormValue;
-            }
+        const testPoint = project3D({ x: testX, y: testY, z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+        if (testPoint.visible) {
+          const distance = Math.sqrt(Math.pow(testPoint.x - screenX, 2) + Math.pow(testPoint.y - screenY, 2));
+          // Stricter detection radius for precise alignment
+          if (distance < 35 && distance < minDistanceToAxis) {
+            minDistanceToAxis = distance;
+            bestResnormMatch = resnormValue;
           }
         }
       }
     }
     
-    return closestResnorm;
+    // Only return match if it's close enough (strict alignment validation)
+    return minDistanceToAxis < 30 ? bestResnormMatch : null;
   }, [filteredModels, resnormSpread, project3D]);
+
+  // Legacy function for discrete resnorm selection (kept for backward compatibility)
+  const findResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
+    return findSmoothResnormAtPoint(screenX, screenY);
+  }, [findSmoothResnormAtPoint]);
+  
+  // Debounced computational update to parent (only discrete grid values)
+  const updateComputationalResnorm = useCallback((visualValue: number) => {
+    if (!onCurrentResnormChange) return;
+    
+    // Find nearest discrete grid model
+    const nearestModel = findNearestGridModel(visualValue);
+    const discreteResnorm = nearestModel?.resnorm || null;
+    
+    // Only update if significantly different from last computational value
+    if (discreteResnorm !== null && 
+        (!lastComputationalResnorm.current || 
+         Math.abs(discreteResnorm - lastComputationalResnorm.current) >= computationalUpdateThreshold)) {
+      
+      lastComputationalResnorm.current = discreteResnorm;
+      onCurrentResnormChange(discreteResnorm);
+    }
+  }, [onCurrentResnormChange, findNearestGridModel, computationalUpdateThreshold]);
 
   const handleMouseMove = (e: React.MouseEvent) => {
     // Handle hover detection for model highlighting and resnorm detection
@@ -1545,28 +1754,85 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         const hoverX = e.clientX - rect.left;
         const hoverY = e.clientY - rect.top;
         
-        const hoveredModelFound = findModelAtPoint(hoverX, hoverY);
-        setHoveredModel(hoveredModelFound);
-        
-        // Check for resnorm level hovering - only if canvas is visible and has models
-        if (models.length > 0 && canvas.offsetParent !== null) {
-          const hoveredResnorm = findResnormAtPoint(hoverX, hoverY);
-          if (onCurrentResnormChange) {
-            onCurrentResnormChange(hoveredResnorm);
+        // Throttled smooth crosshair scrolling and resnorm detection
+        const currentTime = performance.now();
+        if (models.length > 0 && canvas.offsetParent !== null && 
+            (currentTime - lastMouseMoveTime.current) > mouseMoveThrottleMs) {
+          
+          lastMouseMoveTime.current = currentTime;
+          
+          // Precise crosshair scrolling with strict alignment (only when no model is selected)
+          if (!isModelSelected) {
+            const smoothResnorm = findSmoothResnormAtPoint(hoverX, hoverY);
+            if (smoothResnorm !== null) {
+              // Smooth interpolation for ultra-precise visual movement
+              const currentVisual = visualResnorm || smoothResnorm;
+              const diff = smoothResnorm - currentVisual;
+              const interpolationFactor = 0.15; // Smooth interpolation
+              const newVisualResnorm = Math.abs(diff) > 0.001 
+                ? currentVisual + diff * interpolationFactor
+                : smoothResnorm;
+              
+              setVisualResnorm(newVisualResnorm);
+              
+              // Debounced computational sync (discrete values only)
+              updateComputationalResnorm(newVisualResnorm);
+              
+              // Set hovered model to nearest actual model for proper polygon highlighting
+              const nearestModel = findNearestActualModel(newVisualResnorm);
+              setHoveredModel(nearestModel);
+            } else {
+              // Clear visual crosshair and hover when outside strict detection area
+              setVisualResnorm(null);
+              setHoveredModel(null);
+              // Clear computational state as well
+              if (onCurrentResnormChange && lastComputationalResnorm.current !== null) {
+                lastComputationalResnorm.current = null;
+                onCurrentResnormChange(null);
+              }
+            }
+          } else {
+            // When model is selected, use nearest actual model for highlighting
+            const activeResnorm = currentResnorm || visualResnorm;
+            if (activeResnorm) {
+              const nearestModel = findNearestActualModel(activeResnorm);
+              setHoveredModel(nearestModel);
+            } else {
+              setHoveredModel(null);
+            }
+            
+            // Legacy discrete resnorm detection when model is selected
+            const hoveredResnorm = findResnormAtPoint(hoverX, hoverY);
+            if (onCurrentResnormChange) {
+              onCurrentResnormChange(hoveredResnorm);
+            }
           }
         }
       }
       return;
     }
 
+    // Throttle drag operations for smooth performance
+    const currentDragTime = performance.now();
+    if ((currentDragTime - lastDragTime.current) < dragThrottleMs) {
+      // Update interaction state but skip heavy operations
+      setInteraction(prev => ({ ...prev, lastMousePos: { x: e.clientX, y: e.clientY } }));
+      return;
+    }
+    lastDragTime.current = currentDragTime;
+
     const deltaX = e.clientX - interaction.lastMousePos.x;
     const deltaY = e.clientY - interaction.lastMousePos.y;
-    const sensitivity = 0.3; // Reduced for smoother interaction
+    
+    // Enhanced sensitivity with acceleration for ultra-smooth controls
+    const baseSensitivity = 0.5;
+    const accelerationFactor = Math.min(1.5, Math.sqrt(deltaX * deltaX + deltaY * deltaY) / 10);
+    const sensitivity = baseSensitivity * accelerationFactor;
 
     if (interaction.dragMode === 'orbit') {
-      // Orbit around target with smooth interpolation
-      const smoothedDeltaX = deltaX * sensitivity;
-      const smoothedDeltaY = deltaY * sensitivity;
+      // Ultra-smooth orbit with momentum-based smoothing
+      const smoothedDeltaX = deltaX * sensitivity * 0.8; // Reduced for smoothness
+      const smoothedDeltaY = deltaY * sensitivity * 0.8;
       const newRotation = {
         x: Math.max(-89, Math.min(89, rotation.x + smoothedDeltaY)),
         y: (rotation.y + smoothedDeltaX) % 360,
@@ -1578,7 +1844,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
     } else if (interaction.dragMode === 'pan') {
       // Pan the target with smooth movement
-      const panSensitivity = 0.003 * camera.distance; // Reduced for smoother panning
+      const panSensitivity = 0.004 * camera.distance; // Slightly increased for responsiveness
       setCamera(prev => ({
         ...prev,
         target: {
@@ -1589,7 +1855,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }));
     } else if (interaction.dragMode === 'zoom') {
       // Zoom by dragging with smooth scaling
-      const zoomSensitivity = 0.008; // Reduced for smoother zooming
+      const zoomSensitivity = 0.01; // Slightly increased for responsiveness
       const zoomDelta = 1 + (deltaY * zoomSensitivity);
       setCamera(prev => ({
         ...prev,
@@ -1610,6 +1876,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   const handleMouseLeave = () => {
     // Clear hover states and stop dragging when mouse leaves the canvas
     setHoveredModel(null);
+    // Clear computational state
+    lastComputationalResnorm.current = null;
     if (onCurrentResnormChange) {
       onCurrentResnormChange(null);
     }
@@ -1695,10 +1963,68 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     };
   }, [handleKeyDown]);
 
-  // Render effect
+  // Legacy render scheduling (replaced by advanced frame scheduler above)
+
+  // Main rendering trigger
   useEffect(() => {
     render3D();
   }, [render3D]);
+
+  // Additional effect to handle visibility changes and navigation
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && canvasRef.current) {
+        // Re-render when page becomes visible again
+        setTimeout(() => {
+          render3D();
+        }, 100);
+      }
+    };
+
+    const handleFocus = () => {
+      if (canvasRef.current) {
+        // Re-render when canvas gains focus after navigation
+        setTimeout(() => {
+          render3D();
+        }, 50);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    const currentCanvas = canvasRef.current;
+    if (currentCanvas) {
+      currentCanvas.addEventListener('focus', handleFocus);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (currentCanvas) {
+        currentCanvas.removeEventListener('focus', handleFocus);
+      }
+    };
+  }, [render3D]);
+
+  // Force re-render when component becomes visible
+  useEffect(() => {
+    if (containerRef.current) {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting && entry.intersectionRatio > 0.1) {
+            // Component is visible, ensure it renders
+            setTimeout(() => {
+              render3D();
+            }, 100);
+          }
+        });
+      }, { threshold: 0.1 });
+
+      observer.observe(containerRef.current);
+
+      return () => observer.disconnect();
+    }
+  }, [render3D]);
+
+  // Remove complex scheduling - just trigger render on data changes
 
   return (
     <div ref={containerRef} className="relative bg-black overflow-hidden w-full h-full">

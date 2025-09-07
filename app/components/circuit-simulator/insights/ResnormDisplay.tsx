@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ModelSnapshot } from '../types';
+import LinearHistogramScrubber from '../controls/LinearHistogramScrubber';
 
 interface ResnormDisplayProps {
   models: ModelSnapshot[]; // All available models for spectrum analysis
@@ -594,6 +595,20 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
               onMouseLeave={handleMouseLeave}
             />
           </div>
+          
+          {/* Linear Histogram Scrubber */}
+          {spectrumData && (
+            <div className="mt-3 px-1">
+              <LinearHistogramScrubber
+                min={spectrumData.minResnorm}
+                max={spectrumData.maxResnorm}
+                value={currentResnorm}
+                onChange={onResnormSelect || (() => {})}
+                width={containerRef.current?.offsetWidth || 360}
+                disabled={!onResnormSelect}
+              />
+            </div>
+          )}
           
           <div className="mt-2 flex justify-between text-xs text-neutral-400">
             <span>Models: {models.length.toLocaleString()}</span>

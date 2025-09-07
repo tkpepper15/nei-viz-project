@@ -303,8 +303,74 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
 }
 
 // Optimized chunk processing function with minimal data transfer
-async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId) {
-  const results = [];
+async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId, maxComputationResults = 5000) {
+  // Ultra-efficient Top-N heap for massive datasets
+  const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
+  const FINAL_TOP_RESULTS = Math.min(1000, maxComputationResults); // Final top results to return (max 1000)
+  
+  // Efficient min-heap implementation for Top-N results (O(log n) operations)
+  class MinHeap {
+    constructor(maxSize) {
+      this.heap = [];
+      this.maxSize = maxSize;
+    }
+    
+    parent(index) { return Math.floor((index - 1) / 2); }
+    leftChild(index) { return 2 * index + 1; }
+    rightChild(index) { return 2 * index + 2; }
+    
+    swap(i, j) {
+      [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+    }
+    
+    heapifyUp(index) {
+      if (index > 0 && this.heap[this.parent(index)].resnorm > this.heap[index].resnorm) {
+        this.swap(index, this.parent(index));
+        this.heapifyUp(this.parent(index));
+      }
+    }
+    
+    heapifyDown(index) {
+      let smallest = index;
+      const left = this.leftChild(index);
+      const right = this.rightChild(index);
+      
+      if (left < this.heap.length && this.heap[left].resnorm < this.heap[smallest].resnorm) {
+        smallest = left;
+      }
+      if (right < this.heap.length && this.heap[right].resnorm < this.heap[smallest].resnorm) {
+        smallest = right;
+      }
+      if (smallest !== index) {
+        this.swap(index, smallest);
+        this.heapifyDown(smallest);
+      }
+    }
+    
+    insert(item) {
+      if (this.heap.length < this.maxSize) {
+        // Heap not full, just add
+        this.heap.push(item);
+        this.heapifyUp(this.heap.length - 1);
+      } else if (item.resnorm < this.heap[0].resnorm) {
+        // Replace worst (root) with better item
+        this.heap[0] = item;
+        this.heapifyDown(0);
+      }
+      // Otherwise ignore (item is worse than our worst)
+    }
+    
+    getAll() {
+      return [...this.heap].sort((a, b) => a.resnorm - b.resnorm);
+    }
+    
+    size() {
+      return this.heap.length;
+    }
+  }
+  
+  const topResults = new MinHeap(MAX_RESULTS_DURING_COMPUTATION);
+  let processedCount = 0;
   
   // Enhanced adaptive batch sizing based on chunk size
   let batchSize = 25;
@@ -379,20 +445,27 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
         const resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
         
         if (isFinite(resnorm)) {
-          results.push({
+          // Ultra-efficient Top-N: store minimal data during computation
+          // Only store parameters + resnorm during computation phase
+          topResults.insert({
             parameters: params,
-            spectrum: results.length < 1000 ? spectrum : [], // Only keep spectrum for top results
-            resnorm
+            resnorm: resnorm
+            // NO spectrum data during computation - saves massive memory
           });
+          
+          processedCount++;
         }
       } catch (error) {
         console.warn('Parameter processing error:', error);
       }
     }
     
-    // Throttled progress reporting for better performance
+    // Progressive refinement: send best results found so far
     const progress = (i + batchSize) / chunkParams.length;
-    if (i % (batchSize * 10) === 0 || progress >= 1) {
+    if (i % (batchSize * 50) === 0 || progress >= 1) {
+      // Send current best results for progressive visualization
+      const currentBest = topResults.getAll().slice(0, 100);
+      
       self.postMessage({
         type: 'CHUNK_PROGRESS',
         data: {
@@ -401,29 +474,52 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
           totalChunks,
           chunkProgress: progress,
           processed: Math.min(i + batchSize, chunkParams.length),
-          total: chunkParams.length
+          total: chunkParams.length,
+          // Progressive refinement data
+          currentBestResults: currentBest,
+          currentBestResnorm: currentBest.length > 0 ? currentBest[0].resnorm : null,
+          totalQualityResults: topResults.size()
         }
       });
     }
   }
   
-  // Optimized result processing
-  results.sort((a, b) => a.resnorm - b.resnorm);
+  // Get final results from heap (already optimized)
+  const finalResults = topResults.getAll();
   
-  const topResults = results.slice(0, 800); // Slightly reduced to save memory
-  const otherResults = results.slice(800).map(r => ({
-    parameters: r.parameters,
-    resnorm: r.resnorm
-  }));
+  // Now add spectrum data ONLY to top results for final output
+  const topResultsWithSpectra = [];
+  const otherResults = [];
+  
+  // Re-compute spectra only for the top results
+  for (let i = 0; i < finalResults.length; i++) {
+    const result = finalResults[i];
+    
+    if (i < FINAL_TOP_RESULTS) {
+      // Re-calculate spectrum for top results only  
+      const spectrum = calculateImpedanceSpectrum(result.parameters, frequencyArray);
+      topResultsWithSpectra.push({
+        parameters: result.parameters,
+        resnorm: result.resnorm,
+        spectrum: spectrum
+      });
+    } else {
+      // No spectrum for lower-priority results
+      otherResults.push({
+        parameters: result.parameters,
+        resnorm: result.resnorm
+      });
+    }
+  }
   
   self.postMessage({
     type: 'CHUNK_COMPLETE',
     data: {
       chunkIndex,
       taskId,
-      topResults,
-      otherResults,
-      totalProcessed: results.length
+      topResults: topResultsWithSpectra,
+      otherResults: otherResults,
+      totalProcessed: processedCount
     }
   });
 }
@@ -487,7 +583,8 @@ self.onmessage = async function(e) {
           chunkIndex, 
           totalChunks, 
           resnormConfig = { method: 'mae' },
-          taskId
+          taskId,
+          maxComputationResults = 5000
         } = data;
         
         // Use cached shared data instead of transferring it each time
@@ -502,7 +599,8 @@ self.onmessage = async function(e) {
           totalChunks, 
           sharedReferenceSpectrum, 
           resnormConfig,
-          taskId
+          taskId,
+          maxComputationResults
         );
         break;
       }
@@ -514,11 +612,77 @@ self.onmessage = async function(e) {
           chunkIndex, 
           totalChunks,
           referenceSpectrum,
-          resnormConfig = { method: 'mae' }
+          resnormConfig = { method: 'mae' },
+          maxComputationResults = 5000
         } = data;
         
-        // Process chunk with aggressive memory management for large datasets
-        const results = [];
+        // Process chunk with ultra-efficient Top-N heap for massive datasets
+        const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
+        
+        // Efficient min-heap implementation for Top-N results (O(log n) operations)
+        class MinHeap {
+          constructor(maxSize) {
+            this.heap = [];
+            this.maxSize = maxSize;
+          }
+          
+          parent(index) { return Math.floor((index - 1) / 2); }
+          leftChild(index) { return 2 * index + 1; }
+          rightChild(index) { return 2 * index + 2; }
+          
+          swap(i, j) {
+            [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
+          }
+          
+          heapifyUp(index) {
+            if (index > 0 && this.heap[this.parent(index)].resnorm > this.heap[index].resnorm) {
+              this.swap(index, this.parent(index));
+              this.heapifyUp(this.parent(index));
+            }
+          }
+          
+          heapifyDown(index) {
+            let smallest = index;
+            const left = this.leftChild(index);
+            const right = this.rightChild(index);
+            
+            if (left < this.heap.length && this.heap[left].resnorm < this.heap[smallest].resnorm) {
+              smallest = left;
+            }
+            if (right < this.heap.length && this.heap[right].resnorm < this.heap[smallest].resnorm) {
+              smallest = right;
+            }
+            if (smallest !== index) {
+              this.swap(index, smallest);
+              this.heapifyDown(smallest);
+            }
+          }
+          
+          insert(item) {
+            if (this.heap.length < this.maxSize) {
+              // Heap not full, just add
+              this.heap.push(item);
+              this.heapifyUp(this.heap.length - 1);
+            } else if (item.resnorm < this.heap[0].resnorm) {
+              // Replace worst (root) with better item
+              this.heap[0] = item;
+              this.heapifyDown(0);
+            }
+            // Otherwise ignore (item is worse than our worst)
+          }
+          
+          getAll() {
+            return [...this.heap].sort((a, b) => a.resnorm - b.resnorm);
+          }
+          
+          size() {
+            return this.heap.length;
+          }
+        }
+        
+        // Initialize heap with lightweight data structure
+        const topResults = new MinHeap(MAX_RESULTS_DURING_COMPUTATION);
+        let processedCount = 0;
         
         // Ultra-aggressive adaptive batch sizing with enhanced memory pressure monitoring
         let batchSize = 25; // Start conservative
@@ -539,58 +703,22 @@ self.onmessage = async function(e) {
           batchSize = 50; // Larger batches for small chunks
         }
         
-        // Memory usage estimation
-        let estimatedMemoryUsage = 0;
-        const bytesPerResult = 800; // Estimated bytes per result object
+        // Lightweight memory estimation (much lower with heap approach)
+        const bytesPerResult = 150; // Much smaller without spectrum data during computation
         
         for (let i = 0; i < chunkParams.length; i += batchSize) {
           const batch = chunkParams.slice(i, i + batchSize);
           
-          // Memory pressure check - implement back-pressure if needed
-          estimatedMemoryUsage = results.length * bytesPerResult;
-          if (estimatedMemoryUsage > memoryThreshold) {
-            // Trigger intermediate cleanup and result streaming
-            self.postMessage({
-              type: 'MEMORY_PRESSURE',
-              data: {
-                chunkIndex,
-                estimatedMemory: Math.round(estimatedMemoryUsage / 1024 / 1024) + 'MB',
-                resultsCount: results.length,
-                message: 'High memory usage detected, implementing backpressure'
-              }
-            });
-            
-            // Wait for memory pressure to subside (simple backpressure)
-            await new Promise(resolve => setTimeout(resolve, 100));
-            
-            // Implement progressive data streaming if results are large
-            if (results.length > 5000) {
-              // Stream partial results and clear buffer
-              const partialResults = results.splice(0, 3000); // Take first 3000 results
-              self.postMessage({
-                type: 'PARTIAL_RESULTS',
-                data: {
-                  chunkIndex,
-                  partialResults: partialResults.slice(0, 1000), // Only send top 1000
-                  totalPartialCount: partialResults.length
-                }
-              });
-              // Clear memory references
-              partialResults.length = 0;
-              estimatedMemoryUsage = results.length * bytesPerResult;
-            }
+          // Critical: Frequent async yields to prevent worker thread blocking
+          if (i % (batchSize * 2) === 0) {  // Yield every 2 batches
+            // Non-blocking yield to event loop - prevents 55% hang
+            await new Promise(resolve => setTimeout(resolve, 0));
           }
           
-          // Enhanced staggered processing with adaptive delays for UI responsiveness
-          if (chunkParams.length > 80000 && i % (batchSize * 5) === 0) {
-            // More frequent delays for datasets > 80k to prevent UI freezing
-            await new Promise(resolve => setTimeout(resolve, 20));
-          } else if (chunkParams.length > 50000 && i % (batchSize * 10) === 0) {
-            // Medium frequency delays for large datasets
-            await new Promise(resolve => setTimeout(resolve, 10));
-          } else if (chunkParams.length > 25000 && i % (batchSize * 20) === 0) {
-            // Small delay every 20 batches for very large chunks to prevent blocking
-            await new Promise(resolve => setTimeout(resolve, 5));
+          // Additional yields for massive datasets
+          if (chunkParams.length > 100000 && i % batchSize === 0) {
+            // Yield every single batch for very large datasets
+            await new Promise(resolve => setTimeout(resolve, 1));
           }
           
           for (const params of batch) {
@@ -613,12 +741,15 @@ self.onmessage = async function(e) {
                 continue;
               }
               
-              // Only store essential data
-              results.push({
+              // Ultra-efficient Top-N: store minimal data during computation
+              // Only store parameters + resnorm during computation phase
+              topResults.insert({
                 parameters: params,
-                resnorm: resnorm,
-                spectrum: spectrum // Only needed for top results
+                resnorm: resnorm
+                // NO spectrum data during computation - saves massive memory
               });
+              
+              processedCount++;
             } catch (error) {
               // Continue processing even if one parameter set fails
               console.warn('Error processing parameter set:', params, error.message);
@@ -640,24 +771,42 @@ self.onmessage = async function(e) {
           });
         }
         
-        // Sort results by resnorm and keep only top results to save memory
-        results.sort((a, b) => a.resnorm - b.resnorm);
+        // Get final results from heap (already optimized)
+        const finalResults = topResults.getAll();
         
-        // Only keep essential spectrum data for best results
-        const topResults = results.slice(0, 1000); // Keep top 1000 per chunk
-        const otherResults = results.slice(1000).map(r => ({
-          parameters: r.parameters,
-          resnorm: r.resnorm
-          // Remove spectrum to save memory
-        }));
+        // Now add spectrum data ONLY to top results for final output
+        const FINAL_TOP_RESULTS = Math.min(1000, maxComputationResults);
+        const topResultsWithSpectra = [];
+        const otherResults = [];
+        
+        // Re-compute spectra only for the top results
+        for (let i = 0; i < finalResults.length; i++) {
+          const result = finalResults[i];
+          
+          if (i < FINAL_TOP_RESULTS) {
+            // Re-calculate spectrum for top results only  
+            const spectrum = calculateImpedanceSpectrum(result.parameters, frequencyArray);
+            topResultsWithSpectra.push({
+              parameters: result.parameters,
+              resnorm: result.resnorm,
+              spectrum: spectrum
+            });
+          } else {
+            // No spectrum for lower-priority results
+            otherResults.push({
+              parameters: result.parameters,
+              resnorm: result.resnorm
+            });
+          }
+        }
         
         self.postMessage({
           type: 'CHUNK_COMPLETE',
           data: {
             chunkIndex,
-            topResults,
-            otherResults,
-            totalProcessed: results.length
+            topResults: topResultsWithSpectra,
+            otherResults: otherResults,
+            totalProcessed: processedCount
           }
         });
         

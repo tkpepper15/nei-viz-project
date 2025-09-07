@@ -11,7 +11,7 @@ export interface StaticRenderSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
   showGroundTruth: boolean;
-  visualizationType: 'spider2d' | 'spider3d' | 'nyquist';
+  visualizationType: 'spider3d' | 'nyquist';
   resnormSpread: number;
   useResnormCenter: boolean; // New: rotate around resnorm center instead of grid front
   liveRendering: boolean;
