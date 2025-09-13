@@ -78,8 +78,20 @@ test-supabase-profiles.js
 !.vscode/extensions.json
 
 # Data files and generated content
-/data/npz/
-/data/demo_grid_*/
+/data/npz/user_generated/
+/data/demo_*/
+/data/test_*/
 /data/sample-outputs/
+/data/query_*/
 *.db
 render_jobs.db
+
+# macOS files
+.DS_Store
+**/.DS_Store
+
+# Docker files (not needed for this project)
+Dockerfile*
+docker-compose*
+.dockerignore
+.env.docker
