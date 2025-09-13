@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
+import { Database } from '../../lib/database.types';
 import { ExtendedPerformanceSettings } from '../components/circuit-simulator/types/gpuSettings';
 
 export interface UserSettings {
@@ -198,7 +199,7 @@ export function useUserSettings(userId?: string): UseUserSettingsReturn {
 
       const { data, error: createError } = await supabase
         .from('user_sessions')
-        .insert({
+        .insert([{
           user_id: userId,
           session_name: sessionName,
           description: sessionSettings?.session_name || `User session: ${sessionName}`,
@@ -221,11 +222,8 @@ export function useUserSettings(userId?: string): UseUserSettingsReturn {
               chunkSize: 5000
             }
           },
-          is_active: true,
-          total_computations: 0,
-          total_models_generated: 0,
-          total_computation_time: '0 seconds'
-        })
+          is_active: true
+        } as Database['public']['Tables']['user_sessions']['Insert']])
         .select()
         .single();
 

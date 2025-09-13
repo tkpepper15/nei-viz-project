@@ -3,8 +3,40 @@
 import React, { useState } from 'react';
 import { ComputationTest } from '../components/test/ComputationTest';
 import { TestAnalysis } from '../components/test/TestAnalysis';
-import testConfigLarge from '../../data/sample-outputs/test_1.json';
-import testConfigSmall from '../../data/sample-outputs/test_1_small.json';
+// Test configurations for computational testing
+const testConfigSmall = {
+  profileName: "Small Test (6x6x6x6x6)",
+  gridSettings: {
+    gridSize: 6,
+    minFreq: 0.1,
+    maxFreq: 100000.0,
+    numPoints: 50
+  },
+  circuitParameters: {
+    Rsh: 100,
+    Ra: 500,
+    Ca: 0.000001,
+    Rb: 1000,
+    Cb: 0.000001
+  }
+};
+
+const testConfigLarge = {
+  profileName: "Large Test (16x16x16x16x16)",
+  gridSettings: {
+    gridSize: 16,
+    minFreq: 0.1,
+    maxFreq: 100000.0,
+    numPoints: 100
+  },
+  circuitParameters: {
+    Rsh: 100,
+    Ra: 500,
+    Ca: 0.000001,
+    Rb: 1000,
+    Cb: 0.000001
+  }
+};
 
 export default function TestComputationPage() {
   const [useSmallConfig, setUseSmallConfig] = useState(true);

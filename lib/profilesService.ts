@@ -35,7 +35,7 @@ export class ProfilesService {
         return 9; // Default fallback
       }
 
-      const gridSize = data.default_grid_size || 9;
+      const gridSize = (data as any).default_grid_size || 9;
       console.log(`📏 Retrieved user default grid size: ${gridSize}`);
       return gridSize;
     } catch (error) {
