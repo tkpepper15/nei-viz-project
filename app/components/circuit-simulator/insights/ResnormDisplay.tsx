@@ -6,6 +6,10 @@ import LinearHistogramScrubber from '../controls/LinearHistogramScrubber';
 
 interface ResnormDisplayProps {
   models: ModelSnapshot[]; // All available models for spectrum analysis
+  visibleModels?: ModelSnapshot[]; // Currently visible models in navigation window
+  navigationOffset?: number; // Current navigation offset in dataset
+  onNavigationOffsetChange?: (offset: number) => void; // Callback for navigation window changes
+  navigationWindowSize?: number; // Size of navigation window (default 1000)
   onResnormRangeChange?: (minResnorm: number, maxResnorm: number) => void; // Callback for range selection
   currentResnorm?: number | null; // Current resnorm being navigated for highlighting
   onResnormSelect?: (resnorm: number) => void; // Callback for clicking on specific resnorm value
@@ -21,8 +25,12 @@ interface NavigationState {
   totalSections: number;
 }
 
-const ResnormDisplay: React.FC<ResnormDisplayProps> = ({ 
-  models, 
+const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
+  models,
+  visibleModels,
+  navigationOffset = 0,
+  onNavigationOffsetChange,
+  navigationWindowSize = 1000,
   onResnormRangeChange,
   currentResnorm = null,
   onResnormSelect,
@@ -209,6 +217,31 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
     const cropWidth = cropEndX - cropStartX;
     
     // Draw darkened overlay areas (outside of crop)
+    // Navigation window indicator (show visible range within full dataset)
+    if (visibleModels && models.length > navigationWindowSize) {
+      const navStartRatio = navigationOffset / models.length;
+      const navEndRatio = Math.min((navigationOffset + navigationWindowSize) / models.length, 1);
+
+      const navStartX = margin.left + navStartRatio * chartWidth;
+      const navEndX = margin.left + navEndRatio * chartWidth;
+
+      // Navigation window background
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+      ctx.fillRect(navStartX, margin.top - 8, navEndX - navStartX, chartHeight + 16);
+
+      // Navigation window border
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.strokeRect(navStartX, margin.top - 8, navEndX - navStartX, chartHeight + 16);
+      ctx.setLineDash([]);
+
+      // Navigation markers
+      ctx.fillStyle = '#3b82f6';
+      ctx.fillRect(navStartX - 1, margin.top - 8, 2, chartHeight + 16);
+      ctx.fillRect(navEndX - 1, margin.top - 8, 2, chartHeight + 16);
+    }
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     // Left overlay
     ctx.fillRect(margin.left, margin.top, cropStartX - margin.left, chartHeight);
@@ -385,7 +418,7 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
       });
     }
     
-  }, [spectrumData, selectedRange, hoveredResnorm, models, currentResnorm, taggedModels, tagColors]);
+  }, [spectrumData, selectedRange, hoveredResnorm, models, currentResnorm, taggedModels, tagColors, visibleModels, navigationOffset, navigationWindowSize]);
   
   // Handle mouse interactions for crop-style handles
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -596,17 +629,76 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
             />
           </div>
           
-          {/* Linear Histogram Scrubber */}
+          {/* Linear Histogram Scrubber with Arrow Navigation */}
           {spectrumData && (
             <div className="mt-3 px-1">
-              <LinearHistogramScrubber
-                min={spectrumData.minResnorm}
-                max={spectrumData.maxResnorm}
-                value={currentResnorm}
-                onChange={onResnormSelect || (() => {})}
-                width={containerRef.current?.offsetWidth || 360}
-                disabled={!onResnormSelect}
-              />
+              <div className="flex items-center space-x-2">
+                {/* Previous Model Button */}
+                <button
+                  onClick={() => {
+                    if (onResnormSelect && (visibleModels || models).length > 0) {
+                      const modelsToUse = visibleModels || models;
+                      const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+                      const currentIndex = currentResnorm ?
+                        sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
+                      const prevIndex = currentIndex > 0 ? currentIndex - 1 : sortedModels.length - 1;
+                      onResnormSelect(sortedModels[prevIndex].resnorm || spectrumData.minResnorm);
+                    }
+                  }}
+                  disabled={!onResnormSelect || (visibleModels || models).length === 0}
+                  className="p-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded transition-colors flex-shrink-0"
+                  title="Previous model (lower resnorm) - Navigation window"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                
+                {/* Main Scrubber */}
+                <div className="flex-1">
+                  <LinearHistogramScrubber
+                    min={visibleModels && visibleModels.length > 0
+                      ? Math.min(...visibleModels.map(m => m.resnorm || 0))
+                      : spectrumData.minResnorm}
+                    max={visibleModels && visibleModels.length > 0
+                      ? Math.max(...visibleModels.map(m => m.resnorm || 0))
+                      : spectrumData.maxResnorm}
+                    value={currentResnorm}
+                    onChange={onResnormSelect || (() => {})}
+                    width={(containerRef.current?.offsetWidth || 360) - 100} // Account for buttons
+                    disabled={!onResnormSelect}
+                  />
+                </div>
+                
+                {/* Next Model Button */}
+                <button
+                  onClick={() => {
+                    if (onResnormSelect && (visibleModels || models).length > 0) {
+                      const modelsToUse = visibleModels || models;
+                      const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+                      const currentIndex = currentResnorm ?
+                        sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
+                      const nextIndex = currentIndex < sortedModels.length - 1 ? currentIndex + 1 : 0;
+                      onResnormSelect(sortedModels[nextIndex].resnorm || spectrumData.maxResnorm);
+
+                      // If we've reached the end of the visible window, move the navigation window
+                      if (nextIndex === 0 && onNavigationOffsetChange && visibleModels && models.length > navigationWindowSize) {
+                        const newOffset = Math.min(navigationOffset + navigationWindowSize, models.length - navigationWindowSize);
+                        if (newOffset !== navigationOffset) {
+                          onNavigationOffsetChange(newOffset);
+                        }
+                      }
+                    }
+                  }}
+                  disabled={!onResnormSelect || (visibleModels || models).length === 0}
+                  className="p-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded transition-colors flex-shrink-0"
+                  title="Next model (higher resnorm) - Navigation window"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
             </div>
           )}
           

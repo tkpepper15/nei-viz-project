@@ -16,6 +16,9 @@ interface ProfileCardProps {
   onClick?: () => void;
   // Computing state
   isComputing?: boolean;
+  // NPZ/Server functionality
+  onFetchServerData?: () => void;
+  serverConnectionStatus?: 'online' | 'offline' | 'checking';
 }
 
 export const ProfileCard: React.FC<ProfileCardProps> = ({
@@ -70,6 +73,13 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
           {/* Profile Name */}
           <h4 className="text-sm font-medium text-white truncate mb-1 flex items-center gap-2">
             {profile.name}
+            {/* Server-side indicator */}
+            {false && (
+              <svg className="w-3 h-3 text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <title>Server-side dataset</title>
+                <path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clipRule="evenodd" />
+              </svg>
+            )}
             {isComputing && (
               <span className="flex items-center gap-1 text-xs text-green-400">
                 <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
@@ -78,8 +88,8 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             )}
           </h4>
           
-          {/* Grid Info */}
-          <div className="flex items-center gap-2 mb-1">
+          {/* Grid Info and Tags */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="text-xs text-neutral-300 bg-neutral-700/60 px-2 py-0.5 rounded">
               {profile.gridSize}⁵ grid
             </span>
@@ -87,6 +97,18 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             <span className="text-xs text-neutral-300">
               {profile.minFreq}-{profile.maxFreq} Hz
             </span>
+            {/* NPZ Tag for server-side datasets */}
+            {false && (
+              <span className="text-xs text-blue-300 bg-blue-900/40 border border-blue-700/50 px-2 py-0.5 rounded">
+                NPZ
+              </span>
+            )}
+            {/* Additional status tags */}
+            {false && (
+              <span className="text-xs text-green-300 bg-green-900/40 border border-green-700/50 px-2 py-0.5 rounded">
+                PUBLIC
+              </span>
+            )}
           </div>
           
           {/* Description */}
@@ -129,19 +151,21 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
               
               {/* Menu */}
               <div className="absolute right-0 top-full mt-1 w-40 bg-neutral-800 rounded-lg shadow-lg border border-neutral-600 py-1 z-20">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCompute();
-                    setOpenMenuId(null);
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
-                >
-                  <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Compute
-                </button>
+                {true && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCompute();
+                      setOpenMenuId(null);
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Compute
+                  </button>
+                )}
                 
                 {onEditParameters && (
                   <button

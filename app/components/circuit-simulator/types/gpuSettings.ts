@@ -6,6 +6,10 @@ export interface GPUAccelerationSettings {
   deviceType: 'discrete' | 'integrated' | 'cpu';
   enableProfiling: boolean;
   memoryThreshold: number; // MB
+  workgroupSize: number; // WebGPU workgroup size
+  enableDebugMode: boolean; // Additional logging and validation
+  powerPreference: 'default' | 'low-power' | 'high-performance';
+  adaptiveThresholds: boolean; // Auto-adjust thresholds based on performance
 }
 
 export interface CPUSettings {
@@ -18,6 +22,10 @@ export interface ExtendedPerformanceSettings {
   maxComputationResults: number;
   gpuAcceleration: GPUAccelerationSettings;
   cpuSettings: CPUSettings;
+  optimization?: {
+    enableAdvancedOptimization: boolean;
+    useSymmetricOptimization: boolean;
+  };
 }
 
 export interface WebGPUCapabilities {
@@ -42,13 +50,17 @@ export interface WebGPUBenchmarkResult {
 }
 
 export const DEFAULT_GPU_SETTINGS: GPUAccelerationSettings = {
-  enabled: false, // Default to false until user explicitly enables
+  enabled: false, // Default to false - disable GPU acceleration by default until shader is stable
   preferWebGPU: true,
   fallbackToCPU: true,
   maxBatchSize: 65536, // 64K parameter sets per batch
   deviceType: 'discrete',
   enableProfiling: false,
-  memoryThreshold: 1024 // 1GB
+  memoryThreshold: 1024, // 1GB
+  workgroupSize: 64, // Default WebGPU workgroup size
+  enableDebugMode: false,
+  powerPreference: 'high-performance',
+  adaptiveThresholds: true
 };
 
 export const DEFAULT_CPU_SETTINGS: CPUSettings = {

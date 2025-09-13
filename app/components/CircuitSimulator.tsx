@@ -4,13 +4,14 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import Image from 'next/image';
 import 'katex/dist/katex.min.css';
 import { 
-  BackendMeshPoint, 
-  GridParameterArrays 
+  BackendMeshPoint 
 } from './circuit-simulator/types';
 import { ModelSnapshot, ImpedancePoint, ResnormGroup, PerformanceLog, PipelinePhase } from './circuit-simulator/types';
 import { CircuitParameters } from './circuit-simulator/types/parameters';
 import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/workerManager';
 import { useHybridComputeManager } from './circuit-simulator/utils/hybridComputeManager';
+import { useOptimizedComputeManager, OptimizedComputeManagerConfig } from './circuit-simulator/utils/optimizedComputeManager';
+import { SerializedComputationManager, createSerializedComputationManager } from './circuit-simulator/utils/serializedComputationManager';
 import { ExtendedPerformanceSettings, DEFAULT_GPU_SETTINGS, DEFAULT_CPU_SETTINGS } from './circuit-simulator/types/gpuSettings';
 import { SettingsModal } from './settings/SettingsModal';
 import { SettingsButton } from './settings/SettingsButton';
@@ -19,11 +20,13 @@ import { useUserProfiles } from '../hooks/useUserProfiles';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useCircuitConfigurations } from '../hooks/useCircuitConfigurations';
 import { useUISettingsManager } from '../hooks/useUISettingsManager';
+import { ProfilesService } from '../../lib/profilesService';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
-import { DataTableTab } from './circuit-simulator/DataTableTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
+import { NPZManager } from './circuit-simulator/npz-manager/NPZManager';
+// import { SerializedSpiderPlotDemo } from './circuit-simulator/examples/SerializedSpiderPlotDemo';
 // Removed OrchestratorTab - functionality integrated into VisualizerTab
 
 import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
@@ -44,6 +47,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Authentication
   const { user, loading: authLoading, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  
+  // State for user's default grid size
+  const [defaultGridSize, setDefaultGridSize] = useState<number>(9);
   
   // Initialize session management
   const sessionManagement = useSessionManagement();
@@ -94,6 +100,36 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const cpuWorkerManager = useWorkerManager();
   const hybridComputeManager = useHybridComputeManager(cpuWorkerManager);
   const { cancelComputation } = cpuWorkerManager;
+
+  // Initialize optimization manager with fallback to hybrid compute
+  const [optimizationConfig, setOptimizationConfig] = useState<OptimizedComputeManagerConfig>({
+    enableOptimizedPipeline: true,
+    optimizationThreshold: 10000,
+    fallbackToOriginal: true,
+    maxGridSizeForOptimization: 1000000,
+    pipelineConfig: {
+      fingerprintFrequencies: 8,
+      approximationFrequencies: 5,
+      coarseFrequencies: 12,
+      fullFrequencies: 20,
+      topMSurvivors: 5000,
+      finalTopK: 1000,
+      chunkSize: 15000,
+      toleranceForTies: 0.01,
+      enableLocalOptimization: false,
+      quantizationBin: 0.05
+    }
+  });
+
+  const optimizedComputeManager = useOptimizedComputeManager(
+    hybridComputeManager.computeGridHybrid,
+    optimizationConfig
+  );
+
+  const handleOptimizationConfigChange = useCallback((config: Partial<OptimizedComputeManagerConfig>) => {
+    setOptimizationConfig(prev => ({ ...prev, ...config }));
+    optimizedComputeManager.updateConfig(config);
+  }, [optimizedComputeManager]);
   
   // Add frequency control state - extended range for full Nyquist closure
   const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz for full low-frequency closure
@@ -124,11 +160,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Use the new computation state hook
   const {
     gridResults, setGridResults,
-    gridResultsWithIds, setGridResultsWithIds,
     gridSize, setGridSize,
     gridError, setGridError,
     isComputingGrid, setIsComputingGrid,
-    gridParameterArrays, setGridParameterArrays,
     computationProgress, setComputationProgress,
     computationSummary, setComputationSummary,
     skippedPoints, setSkippedPoints,
@@ -151,14 +185,26 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     saveComputationState,
     restoreComputationState,
     clearAllComputationData, // eslint-disable-line @typescript-eslint/no-unused-vars
-    lastComputedResults
-  } = useComputationState();
+    lastComputedResults,
+    updateDefaultGridSize
+  } = useComputationState(defaultGridSize);
+
+  // Serialized computation manager for efficient memory storage
+  const [serializedManager, setSerializedManager] = useState<SerializedComputationManager | null>(null);
+
+  // Initialize serialized computation manager when grid size changes
+  useEffect(() => {
+    const manager = createSerializedComputationManager(gridSize, 'standard');
+    setSerializedManager(manager);
+    console.log('🚀 Initialized SerializedComputationManager for main pipeline');
+  }, [gridSize]);
 
   // Convert CircuitConfigurations to SavedProfiles format for backward compatibility
   const convertedProfiles = useMemo((): SavedProfile[] => {
     if (!circuitConfigurations) return [];
     
-    return circuitConfigurations.map(config => ({
+    // Convert local circuit configurations
+    const localProfiles = circuitConfigurations.map(config => ({
       id: config.id,
       name: config.name,
       description: config.description || '',
@@ -172,8 +218,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       isComputed: config.isComputed,
       computationTime: config.computationTime,
       totalPoints: config.totalPoints,
-      validPoints: config.validPoints
+      validPoints: config.validPoints,
+      datasetSource: 'local' as const
     }));
+
+    return localProfiles;
   }, [circuitConfigurations]);
 
   // Enhanced UI coordination refs for large dataset processing
@@ -254,6 +303,16 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const setVisualizationTab = setActiveTab;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
+  
+  // Load user's default grid size when user changes
+  useEffect(() => {
+    if (user?.id && !authLoading) {
+      ProfilesService.getUserDefaultGridSize(user.id).then((loadedDefaultGridSize) => {
+        setDefaultGridSize(loadedDefaultGridSize);
+        updateDefaultGridSize(loadedDefaultGridSize);
+      });
+    }
+  }, [user?.id, authLoading, updateDefaultGridSize]);
   
   // Auto-restore computation state when switching to visualizer tab
   useEffect(() => {
@@ -441,8 +500,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setMaxFreq(100000);
     setNumPoints(100);
     
-    // Reset grid size
-    setGridSize(9);
+    // Reset grid size to user's default
+    setGridSize(defaultGridSize);
     
     // Generate unique name for new circuit
     const timestamp = new Date().toLocaleString('en-US', { 
@@ -476,7 +535,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       console.error('Error creating new circuit profile:', error);
       updateStatusMessage('New circuit created - profile creation failed, you can save manually');
     }
-  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName]);
+  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName, defaultGridSize]);
   
   // Compute grid function
   const handleCompute = useCallback(async () => {
@@ -566,29 +625,34 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           isReference: false
         }));
 
-        setGridResults(processedResults);
-        setGridResultsWithIds(processedResults.map((r, i) => ({ ...r, id: i })));
+        // Store in serialized format for efficient memory usage
+        if (serializedManager) {
+          const serializedCount = serializedManager.storeResults(processedResults, 'standard');
+          console.log(`🗜️ Stored ${serializedCount} results in compressed format`);
+          
+          // Generate ModelSnapshots from serialized data for visualization
+          const modelSnapshots = serializedManager.generateModelSnapshots();
+          setGridResults(modelSnapshots);
+          
+          updateStatusMessage(`Computation completed! Generated ${modelSnapshots.length} models using compressed storage (${Math.round((serializedCount/processedResults.length)*100)}% compression).`);
+        } else {
+          // Fallback to direct storage if serialized manager not ready
+          console.warn('⚠️ SerializedManager not ready, using direct storage');
+          const modelSnapshots = processedResults.map((result, index) => mapBackendMeshToSnapshot(result, index));
+          setGridResults(modelSnapshots);
+          updateStatusMessage(`Computation completed! Generated ${modelSnapshots.length} models ready for visualization.`);
+        }
         
         // Update computation statistics
         setTotalGridPoints(Math.pow(gridSize, 5));
         setActualComputedPoints(results.length);
         
-        // Create grid parameter arrays for visualization
-        const gridArrays: GridParameterArrays = {
-          Rsh: processedResults.map(r => r.parameters.Rsh),
-          Ra: processedResults.map(r => r.parameters.Ra),
-          Ca: processedResults.map(r => r.parameters.Ca),
-          Rb: processedResults.map(r => r.parameters.Rb),
-          Cb: processedResults.map(r => r.parameters.Cb)
-        };
-        setGridParameterArrays(gridArrays);
+        // Grid parameter arrays removed - functionality moved to visualization layer
 
         console.log('Computation successful:', {
           processedResultsLength: processedResults.length,
           sampleResult: processedResults[0]
         });
-
-        updateStatusMessage(`Computation completed! Generated ${processedResults.length} models ready for visualization.`);
         
         // Mark current profile as computed if one is selected
         if (savedProfilesState.selectedProfile) {
@@ -650,11 +714,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     isComputingGrid, gridSize, parameters, minFreq, maxFreq, numPoints, 
     performanceSettings, resnormConfig, hybridComputeManager.computeGridHybrid, 
     setIsComputingGrid, setGridError, setComputationProgress, setComputationSummary,
-    setGridResults, setGridResultsWithIds, setTotalGridPoints, setActualComputedPoints,
-    setGridParameterArrays, savedProfilesState.selectedProfile, profileActions,
+    setGridResults, setTotalGridPoints, setActualComputedPoints,
+    savedProfilesState.selectedProfile, profileActions,
     updateStatusMessage, configurationName
   ]);
   
+
   // Multi-select functions
   const handleToggleMultiSelect = useCallback(() => {
     setIsMultiSelectMode(!isMultiSelectMode);
@@ -668,7 +733,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         : [...selectedCircuits, configId];
       setSelectedCircuits(newSelectedCircuits);
     } else {
-      // Normal single selection behavior
+      
+      // Normal single selection behavior for regular profiles
       // Clear existing grid results when switching configurations
       resetComputationState();
       
@@ -680,6 +746,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       if (config) {
         // Load configuration settings into current state
         setGridSize(config.gridSize);
+        updateDefaultGridSize(config.gridSize);
         setMinFreq(config.minFreq);
         setMaxFreq(config.maxFreq);
         setNumPoints(config.numPoints);
@@ -697,7 +764,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         updateStatusMessage(`Loaded configuration: ${config.name} - Previous grid data cleared, ready to compute`);
       }
     }
-  }, [isMultiSelectMode, selectedCircuits, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage, setIsMultiSelectMode, setSelectedCircuits]);
+  }, [isMultiSelectMode, selectedCircuits, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage, setIsMultiSelectMode, setSelectedCircuits, convertedProfiles, updateDefaultGridSize]);
   
   const handleBulkDelete = useCallback(async () => {
     if (selectedCircuits.length === 0) return;
@@ -1189,8 +1256,24 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         const Zb_real = Rb / (1 + Math.pow(omega * Rb * Cb, 2));
         const Zb_imag = -omega * Rb * Rb * Cb / (1 + Math.pow(omega * Rb * Cb, 2));
         
-        const real = Rsh + Za_real + Zb_real;
-        const imaginary = Za_imag + Zb_imag;
+        // Calculate sum of membrane impedances (Za + Zb)
+        const Zab_real = Za_real + Zb_real;
+        const Zab_imag = Za_imag + Zb_imag;
+        
+        // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+        // Numerator: Rsh * (Za + Zb)
+        const num_real = Rsh * Zab_real;
+        const num_imag = Rsh * Zab_imag;
+        
+        // Denominator: Rsh + Za + Zb
+        const denom_real = Rsh + Zab_real;
+        const denom_imag = Zab_imag;
+        
+        // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+        const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+        
+        const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+        const imaginary = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
         const magnitude = Math.sqrt(real * real + imaginary * imaginary);
         const phase = Math.atan2(imaginary, real) * (180 / Math.PI);
         
@@ -1373,6 +1456,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig]);
 
   // Updated grid computation using Web Workers for parallel processing
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleComputeRegressionMesh = useCallback(async () => {
     // Validate grid size
     if (gridSize < 2 || gridSize > 25) {
@@ -1547,8 +1631,29 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         setIsComputingGrid(false);
       };
 
-      // Run the parallel computation
-      const hybridResult = await hybridComputeManager.computeGridHybrid(
+      // Create progress adapter for optimized compute manager
+      const progressAdapter = (progress: {
+        phase: string;
+        progress: number;
+        currentOperation: string;
+        parametersProcessed?: number;
+        memoryUsage?: number;
+        estimatedTimeRemaining?: number;
+      }) => {
+        // Convert to WorkerProgress format
+        handleProgress({
+          type: progress.phase.includes('Stage 1') ? 'GENERATION_PROGRESS' : 
+                progress.phase.includes('Stage 2') ? 'CHUNK_PROGRESS' : 
+                progress.phase.includes('Stage 3') ? 'MATHEMATICAL_OPERATION' : 'COMPUTATION_START',
+          total: 100,
+          overallProgress: progress.progress,
+          processed: progress.parametersProcessed,
+          generated: progress.parametersProcessed
+        });
+      };
+      
+      // Run the parallel computation (with optimization if qualified)
+      const computeResult = await optimizedComputeManager.computeGridOptimized(
         parameters,
         gridSize,
         minFreq,
@@ -1557,12 +1662,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         performanceSettings,
         extendedSettings,
         resnormConfig,
-        handleProgress,
-        handleError,
-        maxComputationResults
+        progressAdapter,
+        handleError
       );
 
-      const results = hybridResult.results;
+      const results = computeResult.results;
 
       if (results.length === 0) {
         throw new Error('No results returned from computation');
@@ -1721,15 +1825,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         };
       });
       
-      // Create filtered points with IDs
-      const filteredPointsWithIds = filteredResults.map((point, idx) => ({
-        ...point,
-        id: idx + 1
-      }));
+      // Filtered results ready for state update
       
-      // Update state with filtered results
-      setGridResults(filteredResults);
-      setGridResultsWithIds(filteredPointsWithIds);
+      // Convert BackendMeshPoint to ModelSnapshot and update state
+      const filteredModelSnapshots = filteredResults.map((result, index) => mapBackendMeshToSnapshot(result, index));
+      setGridResults(filteredModelSnapshots);
       
       // Calculate final timing and generate comprehensive performance log
       const endTime = Date.now();
@@ -1868,7 +1968,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
       setComputationProgress(null);
     }
-  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, hybridComputeManager.computeGridHybrid, mapBackendMeshToSnapshot, setGridResults, setGridResultsWithIds, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, parameters, isUserControlledLimits, performanceSettings, extendedSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, profileActions, configurationName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gridSize, updateStatusMessage, setIsComputingGrid, resetComputationState, setParameterChanged, setManuallyHidden, setTotalGridPoints, minFreq, maxFreq, numPoints, setComputationProgress, hybridComputeManager.computeGridHybrid, mapBackendMeshToSnapshot, setGridResults, setResnormGroups, setComputationSummary, visualizationSettings, applyVisualizationFiltering, calculateEffectiveVisualizationLimit, completePhase, createReferenceModel, currentPhases, generatePerformanceLog, parameters, isUserControlledLimits, performanceSettings, extendedSettings, referenceModelId, savedProfilesState.selectedProfile, setActualComputedPoints, setEstimatedMemoryUsage, setGridError, setMemoryLimitedPoints, setSkippedPoints, startPhase, userVisualizationPercentage, profileActions, configurationName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Add pagination state - used by child components
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1958,38 +2058,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [minFreq, maxFreq, numPoints, frequencyPoints.length, referenceModelId, manuallyHidden, createReferenceModel, updateStatusMessage]);
 
-  // Handler for grid values generated by spider plot
-  const handleGridValuesGenerated = useCallback((values: GridParameterArrays) => {
-    if (!values) return;
-    
-    // Log the values for debugging
-    console.log('Grid values received:', values);
-    
-    // Only update if values have actually changed
-    setGridParameterArrays(prev => {
-      if (!prev) return values;
-      
-      // Quick equality check for performance
-      if (prev === values) return prev;
-      
-      // Check if any arrays have changed length
-      const keys = Object.keys(values) as Array<keyof GridParameterArrays>;
-      const hasLengthChanged = keys.some(key => 
-        !prev[key] || prev[key].length !== values[key].length
-      );
-      
-      if (hasLengthChanged) return values;
-      
-      // Deep compare arrays
-      const hasChanged = keys.some(key => {
-        const prevArr = prev[key];
-        const newArr = values[key];
-        return !prevArr.every((val, idx) => val === newArr[idx]);
-      });
-      
-      return hasChanged ? values : prev;
-    });
-  }, [setGridParameterArrays]);
+  // Grid values handler removed - functionality moved to visualization layer
 
   // Note: Grid clearing functionality is now handled by resetComputationState from useComputationState hook
 
@@ -2151,7 +2220,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // pendingComputeProfile is now handled by the useUserProfiles hook
   
 
-  // Handler for copying profile parameters
+// Handler for copying profile parameters
   const handleCopyParams = useCallback((configId: string) => {
     const config = circuitConfigurations?.find(c => c.id === configId);
     if (config) {
@@ -2421,6 +2490,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [hasLoadedFromStorage]);
 
+
   // Persist profiles to localStorage whenever they change (but only after initial load)
   useEffect(() => {
     if (typeof window !== 'undefined' && hasLoadedFromStorage) {
@@ -2613,6 +2683,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               if (config) {
                 // Load configuration settings into current state
                 setGridSize(config.gridSize);
+                updateDefaultGridSize(config.gridSize);
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -2663,6 +2734,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 
                 // Load configuration settings into center panel for editing
                 setGridSize(config.gridSize);
+                updateDefaultGridSize(config.gridSize);
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -2687,11 +2759,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             onComputeProfile={(configId) => {
               const config = circuitConfigurations?.find(c => c.id === configId);
               if (config) {
+                
                 // Clear existing grid results first
                 resetComputationState();
                 
                 // Load configuration settings
                 setGridSize(config.gridSize);
+                updateDefaultGridSize(config.gridSize);
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -2712,9 +2786,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 
                 updateStatusMessage(`Loading configuration "${config.name}" parameters...`);
                 
-                // Auto-trigger computation
+                // Auto-trigger computation using the same function as center panel
                 setTimeout(() => {
-                  handleComputeRegressionMesh();
+                  handleCompute();
                 }, 100);
               }
             }}
@@ -2776,10 +2850,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
               onClick={() => setVisualizationTab('data')}
-              title="Data Table"
+              title="File Manager"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </button>
             <button 
@@ -3072,35 +3146,16 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 />
               </div>
             ) : visualizationTab === 'data' ? (
-              gridResults.length > 0 ? (
-                <div className="h-full overflow-y-auto">
-                  <DataTableTab 
-                    gridResults={gridResults}
-                    gridResultsWithIds={gridResultsWithIds}
-                    resnormGroups={resnormGroups}
-                    hiddenGroups={hiddenGroups}
-                    maxGridPoints={Math.pow(gridSize, 5)}
-                    gridSize={gridSize}
-                    parameters={parameters}
-                    gridParameterArrays={gridParameterArrays}
-                    opacityExponent={opacityExponent}
-                    groundTruthParams={parameters}
-                    minFreq={minFreq}
-                    maxFreq={maxFreq}
-                  />
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-32 bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md p-4">
-                  <div className="text-center">
-                    <svg className="w-8 h-8 mx-auto mb-2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <p className="text-sm text-neutral-400">
-                      No data to display. Compute a grid first.
-                    </p>
-                  </div>
-                </div>
-              )
+              <div className="h-full overflow-y-auto">
+                <NPZManager 
+                  results={gridResults}
+                  onLoadDataset={(loadedResults) => {
+                    setGridResults(loadedResults);
+                    updateStatusMessage(`Loaded ${loadedResults.length.toLocaleString()} results from dataset`);
+                  }}
+                  className="h-full"
+                />
+              </div>
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
@@ -3155,7 +3210,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     opacityLevel={opacityLevel}
                     referenceModelId={referenceModelId}
                     gridSize={gridSize}
-                    onGridValuesGenerated={handleGridValuesGenerated}
+                    onGridValuesGenerated={() => {}}
                     opacityExponent={opacityExponent}
                     onOpacityExponentChange={setOpacityExponent}
                     userReferenceParams={parameters}
@@ -3220,6 +3275,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         onSettingsChange={setExtendedSettings}
+        optimizationConfig={optimizationConfig}
+        onOptimizationConfigChange={handleOptimizationConfigChange}
+        optimizationStats={optimizedComputeManager.getOptimizationStats() || undefined}
+        isComputing={isComputingGrid}
       />
 
       {/* Authentication Modal */}

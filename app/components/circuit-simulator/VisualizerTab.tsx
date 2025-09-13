@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 // SpiderPlot 2D import removed - using only 3D visualization
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
 import { ModelSnapshot, ResnormGroup } from './types';
-import { GridParameterArrays, BackendMeshPoint } from './types';
+import { GridParameterArrays } from './types';
 import { CircuitParameters } from './types/parameters';
 import { StaticRenderSettings } from './controls/StaticRenderControls';
 import { ResnormConfig, calculateResnormWithConfig, calculate_impedance_spectrum } from './utils/resnorm';
@@ -47,7 +47,7 @@ interface VisualizerTabProps {
   resnormConfig: ResnormConfig;
   
   // Grid results for single circuit selection
-  gridResults?: BackendMeshPoint[];
+  gridResults?: ModelSnapshot[];
   
   // Group portion for model filtering - sync with parent CircuitSimulator
   groupPortion: number;
@@ -229,24 +229,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       // const referenceSpectrum = userReferenceParams ? 
       //   calculate_impedance_spectrum(userReferenceParams) : null;
       
-      // Convert gridResults to ModelSnapshot format
-      return gridResults.map((result, index): ModelSnapshot => ({
-        id: result.id?.toString() || `model-${index}`,
-        name: `Model ${index}`,
-        timestamp: Date.now(),
-        parameters: result.parameters,
-        resnorm: result.resnorm,
-        data: (result.spectrum || []).map(point => ({
-          real: point.real,
-          imaginary: point.imag,
-          frequency: point.freq,
-          magnitude: point.mag,
-          phase: point.phase
-        })),
-        color: '#10B981', // Default color - will be overridden by portion-based system
-        isVisible: true,
-        opacity: result.alpha || 1
-      }));
+      // gridResults are already ModelSnapshot[], so just return them
+      return gridResults;
     }
     
     // Fallback to old resnormGroups system
@@ -422,7 +406,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     // Sort grid results by resnorm and take top configurations
     const sorted = [...gridResults]
       .filter(point => point.resnorm !== undefined && point.resnorm !== null)
-      .sort((a, b) => a.resnorm - b.resnorm)
+      .sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0))
       .slice(0, Math.max(50, Math.ceil(gridResults.length * logModelPercent / 100))); // Show top models based on percentage
     
     return sorted.map(point => ({
@@ -454,14 +438,29 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
   // Note: allAvailableModels removed as it was unused
 
-  // Get visible models based on logarithmic percentage selection
-  const visibleModels: ModelSnapshot[] = useMemo(() => {
+  // Navigation window for efficient rendering (default 1000 models)
+  const [navigationWindowSize] = useState<number>(1000);
+  const [navigationOffset, setNavigationOffset] = useState<number>(0);
+
+  // Get all available models based on logarithmic percentage selection
+  const allFilteredModels: ModelSnapshot[] = useMemo(() => {
     if (!sortedModels.length) return [];
-    
-    // Calculate how many models to show based on logarithmic percentage
-    const modelCount = Math.max(1, Math.ceil(sortedModels.length * logModelPercent / 100));
-    return sortedModels.slice(0, modelCount);
+
+    // Calculate how many models to include in navigation dataset based on logarithmic percentage
+    const calculatedModelCount = Math.max(1, Math.ceil(sortedModels.length * logModelPercent / 100));
+    return sortedModels.slice(0, calculatedModelCount);
   }, [sortedModels, logModelPercent]);
+
+  // Get visible models within current navigation window
+  const visibleModels: ModelSnapshot[] = useMemo(() => {
+    if (!allFilteredModels.length) return [];
+
+    // Navigation window: show up to 1000 models at current offset position
+    const startIndex = Math.max(0, Math.min(navigationOffset, allFilteredModels.length - 1));
+    const endIndex = Math.min(startIndex + navigationWindowSize, allFilteredModels.length);
+
+    return allFilteredModels.slice(startIndex, endIndex);
+  }, [allFilteredModels, navigationOffset, navigationWindowSize]);
 
   // Memoized tagged model data for Nyquist plot to avoid recalculation
   const taggedModelNyquistData = useMemo(() => {
@@ -752,7 +751,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     >
                       {topConfigurations.map((config, index) => (
                         <option key={index} value={index}>
-                          #{index + 1} - Resnorm: {config.resnorm.toFixed(4)}
+                          #{index + 1} - Resnorm: {(config.resnorm || 0).toFixed(4)}
                         </option>
                       ))}
                     </select>
@@ -895,10 +894,30 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 hover:[&::-webkit-slider-thumb]:bg-blue-400 transition-colors"
                     />
                     
+                    {/* Navigation progress integrated into slider info */}
                     <div className="flex justify-between text-xs text-neutral-500 mt-1">
                       <span>0.01%</span>
-                      <span>100%</span>
+                      {allFilteredModels.length > navigationWindowSize ? (
+                        <span className="text-blue-400 font-mono">
+                          Nav: {navigationOffset + 1}-{Math.min(navigationOffset + navigationWindowSize, allFilteredModels.length)} of {allFilteredModels.length.toLocaleString()}
+                        </span>
+                      ) : (
+                        <span>100%</span>
+                      )}
                     </div>
+
+                    {/* Minimal navigation progress bar */}
+                    {allFilteredModels.length > navigationWindowSize && (
+                      <div className="relative mt-1 h-0.5 bg-neutral-700 rounded-full overflow-hidden">
+                        <div
+                          className="absolute h-full bg-blue-400 transition-all duration-300 ease-out"
+                          style={{
+                            left: `${(navigationOffset / allFilteredModels.length) * 100}%`,
+                            width: `${Math.min((navigationWindowSize / allFilteredModels.length) * 100, 100 - (navigationOffset / allFilteredModels.length) * 100)}%`
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {/* Resnorm Range */}
@@ -906,7 +925,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     <label className="block text-xs text-neutral-400 mb-2">Resnorm Range</label>
                     <div className="bg-neutral-800/50 rounded border border-neutral-600">
                       <ResnormDisplay
-                        models={visibleModels}
+                        models={allFilteredModels}
+                        visibleModels={visibleModels}
+                        navigationOffset={navigationOffset}
+                        onNavigationOffsetChange={setNavigationOffset}
+                        navigationWindowSize={navigationWindowSize}
                         onResnormRangeChange={handleResnormRangeChange}
                         currentResnorm={currentResnorm}
                         onResnormSelect={handleResnormSelect}

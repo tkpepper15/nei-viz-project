@@ -64,7 +64,7 @@ export function useUserSettings(userId?: string): UseUserSettingsReturn {
 
       // If no active session exists, create a default one
       if (!activeSession) {
-        const { data: newSession, error: createError } = await (supabase as any)
+        const { data: newSession, error: createError } = await (supabase as any) // eslint-disable-line @typescript-eslint/no-explicit-any
           .from('user_sessions')
           .insert({
             user_id: userId,
@@ -196,7 +196,7 @@ export function useUserSettings(userId?: string): UseUserSettingsReturn {
         .update({ is_active: false })
         .eq('user_id', userId);
 
-      const { data, error: createError } = await (supabase as any)
+      const { data, error: createError } = await (supabase as any) // eslint-disable-line @typescript-eslint/no-explicit-any
         .from('user_sessions')
         .insert({
           user_id: userId,
@@ -268,7 +268,7 @@ export function useUserSettings(userId?: string): UseUserSettingsReturn {
         throw fetchError;
       }
 
-      return data || [];
+      return (data || []) as UserSettings[];
 
     } catch (err) {
       console.error('Error fetching user sessions:', err);

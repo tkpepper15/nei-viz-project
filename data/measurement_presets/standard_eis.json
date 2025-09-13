@@ -1,0 +1,24 @@
+{
+  "min_freq": 0.1,
+  "max_freq": 100000.0,
+  "n_points": 100,
+  "spacing": "log",
+  "measurement_type": "impedance",
+  "complex_format": "rectangular",
+  "precision": "double",
+  "units": {
+    "frequency": "Hz",
+    "impedance": "ohm",
+    "phase": "degrees",
+    "time": "seconds"
+  },
+  "name": "Standard EIS",
+  "description": "Standard electrochemical impedance spectroscopy sweep",
+  "created_by": "system",
+  "version": "1.0",
+  "_metadata": {
+    "file_version": "1.0",
+    "config_type": "measurement",
+    "generated_by": "measurement_config.py"
+  }
+}

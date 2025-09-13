@@ -359,9 +359,24 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       const zb_real = Rb / zb_denom;
       const zb_imag = -omega * Rb * Rb * Cb / zb_denom;
       
-      // Z_eq = Rsh + Za + Zb
-      const real = Rsh + za_real + zb_real;
-      const imag = za_imag + zb_imag;
+      // Calculate sum of membrane impedances (Za + Zb)
+      const zab_real = za_real + zb_real;
+      const zab_imag = za_imag + zb_imag;
+      
+      // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+      // Numerator: Rsh * (Za + Zb)
+      const num_real = Rsh * zab_real;
+      const num_imag = Rsh * zab_imag;
+      
+      // Denominator: Rsh + Za + Zb
+      const denom_real = Rsh + zab_real;
+      const denom_imag = zab_imag;
+      
+      // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+      const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+      
+      const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+      const imag = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
       
       const magnitude = Math.sqrt(real * real + imag * imag);
       const phase = Math.atan2(imag, real) * (180 / Math.PI);
@@ -547,6 +562,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
               break;
               
             case 'GRID_POINTS_GENERATED':
+              console.log(`✅ Grid generation complete: ${data.gridPoints?.length || 0} points`);
               resolve(data.gridPoints);
               break;
               
@@ -575,10 +591,18 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         throw new Error('Computation cancelled');
       }
 
+      // Validate that grid points were actually generated
+      console.log(`🔍 Grid points generated: ${gridPoints.length} parameters`);
+      if (gridPoints.length === 0) {
+        console.error('❌ CRITICAL: No grid points were generated!');
+        throw new Error('Grid generation failed - no parameter combinations created');
+      }
+
       // Worker pool already initialized above
       
       // Split grid points into chunks
       const chunks = chunkArray(gridPoints, chunkSize);
+      console.log(`🔍 Created ${chunks.length} chunks from ${gridPoints.length} grid points`);
       
       onProgress({
         type: 'MATHEMATICAL_OPERATION',
@@ -680,6 +704,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
               const handleMessage = (e: MessageEvent) => {
                 const { type, data } = e.data;
+                console.log(`📨 Worker ${taskId} message: ${type}`);
 
                 if (cancelTokenRef.current.cancelled) {
                   cleanup();
@@ -698,6 +723,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     
                     // Progressive refinement: accumulate best results from all chunks
                     if (data.currentBestResults && data.currentBestResults.length > 0) {
+                      streamedResults = streamedResults || [];
                       streamedResults.push(...data.currentBestResults);
                       // Keep only the best overall results
                       streamedResults.sort((a, b) => a.resnorm - b.resnorm);
@@ -710,7 +736,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                       (chunkPercent % 10 === 0 || data.chunkProgress === 1);
                       
                     if (shouldUpdate) {
-                      const bestResnormSoFar = streamedResults.length > 0 ? streamedResults[0].resnorm : null;
+                      const bestResnormSoFar = (streamedResults && streamedResults.length > 0) ? streamedResults[0].resnorm : null;
                       onProgress({
                         type: 'STREAMING_UPDATE',
                         chunkIndex: data.chunkIndex,
@@ -720,9 +746,9 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                         total: totalPoints,
                         overallProgress: progressPercent,
                         phase: 'impedance_calculation',
-                        message: `Streaming batch ${Math.floor(batchStart / maxConcurrentChunks) + 1}: Processing chunk ${chunkIndex + 1}/${chunks.length} (${streamedResults.length} models computed, best: ${bestResnormSoFar?.toExponential(3) || 'N/A'})`,
+                        message: `Streaming batch ${Math.floor(batchStart / maxConcurrentChunks) + 1}: Processing chunk ${chunkIndex + 1}/${chunks.length} (${streamedResults?.length || 0} models computed, best: ${bestResnormSoFar?.toExponential(3) || 'N/A'})`,
                         // Progressive refinement data
-                        progressiveResults: streamedResults.slice(0, 500), // Send top 500 for immediate visualization
+                        progressiveResults: (streamedResults || []).slice(0, 500), // Send top 500 for immediate visualization
                         bestResnormSoFar: bestResnormSoFar ?? undefined,
                         operation: 'Streaming computation',
                         streamingBatch: Math.floor(batchStart / maxConcurrentChunks) + 1,
@@ -738,43 +764,73 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                     clearInterval(heartbeatInterval);
                     workerTimeoutsRef.current.delete(taskId);
                     
-                    // Immediately convert and stream results to prevent memory accumulation
-                    const chunkResults: BackendMeshPoint[] = [
-                      ...data.topResults.map((r: { 
-                        parameters: CircuitParameters; 
-                        spectrum: Array<{ freq: number; real: number; imag: number; mag: number; phase: number }>; 
-                        resnorm: number 
-                      }) => ({
-                        parameters: {
-                          Rsh: r.parameters.Rsh,
-                          Ra: r.parameters.Ra,
-                          Ca: r.parameters.Ca,
-                          Rb: r.parameters.Rb,
-                          Cb: r.parameters.Cb,
-                          frequency_range: [minFreq, maxFreq] as [number, number]
-                        },
-                        spectrum: r.spectrum,
-                        resnorm: r.resnorm
-                      })),
-                      ...data.otherResults.map((r: { parameters: CircuitParameters; resnorm: number }) => ({
-                        parameters: {
-                          Rsh: r.parameters.Rsh,
-                          Ra: r.parameters.Ra,
-                          Ca: r.parameters.Ca,
-                          Rb: r.parameters.Rb,
-                          Cb: r.parameters.Cb,
-                          frequency_range: [minFreq, maxFreq] as [number, number]
-                        },
-                        spectrum: [], // Empty spectrum for memory efficiency
-                        resnorm: r.resnorm
-                      }))
-                    ];
-                    
-                    streamedResults.push(...chunkResults);
-                    totalProcessedCount += data.totalProcessed;
-                    
-                    console.log(`Streamed ${chunkResults.length} results, total: ${streamedResults.length}`);
-                    resolve(data); // Return original worker result for compatibility
+                    try {
+                      // Validate worker response data
+                      if (!data || (!data.topResults && !data.otherResults)) {
+                        console.warn(`Worker ${taskId} returned empty or invalid data:`, data);
+                        resolve({ topResults: [], otherResults: [], totalProcessed: 0 });
+                        break;
+                      }
+
+                      // Safely convert results with validation
+                      const chunkResults: BackendMeshPoint[] = [];
+                      
+                      // Process topResults with validation
+                      if (Array.isArray(data.topResults)) {
+                        for (const r of data.topResults) {
+                          if (r && r.parameters && typeof r.resnorm === 'number' && isFinite(r.resnorm)) {
+                            chunkResults.push({
+                              parameters: {
+                                Rsh: r.parameters.Rsh,
+                                Ra: r.parameters.Ra,
+                                Ca: r.parameters.Ca,
+                                Rb: r.parameters.Rb,
+                                Cb: r.parameters.Cb,
+                                frequency_range: [minFreq, maxFreq] as [number, number]
+                              },
+                              spectrum: Array.isArray(r.spectrum) ? r.spectrum : [],
+                              resnorm: r.resnorm
+                            });
+                          }
+                        }
+                      }
+                      
+                      // Process otherResults with validation
+                      if (Array.isArray(data.otherResults)) {
+                        for (const r of data.otherResults) {
+                          if (r && r.parameters && typeof r.resnorm === 'number' && isFinite(r.resnorm)) {
+                            chunkResults.push({
+                              parameters: {
+                                Rsh: r.parameters.Rsh,
+                                Ra: r.parameters.Ra,
+                                Ca: r.parameters.Ca,
+                                Rb: r.parameters.Rb,
+                                Cb: r.parameters.Cb,
+                                frequency_range: [minFreq, maxFreq] as [number, number]
+                              },
+                              spectrum: [], // Empty spectrum for memory efficiency
+                              resnorm: r.resnorm
+                            });
+                          }
+                        }
+                      }
+                      
+                      // Ensure streamedResults is initialized
+                      if (!streamedResults) {
+                        streamedResults = [];
+                      }
+                      
+                      streamedResults.push(...chunkResults);
+                      totalProcessedCount += (data.totalProcessed || 0);
+                      
+                      console.log(`✅ Worker ${taskId} completed: ${chunkResults.length} results, total: ${streamedResults.length}`);
+                      resolve(data); // Return original worker result for compatibility
+                      
+                    } catch (conversionError) {
+                      console.error(`❌ Error converting results from worker ${taskId}:`, conversionError);
+                      // Don't fail the entire computation for one bad chunk
+                      resolve({ topResults: [], otherResults: [], totalProcessed: 0 });
+                    }
                     break;
                 
                   case 'MEMORY_PRESSURE':
@@ -819,6 +875,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           worker.addEventListener('message', handleMessage);
           
           worker.onerror = (error) => {
+            console.error(`❌ Worker ${taskId} onerror:`, error.message);
             worker.removeEventListener('message', handleMessage);
             returnWorkerToPool(taskId);
             activePromisesRef.current.delete(cleanup);
@@ -828,6 +885,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           };
 
               // Send only minimal data - frequencies and referenceSpectrum already initialized
+              console.log(`🚀 Sending chunk ${chunkIndex} to worker ${taskId}: ${chunk.length} parameters`);
               worker.postMessage({
                 type: 'COMPUTE_GRID_CHUNK_OPTIMIZED',
                 data: {
@@ -867,19 +925,33 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           }
         }
         
-        console.log(`Streaming computation complete: ${streamedResults.length} total results`);
+        console.log(`📊 Streaming computation complete: ${streamedResults?.length || 0} total results`);
+        
+        // Validate final results
+        if (!streamedResults || streamedResults.length === 0) {
+          console.warn('⚠️ No results collected from workers. This may indicate a computation issue.');
+          console.warn(`Debug info: chunks processed: ${chunks.length}, total points: ${totalPoints}`);
+          return []; // Return empty array instead of undefined
+        }
+
         return streamedResults;
       };
       
       // Execute the streaming processing
       const streamedResults = await processChunksWithStreaming();
       
+      console.log(`🔍 Final computation results: ${streamedResults?.length || 0} models`);
+      console.log(`🔍 Debug - streamedResults is array: ${Array.isArray(streamedResults)}`);
+      console.log(`🔍 Debug - streamedResults defined: ${streamedResults !== undefined}`);
+      
       if (cancelTokenRef.current.cancelled) {
         throw new Error('Computation cancelled');
       }
 
       // Sort results by resnorm for consistent ordering
-      streamedResults.sort((a, b) => a.resnorm - b.resnorm);
+      if (streamedResults && streamedResults.length > 0) {
+        streamedResults.sort((a, b) => a.resnorm - b.resnorm);
+      }
       
       // Send final completion update
       onProgress({

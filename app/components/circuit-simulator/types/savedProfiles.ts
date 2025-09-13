@@ -21,9 +21,6 @@ export interface SavedProfile {
   computationTime?: number; // time taken to compute in seconds
   totalPoints?: number; // total computed points
   validPoints?: number; // valid computed points
-  
-  // Note: Tagged models are now stored in database (tagged_models table) 
-  // instead of locally in profiles
 }
 
 export interface SavedProfilesState {

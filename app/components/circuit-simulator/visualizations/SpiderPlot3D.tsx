@@ -122,6 +122,16 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   highlightedModelId = null,
   selectedResnormRange = null,
 }) => {
+  // Debug component props
+  console.log('🐛 SpiderPlot3D: Component initialized with:', {
+    modelsCount: models.length,
+    gridSize,
+    resnormSpread,
+    hasReferenceModel: !!referenceModel,
+    resnormRange,
+    selectedResnormRange
+  });
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -252,7 +262,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   
   // Convert models to 3D radar polygons
   const convert3DPolygons = React.useMemo(() => {
-    if (!filteredModels.length) return [];
+    if (!filteredModels.length) {
+      console.warn('🔴 SpiderPlot3D: No filtered models available for 3D conversion');
+      return [];
+    }
 
     // Parameter definitions for radar chart (shared with reference model)
     const params = paramKeys;
@@ -271,8 +284,16 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const resnormRange = maxResnorm - minResnorm;
     
 
+    console.log('🟢 SpiderPlot3D: Converting', filteredModels.length, 'models to 3D polygons');
+    
     return filteredModels.map(model => {
       const resnorm = model.resnorm || 0;
+      
+      // Validate model parameters
+      if (!model.parameters) {
+        console.warn('🔴 SpiderPlot3D: Model missing parameters:', model.id);
+        return null;
+      }
       
       // Calculate Z position based on resnorm (FIXED: lower resnorm = lower Z, closer to ground truth)
       const normalizedResnorm = resnormRange > 0 
@@ -297,6 +318,11 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         const value = model.parameters[param as keyof typeof model.parameters] as number;
         const range = paramRanges[param as keyof typeof paramRanges];
         
+        // Validate parameter value
+        if (typeof value !== 'number' || !isFinite(value)) {
+          console.warn('🔴 SpiderPlot3D: Invalid parameter value for', param, ':', value, 'in model', model.id);
+        }
+        
         // Normalize parameter value to 0-1 range (logarithmic)
         const logMin = Math.log10(range.min);
         const logMax = Math.log10(range.max);
@@ -317,6 +343,18 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         };
       });
 
+      // Log first model for debugging
+      if (model.id === filteredModels[0]?.id) {
+        console.log('🟢 SpiderPlot3D: First model vertex sample:', {
+          modelId: model.id,
+          resnorm,
+          normalizedResnorm,
+          zHeight,
+          firstVertex: vertices[0],
+          parameters: model.parameters
+        });
+      }
+
       return {
         vertices,
         color: color,
@@ -324,7 +362,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         model,
         zHeight
       };
-    });
+    }).filter(polygon => polygon !== null); // Filter out invalid polygons
   }, [filteredModels, resnormSpread, paramKeys]);
 
 
@@ -915,7 +953,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     return interpolated;
   }, [filteredModels, findNearestGridModel]);
   
-  // Memoized crosshair model with reduced computational overhead
+  // Memoized crosshair model with exact match detection for yellow selection
   const crosshairModel = useMemo((): ModelSnapshot | null => {
     const activeResnorm = isModelSelected ? currentResnorm : visualResnorm;
     if (!activeResnorm || !filteredModels.length) return null;
@@ -927,7 +965,23 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       return lastModelRef.current;
     }
     
-    // Create synthetic model with interpolated parameters for smooth visuals
+    // For locked selections (yellow), only show exact model matches
+    if (isModelSelected) {
+      const exactModel = findNearestGridModel(activeResnorm);
+      // Only show yellow if we have a very close match (within 0.005% tolerance)
+      const exactTolerance = 0.00005;
+      if (exactModel && exactModel.resnorm !== undefined && Math.abs(exactModel.resnorm - activeResnorm) <= exactTolerance) {
+        lastResnormRef.current = activeResnorm;
+        lastModelRef.current = exactModel;
+        return exactModel;
+      }
+      // No exact match for locked selection - return null to hide yellow
+      lastResnormRef.current = activeResnorm;
+      lastModelRef.current = null;
+      return null;
+    }
+    
+    // For free scrolling (cyan), create smooth interpolated model
     const interpolatedParams = getInterpolatedParameters(activeResnorm);
     if (!interpolatedParams) {
       // Fallback to nearest discrete model if interpolation fails
@@ -1000,8 +1054,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         const logValue = Math.log10(Math.max(paramRange.min, Math.min(paramRange.max, value)));
         const normalizedValue = (logValue - logMin) / (logMax - logMin);
         
-        // Calculate pentagon position (flipped 180 degrees to match 3D spider plot parameter arrangements)
-        const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2 + Math.PI;
+        // Calculate pentagon position (matching 3D spider plot parameter arrangements)
+        const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
         const vertexRadius = normalizedValue * radius;
         
         return {
@@ -1046,8 +1100,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     // Draw crosshair model pentagon (dynamic based on crosshair position)
     if (crosshairModel && crosshairModel.parameters) {
       const crosshairValues = params.map(param => (crosshairModel.parameters as any)[param as keyof CircuitParameters] as number); // eslint-disable-line @typescript-eslint/no-explicit-any
-      const crosshairColor = isModelSelected ? '#FFFF00' : '#00FFFF'; // Yellow when locked, Cyan when scrolling
-      const lineWidth = isModelSelected ? 3 : 2;
+      // Only show yellow if exact model match exists (consistent with 3D crosshair)
+      const hasExactMatch = isModelSelected && crosshairModel !== null && !crosshairModel.id.startsWith('interpolated_');
+      const crosshairColor = hasExactMatch ? '#FFFF00' : '#00FFFF'; 
+      const lineWidth = hasExactMatch ? 3 : 2;
       drawPentagon(centerX, centerY, crosshairValues, crosshairColor, lineWidth);
     } else if (gridSize && gridSize > 1) {
       // Fallback to grid pentagon if no crosshair model
@@ -1217,18 +1273,21 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
     }
 
-    // Draw smooth crosshair resnorm highlight (visual interpolation only)
-    const activeVisualResnorm = isModelSelected ? currentResnorm : visualResnorm;
+    // Draw crosshair - always visible when currentResnorm or visualResnorm is available
+    const activeVisualResnorm = isModelSelected ? currentResnorm : (visualResnorm || currentResnorm);
     if (activeVisualResnorm !== null && activeVisualResnorm >= minResnorm && activeVisualResnorm <= maxResnorm) {
       const normalizedCurrentResnorm = (activeVisualResnorm - minResnorm) / (maxResnorm - minResnorm);
       const currentZ = normalizedCurrentResnorm * zAxisHeight;
       
-      // Different styling for selected vs smooth scrolling
-      const isLocked = isModelSelected;
-      ctx.strokeStyle = isLocked ? '#FFFF00' : '#00FFFF'; // Yellow when locked, Cyan when scrolling
-      ctx.lineWidth = Math.max(2, isLocked ? 4 : 3 * camera.scale);
-      ctx.globalAlpha = isLocked ? 1.0 : 0.7;
-      ctx.setLineDash(isLocked ? [] : [4, 4]); // Solid when locked, dashed when scrolling
+      // Enhanced styling for different interaction modes
+      const isLocked = isModelSelected && crosshairModel !== null; // Only yellow if exact model match
+      const isHovering = visualResnorm !== null && !isModelSelected;
+      
+      // Color coding: Yellow (exact locked model) > Cyan (hovering) > Blue (scrubber control)
+      ctx.strokeStyle = isLocked ? '#FFFF00' : (isHovering ? '#00FFFF' : '#0080FF'); 
+      ctx.lineWidth = Math.max(2, isLocked ? 4 : (isHovering ? 3 : 2.5) * camera.scale);
+      ctx.globalAlpha = isLocked ? 1.0 : (isHovering ? 0.8 : 0.6);
+      ctx.setLineDash(isLocked ? [] : (isHovering ? [4, 4] : [2, 6])); // Different dash patterns for each mode
       
       // Draw 5-prong crosshair aligned with pentagon parameter directions
       const crosshairLength = 1.8; // Slightly larger crosshair
@@ -1239,8 +1298,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       if (centerPoint.visible) {
         // Draw 5 prongs pointing to each parameter direction
         for (let i = 0; i < 5; i++) {
-          // Calculate angle for each parameter (matching pentagon layout)
-          const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2 + Math.PI;
+          // Calculate angle for each parameter (matching 3D spider plot layout)
+          const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
           
           // Calculate prong endpoints
           const prongX = Math.cos(angle) * crosshairLength;
@@ -1375,11 +1434,37 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.lineWidth = 1;
     ctx.strokeRect(listX, listY, listWidth, listHeight);
     
-    // Draw header
+    // Draw header with circuit icon
     ctx.fillStyle = '#FFFFFF';
     ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'left';
-    ctx.fillText('Parameter Grid Values', listX + 10, listY + 18);
+
+    // Draw circuit icon (simple resistor/capacitor symbol)
+    const iconX = listX + 10;
+    const iconY = listY + 8;
+    const iconSize = 12;
+
+    // Resistor symbol (zig-zag)
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(iconX, iconY + iconSize/2);
+    ctx.lineTo(iconX + 2, iconY + 2);
+    ctx.lineTo(iconX + 4, iconY + iconSize - 2);
+    ctx.lineTo(iconX + 6, iconY + 2);
+    ctx.lineTo(iconX + 8, iconY + iconSize - 2);
+    ctx.lineTo(iconX + 10, iconY + iconSize/2);
+    ctx.stroke();
+
+    // Connection lines
+    ctx.beginPath();
+    ctx.moveTo(iconX - 2, iconY + iconSize/2);
+    ctx.lineTo(iconX, iconY + iconSize/2);
+    ctx.moveTo(iconX + 10, iconY + iconSize/2);
+    ctx.lineTo(iconX + 12, iconY + iconSize/2);
+    ctx.stroke();
+
+    ctx.fillText('Circuit Configuration Matrix', listX + 25, listY + 18);
     
     const numPoints = gridSize || 5;
     ctx.fillStyle = '#CCCCCC';

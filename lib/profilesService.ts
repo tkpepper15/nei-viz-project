@@ -22,6 +22,28 @@ export interface UserProfileRow {
 }
 
 export class ProfilesService {
+  static async getUserDefaultGridSize(userId: string): Promise<number> {
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('default_grid_size')
+        .eq('user_id', userId)
+        .single();
+
+      if (error || !data) {
+        console.log('📏 No user profile found or error, using default grid size: 9');
+        return 9; // Default fallback
+      }
+
+      const gridSize = data.default_grid_size || 9;
+      console.log(`📏 Retrieved user default grid size: ${gridSize}`);
+      return gridSize;
+    } catch (error) {
+      console.error('❌ Error fetching user default grid size:', error);
+      return 9; // Fallback default
+    }
+  }
+
   static async getUserProfiles(userId: string): Promise<SavedProfile[]> {
     // Enhanced debugging and validation
     console.log('📦 ProfilesService: Fetching profiles for user:', userId);

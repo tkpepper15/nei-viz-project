@@ -6,10 +6,12 @@ import { CircuitParameters } from '../types/parameters';
 
 /**
  * Available resnorm calculation methods for EIS parameter fitting
- * Simplified to use only Sum of Squared Residuals (SSR) method
+ * MAE is preferred for EIS as noted in battery research literature
  */
 export enum ResnormMethod {
-  SSR = 'ssr'           // Sum of Squared Residuals (classic least-squares in complex plane)
+  MAE = 'mae',          // Mean Absolute Error (preferred for EIS parameter extraction)
+  SSR = 'ssr',          // Sum of Squared Residuals (classic least-squares in complex plane)
+  RMSE = 'rmse'         // Root Mean Square Error
 }
 
 /**
@@ -159,7 +161,7 @@ export const calculateResnormWithConfig = (
   referenceData: ImpedancePoint[] | number,
   logFunction?: ((message: string) => void) | number,
   frequency?: number,
-  config: ResnormConfig = { method: ResnormMethod.SSR }
+  config: ResnormConfig = { method: ResnormMethod.MAE }
 ): number => {
   // Handle the case where we're passing individual points
   if (!Array.isArray(testData) && typeof referenceData === 'number' && typeof logFunction === 'number') {
@@ -234,7 +236,7 @@ export const calculateResnormWithConfig = (
 
   if (logger) logger(`Matched ${matchedData.length} frequency points for comparison`);
 
-  // const n = matchedData.length; // Not needed for simplified implementation
+  // const n = matchedData.length; // Not currently used but may be needed for future methods
   let totalError = 0;
   let sumWeights = 0;
 
@@ -248,10 +250,26 @@ export const calculateResnormWithConfig = (
       continue;
     }
     
-    // Calculate error using Sum of Squared Residuals method only
+    // Calculate base error components
     const realDiff = point.test.real - point.reference.real;
     const imagDiff = point.test.imaginary - point.reference.imaginary;
-    const error = Math.sqrt(realDiff * realDiff + imagDiff * imagDiff);
+    const complexMagnitudeError = Math.sqrt(realDiff * realDiff + imagDiff * imagDiff);
+    
+    // Calculate error based on selected method
+    let error: number;
+    switch (config.method) {
+      case ResnormMethod.MAE:
+        error = complexMagnitudeError; // Absolute error in complex magnitude
+        break;
+      case ResnormMethod.SSR:
+        error = complexMagnitudeError * complexMagnitudeError; // Squared error
+        break;
+      case ResnormMethod.RMSE:
+        error = complexMagnitudeError * complexMagnitudeError; // Will be square rooted later
+        break;
+      default:
+        error = complexMagnitudeError; // Default to MAE
+    }
     
     // Apply frequency weighting if enabled
     let weight = 1.0;
@@ -264,15 +282,28 @@ export const calculateResnormWithConfig = (
     
     if (logger) {
       const weightStr = config.useFrequencyWeighting ? ` (weight: ${weight.toFixed(4)})` : '';
-      logger(`Freq: ${point.frequency.toFixed(2)} Hz, SSR: ${error.toFixed(4)}${weightStr}`);
+      logger(`Freq: ${point.frequency.toFixed(2)} Hz, ${config.method.toUpperCase()}: ${error.toFixed(4)}${weightStr}`);
     }
   }
 
   // Calculate base resnorm
   if (sumWeights === 0) return Infinity;
   
-  // Calculate final value using SSR method only
-  const baseResnorm = totalError / sumWeights;  // Mean of squared residuals
+  // Calculate final value based on method
+  let baseResnorm: number;
+  switch (config.method) {
+    case ResnormMethod.MAE:
+      baseResnorm = totalError / sumWeights; // Mean absolute error
+      break;
+    case ResnormMethod.SSR:
+      baseResnorm = totalError / sumWeights; // Mean squared error
+      break;
+    case ResnormMethod.RMSE:
+      baseResnorm = Math.sqrt(totalError / sumWeights); // Root mean squared error
+      break;
+    default:
+      baseResnorm = totalError / sumWeights; // Default to MAE
+  }
   
   // Apply range amplification if enabled
   let finalResnorm = baseResnorm;

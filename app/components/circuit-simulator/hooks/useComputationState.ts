@@ -1,13 +1,13 @@
 import { useState, useCallback } from 'react';
-import { BackendMeshPoint, GridParameterArrays, ResnormGroup } from '../types';
+import { ModelSnapshot, GridParameterArrays, ResnormGroup } from '../types';
 import { WorkerProgress } from '../utils/workerManager';
 import { ComputationSummary } from '../notifications/ComputationNotification';
 
-export const useComputationState = () => {
-  // Grid computation state
-  const [gridResults, setGridResults] = useState<BackendMeshPoint[]>([]);
-  const [gridResultsWithIds, setGridResultsWithIds] = useState<(BackendMeshPoint & { id: number })[]>([]);
-  const [gridSize, setGridSize] = useState<number>(9);
+export const useComputationState = (initialGridSize: number = 9) => {
+  // Grid computation state - now using ModelSnapshot for modern serialized workflow
+  const [gridResults, setGridResults] = useState<ModelSnapshot[]>([]);
+  const [gridSize, setGridSize] = useState<number>(initialGridSize);
+  const [defaultGridSize, setDefaultGridSize] = useState<number>(initialGridSize);
   const [gridError, setGridError] = useState<string | null>(null);
   const [isComputingGrid, setIsComputingGrid] = useState<boolean>(false);
   const [gridParameterArrays, setGridParameterArrays] = useState<GridParameterArrays | null>(null);
@@ -40,8 +40,7 @@ export const useComputationState = () => {
   // Preserve last computed results for tab switching
   const [lastComputedResults, setLastComputedResults] = useState<{
     resnormGroups: ResnormGroup[];
-    gridResults: BackendMeshPoint[];
-    gridResultsWithIds: (BackendMeshPoint & { id: number })[];
+    gridResults: ModelSnapshot[];
     computationSummary: ComputationSummary | null;
   } | null>(null);
 
@@ -65,24 +64,31 @@ export const useComputationState = () => {
     setStatusMessage('');
   }, []);
 
+  // Update the default grid size (for when user preferences are loaded)
+  const updateDefaultGridSize = useCallback((newDefaultGridSize: number) => {
+    setDefaultGridSize(newDefaultGridSize);
+    // If the current grid size is still the old default, update it too
+    if (gridSize === defaultGridSize) {
+      setGridSize(newDefaultGridSize);
+    }
+  }, [gridSize, defaultGridSize]);
+
   // Save current computed results before clearing
   const saveComputationState = useCallback(() => {
     if (resnormGroups.length > 0 || gridResults.length > 0) {
       setLastComputedResults({
         resnormGroups,
         gridResults,
-        gridResultsWithIds,
         computationSummary
       });
     }
-  }, [resnormGroups, gridResults, gridResultsWithIds, computationSummary]);
+  }, [resnormGroups, gridResults, computationSummary]);
 
   // Restore previously computed results
   const restoreComputationState = useCallback(() => {
     if (lastComputedResults) {
       setResnormGroups(lastComputedResults.resnormGroups);
       setGridResults(lastComputedResults.gridResults);
-      setGridResultsWithIds(lastComputedResults.gridResultsWithIds);
       setComputationSummary(lastComputedResults.computationSummary);
       setGridError(null);
       updateStatusMessage('Restored previous computation results');
@@ -94,7 +100,6 @@ export const useComputationState = () => {
   // Reset only when starting a new computation
   const resetComputationState = useCallback(() => {
     setGridResults([]);
-    setGridResultsWithIds([]);
     setGridError(null);
     setResnormGroups([]);
     setHiddenGroups([]);
@@ -147,8 +152,6 @@ export const useComputationState = () => {
     // Grid computation state
     gridResults,
     setGridResults,
-    gridResultsWithIds,
-    setGridResultsWithIds,
     gridSize,
     setGridSize,
     gridError,
@@ -210,5 +213,9 @@ export const useComputationState = () => {
     restoreComputationState,
     clearAllComputationData,
     lastComputedResults,
+
+    // Grid size management
+    defaultGridSize,
+    updateDefaultGridSize,
   };
 };

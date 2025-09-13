@@ -27,9 +27,9 @@ export class WebGPUManager {
     }
 
     try {
-      // Request adapter
+      // Request adapter with configurable power preference
       this.adapter = await navigator.gpu.requestAdapter({
-        powerPreference: 'high-performance',
+        powerPreference: 'high-performance', // Will be configurable via settings
         forceFallbackAdapter: false
       });
 
@@ -195,17 +195,39 @@ export class WebGPUManager {
     circuitParameters: CircuitParameters[],
     frequencies: number[],
     referenceSpectrum: Array<{ freq: number; real: number; imag: number; mag: number; phase: number }>,
-    settings: GPUAccelerationSettings
+    settings: GPUAccelerationSettings,
+    maxResults: number = 5000,
+    progressCallback?: (progress: number) => void
   ): Promise<WebGPUComputeResult> {
     if (!this.isInitialized || !this.device || !this.computeShader) {
       throw new Error('WebGPU not initialized');
     }
 
+    // Device validation will be handled by the actual operations failing
+
     const startTime = performance.now();
-    // const computeStartTime = performance.now();
+    const totalParams = circuitParameters.length;
+    const freqCount = Math.min(frequencies.length, 256); // Shader limit
+
+    // Calculate optimal chunk size based on GPU memory limits
+    const maxMemoryMB = Math.min(
+      settings.memoryThreshold || 1024, // User setting
+      this.capabilities?.limits.maxBufferSize ? this.capabilities.limits.maxBufferSize / (1024 * 1024) : 512 // GPU limit
+    );
+    
+    // Each param needs: param data (8 floats) + result data (freqCount * 8 floats)
+    const bytesPerParam = (8 + freqCount * 8) * 4; // 4 bytes per float
+    const maxParamsPerChunk = Math.floor((maxMemoryMB * 1024 * 1024 * 0.8) / bytesPerParam); // 80% of available memory
+    const chunkSize = Math.min(
+      maxParamsPerChunk,
+      Math.max(1000, settings.maxBatchSize || 10000) // Min 1k, respect user setting
+    );
+
+    console.log(`🚀 WebGPU streaming compute: ${totalParams.toLocaleString()} params in chunks of ${chunkSize.toLocaleString()} (${Math.ceil(totalParams / chunkSize)} chunks)`);
+    console.log(`  Memory per chunk: ${(chunkSize * bytesPerParam / 1024 / 1024).toFixed(1)}MB`);
 
     try {
-      // Create compute pipeline
+      // Create compute pipeline (reuse across chunks)
       const shaderModule = this.device.createShaderModule({
         code: this.computeShader
       });
@@ -218,93 +240,177 @@ export class WebGPUManager {
         }
       });
 
-      // Prepare data buffers
-      const paramCount = Math.min(circuitParameters.length, settings.maxBatchSize);
-      const freqCount = Math.min(frequencies.length, 256); // Shader limit
+      // Maintain top-K results pool
+      const topKResults: Array<{
+        parameters: CircuitParameters;
+        spectrum: Array<{ freq: number; real: number; imag: number; mag: number; phase: number }>;
+        resnorm: number;
+      }> = [];
 
-      // Create buffers
-      const { paramBuffer, freqBuffer, refSpectrumBuffer, resultBuffer, configBuffer } = 
-        this.createBuffers(circuitParameters.slice(0, paramCount), frequencies.slice(0, freqCount), referenceSpectrum, freqCount);
+      let totalGpuMemoryUsed = 0;
+      let totalComputeTime = 0;
+      let totalDataTransferTime = 0;
+      let processedParams = 0;
 
-      // Create bind groups
-      const bindGroup0 = this.device.createBindGroup({
-        layout: computePipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: paramBuffer } },
-          { binding: 1, resource: { buffer: freqBuffer } },
-          { binding: 2, resource: { buffer: refSpectrumBuffer } },
-          { binding: 3, resource: { buffer: resultBuffer } }
-        ]
-      });
+      // Process in chunks
+      for (let chunkStart = 0; chunkStart < totalParams; chunkStart += chunkSize) {
+        const chunkEnd = Math.min(chunkStart + chunkSize, totalParams);
+        const chunkParams = circuitParameters.slice(chunkStart, chunkEnd);
+        const actualChunkSize = chunkParams.length;
 
-      const bindGroup1 = this.device.createBindGroup({
-        layout: computePipeline.getBindGroupLayout(1),
-        entries: [
-          { binding: 0, resource: { buffer: configBuffer } }
-        ]
-      });
+        // Report progress
+        const progress = (chunkStart / totalParams) * 100;
+        progressCallback?.(progress);
 
-      const computeTime = performance.now();
+        const chunkNum = Math.floor(chunkStart / chunkSize) + 1;
+        const totalChunks = Math.ceil(totalParams / chunkSize);
+        console.log(`  📦 Chunk ${chunkNum}/${totalChunks}: processing ${actualChunkSize.toLocaleString()} params (${chunkStart}-${chunkEnd-1})`);
 
-      // Execute compute shader
-      const commandEncoder = this.device.createCommandEncoder();
-      const computePass = commandEncoder.beginComputePass({
-        label: 'Circuit Impedance Computation'
-      });
+        const chunkStartTime = performance.now();
 
-      computePass.setPipeline(computePipeline);
-      computePass.setBindGroup(0, bindGroup0);
-      computePass.setBindGroup(1, bindGroup1);
-      computePass.dispatchWorkgroups(Math.ceil(paramCount / 64)); // 64 = workgroup size
-      computePass.end();
+        // Create buffers for this chunk only
+        const { paramBuffer, freqBuffer, refSpectrumBuffer, resultBuffer, configBuffer } = 
+          this.createBuffers(chunkParams, frequencies.slice(0, freqCount), referenceSpectrum, freqCount);
 
-      // Copy results back
-      const stagingBuffer = this.device.createBuffer({
-        size: resultBuffer.size,
-        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
-      });
+        const bufferTime = performance.now();
 
-      commandEncoder.copyBufferToBuffer(resultBuffer, 0, stagingBuffer, 0, resultBuffer.size);
-      this.device.queue.submit([commandEncoder.finish()]);
+        // Create bind groups
+        const bindGroup0 = this.device.createBindGroup({
+          layout: computePipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: paramBuffer } },
+            { binding: 1, resource: { buffer: freqBuffer } },
+            { binding: 2, resource: { buffer: refSpectrumBuffer } },
+            { binding: 3, resource: { buffer: resultBuffer } }
+          ]
+        });
 
-      // Read results
-      await stagingBuffer.mapAsync(GPUMapMode.READ);
-      const rawResults = new Float32Array(stagingBuffer.getMappedRange());
-      
-      const dataTransferEndTime = performance.now();
+        const bindGroup1 = this.device.createBindGroup({
+          layout: computePipeline.getBindGroupLayout(1),
+          entries: [
+            { binding: 0, resource: { buffer: configBuffer } }
+          ]
+        });
 
-      // Parse results
-      const results = this.parseResults(rawResults, paramCount, freqCount, circuitParameters);
+        // Execute compute shader
+        const commandEncoder = this.device.createCommandEncoder();
+        const computePass = commandEncoder.beginComputePass({
+          label: `Circuit Computation Chunk ${chunkNum}`
+        });
 
-      // Cleanup
-      stagingBuffer.unmap();
-      [paramBuffer, freqBuffer, refSpectrumBuffer, resultBuffer, configBuffer, stagingBuffer]
-        .forEach(buffer => buffer.destroy());
+        computePass.setPipeline(computePipeline);
+        computePass.setBindGroup(0, bindGroup0);
+        computePass.setBindGroup(1, bindGroup1);
+        computePass.dispatchWorkgroups(Math.ceil(actualChunkSize / 64)); // 64 = workgroup size
+        computePass.end();
+
+        // Copy results back
+        const stagingBuffer = this.device.createBuffer({
+          size: resultBuffer.size,
+          usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ
+        });
+
+        commandEncoder.copyBufferToBuffer(resultBuffer, 0, stagingBuffer, 0, resultBuffer.size);
+        
+        const computeEndTime = performance.now();
+        this.device.queue.submit([commandEncoder.finish()]);
+
+        // Read results with error handling
+        let chunkResults: Array<{
+          parameters: CircuitParameters;
+          spectrum: Array<{ freq: number; real: number; imag: number; mag: number; phase: number }>;
+          resnorm: number;
+        }> = [];
+        try {
+          await stagingBuffer.mapAsync(GPUMapMode.READ);
+          const rawResults = new Float32Array(stagingBuffer.getMappedRange());
+
+          // Parse chunk results
+          chunkResults = this.parseResults(rawResults, actualChunkSize, freqCount, chunkParams);
+
+          // Update top-K results pool
+          topKResults.push(...chunkResults);
+          topKResults.sort((a, b) => a.resnorm - b.resnorm);
+          if (topKResults.length > maxResults * 2) { // Keep 2x buffer to ensure best results
+            topKResults.splice(maxResults * 2);
+          }
+        } catch (error) {
+          console.error('🔴 WebGPU Buffer Error:', error);
+          // Continue processing other chunks even if this one fails
+        } finally {
+          // Always cleanup buffers regardless of success/failure
+          try {
+            stagingBuffer.unmap();
+          } catch {
+            // Buffer might not be mapped, ignore this error
+          }
+          
+          // Destroy buffers
+          [paramBuffer, freqBuffer, refSpectrumBuffer, resultBuffer, configBuffer, stagingBuffer]
+            .forEach(buffer => {
+              try {
+                buffer.destroy();
+              } catch (destroyError) {
+                console.warn('Buffer destroy failed:', destroyError);
+              }
+            });
+        }
+
+        // Track metrics (only if processing succeeded)
+        if (chunkResults.length > 0) {
+          const chunkTotalTime = performance.now() - chunkStartTime;
+          const chunkComputeTime = computeEndTime - bufferTime;
+          const chunkDataTime = chunkTotalTime - chunkComputeTime; // Simplified calculation
+          
+          totalComputeTime += chunkComputeTime;
+          totalDataTransferTime += chunkDataTime;
+          totalGpuMemoryUsed = Math.max(totalGpuMemoryUsed, this.estimateGPUMemory(actualChunkSize, freqCount));
+          processedParams += actualChunkSize;
+        }
+
+        const bestResnorm = chunkResults.length > 0 ? chunkResults[0].resnorm : 'N/A';
+        const actualChunkTime = performance.now() - chunkStartTime;
+        console.log(`    ✅ Chunk ${chunkNum} completed: ${actualChunkTime.toFixed(2)}ms, best resnorm: ${typeof bestResnorm === 'number' ? bestResnorm.toFixed(6) : bestResnorm}`);
+      }
+
+      progressCallback?.(100);
 
       const endTime = performance.now();
+      const totalTime = endTime - startTime;
+
+      // Final sort and limit
+      const finalResults = topKResults
+        .sort((a, b) => a.resnorm - b.resnorm)
+        .slice(0, maxResults);
 
       const benchmarkData: WebGPUBenchmarkResult = {
-        totalTime: endTime - startTime,
-        computeTime: dataTransferEndTime - computeTime,
-        dataTransferTime: (computeTime - startTime) + (endTime - dataTransferEndTime),
-        parametersProcessed: paramCount,
-        parametersPerSecond: paramCount / ((endTime - startTime) / 1000),
-        gpuMemoryUsed: this.estimateGPUMemory(paramCount, freqCount),
-        cpuMemoryUsed: results.length * 1000 // Rough estimate
+        totalTime,
+        computeTime: totalComputeTime,
+        dataTransferTime: totalDataTransferTime,
+        parametersProcessed: processedParams,
+        parametersPerSecond: processedParams / (totalTime / 1000),
+        gpuMemoryUsed: totalGpuMemoryUsed,
+        cpuMemoryUsed: finalResults.length * 1000 // Rough estimate
       };
 
-      console.log('🚀 WebGPU computation completed:', {
-        parameters: paramCount,
+      console.log('✅ WebGPU streaming computation completed:', {
+        totalParams: totalParams.toLocaleString(),
+        chunks: Math.ceil(totalParams / chunkSize),
+        chunkSize: chunkSize.toLocaleString(),
         frequencies: freqCount,
-        totalTime: `${benchmarkData.totalTime.toFixed(2)}ms`,
+        totalTime: `${totalTime.toFixed(2)}ms`,
+        computeTime: `${totalComputeTime.toFixed(2)}ms`,
+        dataTransferTime: `${totalDataTransferTime.toFixed(2)}ms`,
+        resultCount: `${finalResults.length}/${totalParams}`,
+        peakMemoryPerChunk: `${(totalGpuMemoryUsed / 1024 / 1024).toFixed(1)}MB`,
         paramPerSec: `${benchmarkData.parametersPerSecond.toFixed(0)}/s`,
-        speedup: `${((paramCount * freqCount * 8) / benchmarkData.totalTime).toFixed(1)}x`
+        bestResnorm: finalResults[0]?.resnorm.toFixed(6) || 'N/A'
       });
 
       return {
-        results,
+        results: finalResults,
         benchmarkData,
-        memoryUsed: benchmarkData.gpuMemoryUsed
+        memoryUsed: totalGpuMemoryUsed
       };
 
     } catch (error) {
@@ -407,17 +513,27 @@ export class WebGPUManager {
           
           if (freqIdx === 0) {
             resnorm = rawData[resultIdx + 5]; // Get resnorm from first frequency point
+            
+            // Validate resnorm - GPU computation might return invalid values
+            if (!isFinite(resnorm) || resnorm < 0) {
+              console.warn(`🟡 WebGPU: Invalid resnorm ${resnorm} for parameter ${paramIdx}, skipping`);
+              resnorm = Infinity; // Mark as invalid
+            }
           }
         }
       }
 
-      results.push({
-        parameters: originalParams[paramIdx],
-        spectrum,
-        resnorm
-      });
+      // Only include results with valid resnorms and non-empty spectra
+      if (isFinite(resnorm) && resnorm > 0 && spectrum.length > 0) {
+        results.push({
+          parameters: originalParams[paramIdx],
+          spectrum,
+          resnorm
+        });
+      }
     }
 
+    console.log(`🟢 WebGPU parseResults: ${results.length}/${paramCount} valid results parsed`);
     return results;
   }
 

@@ -306,7 +306,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
 async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId, maxComputationResults = 5000) {
   // Ultra-efficient Top-N heap for massive datasets
   const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
-  const FINAL_TOP_RESULTS = Math.min(1000, maxComputationResults); // Final top results to return (max 1000)
+  const FINAL_TOP_RESULTS = maxComputationResults; // Final top results to return (user configurable)
   
   // Efficient min-heap implementation for Top-N results (O(log n) operations)
   class MinHeap {
@@ -395,7 +395,7 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
     const batch = chunkParams.slice(i, i + batchSize);
     
     // Enhanced memory pressure monitoring
-    estimatedMemoryUsage = results.length * bytesPerResult;
+    estimatedMemoryUsage = topResults.size() * bytesPerResult;
     if (estimatedMemoryUsage > memoryThreshold) {
       self.postMessage({
         type: 'MEMORY_PRESSURE',
@@ -403,25 +403,25 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
           chunkIndex,
           taskId,
           estimatedMemory: Math.round(estimatedMemoryUsage / 1024 / 1024) + 'MB',
-          resultsCount: results.length,
+          resultsCount: topResults.size(),
           message: 'High memory usage detected in optimized worker'
         }
       });
       
       // Aggressive memory management for large datasets
-      if (results.length > 3000) {
-        const partialResults = results.splice(0, 2000);
+      if (topResults.size() > 3000) {
+        // For heap-based approach, we don't need to splice - just report current status
+        const currentResults = topResults.getAll().slice(0, 500);
         self.postMessage({
           type: 'PARTIAL_RESULTS',
           data: {
             chunkIndex,
             taskId,
-            partialResults: partialResults.slice(0, 500),
-            totalPartialCount: partialResults.length
+            partialResults: currentResults,
+            totalPartialCount: topResults.size()
           }
         });
-        partialResults.length = 0;
-        estimatedMemoryUsage = results.length * bytesPerResult;
+        estimatedMemoryUsage = topResults.size() * bytesPerResult;
       }
       
       // Yield more frequently for large datasets
@@ -775,7 +775,7 @@ self.onmessage = async function(e) {
         const finalResults = topResults.getAll();
         
         // Now add spectrum data ONLY to top results for final output
-        const FINAL_TOP_RESULTS = Math.min(1000, maxComputationResults);
+        const FINAL_TOP_RESULTS = maxComputationResults;
         const topResultsWithSpectra = [];
         const otherResults = [];
         

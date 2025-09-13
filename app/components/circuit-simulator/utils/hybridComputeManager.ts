@@ -6,6 +6,7 @@ import { ResnormConfig } from './resnorm';
 import { WorkerProgress, UseWorkerManagerReturn } from './workerManager';
 import { WebGPUManager, WebGPUComputeResult } from './webgpuManager';
 import { ExtendedPerformanceSettings, WebGPUCapabilities } from '../types/gpuSettings';
+import { CANONICAL_PARAMETER_RANGES } from '../config/parameterRanges';
 
 export interface HybridComputeResult {
   results: BackendMeshPoint[];
@@ -79,33 +80,9 @@ export function useHybridComputeManager(
       return false;
     }
 
-    // For small datasets, CPU might be faster due to setup overhead
-    const GPU_THRESHOLD = 5000; // Parameters below this use CPU
-    if (totalParameters < GPU_THRESHOLD) {
-      console.log(`📝 GPU disabled: Dataset too small (${totalParameters} < ${GPU_THRESHOLD})`);
-      return false;
-    }
-
-    // Check if batch size is appropriate
-    if (totalParameters > extendedSettings.gpuAcceleration.maxBatchSize * 2) {
-      console.log(`📝 GPU enabled: Large dataset (${totalParameters} parameters)`);
-      return true;
-    }
-
-    // For discrete GPUs, prefer GPU for medium datasets
-    if (capabilities.deviceType === 'discrete' && totalParameters >= GPU_THRESHOLD) {
-      console.log(`📝 GPU enabled: Discrete GPU with medium dataset`);
-      return true;
-    }
-
-    // For integrated GPUs, be more conservative
-    if (capabilities.deviceType === 'integrated' && totalParameters >= GPU_THRESHOLD * 2) {
-      console.log(`📝 GPU enabled: Integrated GPU with larger dataset`);
-      return true;
-    }
-
-    console.log(`📝 GPU disabled: Dataset not suitable for GPU acceleration`);
-    return false;
+    // Always use GPU when available and enabled - no minimum threshold
+    console.log(`📝 GPU enabled: Processing ${totalParameters} parameters on ${capabilities.deviceType} GPU`);
+    return true;
   }, []);
 
   const generateGridPoints = useCallback(async (
@@ -123,13 +100,7 @@ export function useHybridComputeManager(
     
     // This is a simplified version - the actual implementation should match
     // the sophisticated grid generation in your existing worker
-    const paramRanges = {
-      Rsh: [100, 10000],
-      Ra: [50, 5000], 
-      Ca: [1e-8, 1e-4],
-      Rb: [30, 3000],
-      Cb: [1e-8, 1e-4]
-    };
+    const paramRanges = CANONICAL_PARAMETER_RANGES;
 
     const stepSize = gridSize > 1 ? 1 / (gridSize - 1) : 0;
     
@@ -237,9 +208,24 @@ export function useHybridComputeManager(
           const zb_real = Rb / zb_denom; 
           const zb_imag = -omega * Rb * Rb * Cb / zb_denom;
           
-          // Z_total = Rsh + Za + Zb
-          const real = Rsh + za_real + zb_real;
-          const imag = za_imag + zb_imag;
+          // Calculate sum of membrane impedances (Za + Zb)
+          const zab_real = za_real + zb_real;
+          const zab_imag = za_imag + zb_imag;
+          
+          // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+          // Numerator: Rsh * (Za + Zb)
+          const num_real = Rsh * zab_real;
+          const num_imag = Rsh * zab_imag;
+          
+          // Denominator: Rsh + Za + Zb
+          const denom_real = Rsh + zab_real;
+          const denom_imag = zab_imag;
+          
+          // Complex division: (num_real + j*num_imag) / (denom_real + j*denom_imag)
+          const denom_mag_squared = denom_real * denom_real + denom_imag * denom_imag;
+          
+          const real = (num_real * denom_real + num_imag * denom_imag) / denom_mag_squared;
+          const imag = (num_imag * denom_real - num_real * denom_imag) / denom_mag_squared;
           const magnitude = Math.sqrt(real * real + imag * imag);
           const phase = Math.atan2(imag, real) * (180 / Math.PI);
           
@@ -299,12 +285,30 @@ export function useHybridComputeManager(
             message: `GPU batch ${batchIndex + 1}/${batches.length}: Processing ${batch.length} parameters`
           });
 
-          // Run GPU computation
+          // Run GPU computation with progress callback
           const gpuResult = await webgpuManagerRef.current.computeCircuitGrid(
             batch,
             frequencies,
             referenceSpectrum,
-            extendedSettings.gpuAcceleration
+            extendedSettings.gpuAcceleration,
+            maxComputationResults,
+            (chunkProgress: number) => {
+              // Map chunk progress to overall progress
+              const batchStartProgress = 15 + (totalProcessed / gridPoints.length) * 75;
+              const batchEndProgress = 15 + ((totalProcessed + batch.length) / gridPoints.length) * 75;
+              const overallProgress = batchStartProgress + (chunkProgress / 100) * (batchEndProgress - batchStartProgress);
+              
+              onProgress({
+                type: 'CHUNK_PROGRESS',
+                chunkIndex: batchIndex,
+                totalChunks: batches.length,
+                processed: totalProcessed + Math.floor((chunkProgress / 100) * batch.length),
+                total: gridPoints.length,
+                overallProgress,
+                phase: 'impedance_calculation',
+                message: `GPU batch ${batchIndex + 1}/${batches.length}: ${chunkProgress.toFixed(1)}% complete`
+              });
+            }
           );
 
           // Convert results
@@ -399,10 +403,16 @@ export function useHybridComputeManager(
 
     } catch (error) {
       // If GPU fails and fallback is enabled, try CPU
+      const isGPUError = error instanceof Error && (
+        error.message.includes('GPU') || 
+        error.message.includes('mapAsync') ||
+        error.message.includes('Invalid Buffer') ||
+        error.name === 'OperationError'
+      );
+      
       if (extendedSettings.gpuAcceleration.enabled && 
           extendedSettings.gpuAcceleration.fallbackToCPU && 
-          error instanceof Error && 
-          error.message.includes('GPU')) {
+          isGPUError) {
         
         console.warn('🔄 GPU computation failed, falling back to CPU:', error.message);
         

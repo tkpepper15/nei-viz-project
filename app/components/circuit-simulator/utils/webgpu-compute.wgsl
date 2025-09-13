@@ -76,20 +76,36 @@ fn calculate_impedance(params: CircuitParams, omega: f32) -> ComplexNumber {
     let zb_denom = ComplexNumber(1.0, omega * params.Rb * params.Cb);
     let zb = complex_divide(ComplexNumber(params.Rb, 0.0), zb_denom);
     
-    // Z_total = Rs + Za + Zb (series combination)
-    let z_series = complex_add(complex_add(ComplexNumber(params.Rs, 0.0), za), zb);
+    // Calculate sum of membrane impedances (Za + Zb)
+    let zab = complex_add(za, zb);
     
-    return z_series;
+    // Calculate parallel combination: Z_total = (Rsh * (Za + Zb)) / (Rsh + Za + Zb)
+    // Numerator: Rsh * (Za + Zb)
+    let rsh_complex = ComplexNumber(params.Rs, 0.0);
+    let numerator = complex_multiply(rsh_complex, zab);
+    
+    // Denominator: Rsh + Za + Zb
+    let denominator = complex_add(rsh_complex, zab);
+    
+    // Complex division
+    let z_parallel = complex_divide(numerator, denominator);
+    
+    return z_parallel;
 }
 
 // Calculate resnorm using MAE method (configurable via uniform)
-fn calculate_resnorm(test_spectrum: array<ComplexNumber>, freq_count: u32) -> f32 {
+fn calculate_resnorm(param_index: u32, freq_count: u32) -> f32 {
     var total_error: f32 = 0.0;
     var valid_points: u32 = 0u;
     
     for (var i = 0u; i < freq_count; i = i + 1u) {
         let ref_point = reference_spectrum[i];
-        let test_point = test_spectrum[i];
+        let params = circuit_parameters[param_index];
+        let frequency = frequencies[i];
+        
+        // Calculate test impedance for this parameter set and frequency
+        let omega = 2.0 * 3.141592653589793 * frequency;
+        let test_point = calculate_impedance(params, omega);
         
         let ref_mag = complex_magnitude(ref_point);
         let test_mag = complex_magnitude(test_point);
@@ -153,7 +169,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     
     // Calculate resnorm for this parameter set
-    let resnorm = calculate_resnorm(test_spectrum, min(num_freqs, 256u));
+    let resnorm = calculate_resnorm(param_idx, min(num_freqs, 256u));
     
     // Update all results for this parameter set with resnorm
     for (var freq_idx = 0u; freq_idx < min(num_freqs, 256u); freq_idx = freq_idx + 1u) {

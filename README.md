@@ -1,102 +1,23 @@
-# SpideyPlot - Interactive EIS Circuit Simulator & Visualization
+# SpideyPlot - Electrochemical Impedance Spectroscopy Simulation
 
-[![Live Demo](https://img.shields.io/badge/demo-online-green.svg)](https://nei-viz-project.vercel.app/)
-[![Next.js](https://img.shields.io/badge/built%20with-Next.js-black)](https://nextjs.org)
-[![TailwindCSS](https://img.shields.io/badge/styled%20with-TailwindCSS-06B6D4)](https://tailwindcss.com)
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/tkpepper15/nei-viz-project/releases/tag/v2.0.0)
+SpideyPlot is an advanced web-based tool for electrochemical impedance spectroscopy (EIS) simulation and visualization, specifically designed for retinal pigment epithelium (RPE) research. The application provides comprehensive circuit modeling, parameter optimization, and interactive visualization capabilities.
 
-> 🕸️ **SpideyPlot** - Advanced electrochemical impedance spectroscopy (EIS) simulation and visualization for retinal pigment epithelium (RPE) research
+## Core Technology Stack
 
-An interactive web application for simulating and visualizing RPE impedance characteristics using equivalent circuit models, featuring spider plots, parallel computation, and comprehensive parameter space exploration.
+- **Framework**: Next.js 15 with App Router and TypeScript
+- **Styling**: TailwindCSS with custom dark theme
+- **Visualization**: Custom React components with D3.js mathematics, Plotly.js, and Recharts
+- **Math Rendering**: KaTeX for LaTeX equations
+- **Parallel Computation**: Web Workers for multi-core processing
+- **UI Components**: Material-UI (@mui/material) and Heroicons
+- **Database**: Supabase for profile storage and data persistence
 
-<div align="center">
-  <img src="public/screenshot.png" alt="SpideyPlot Screenshot" width="800"/>
-</div>
+## Mathematical Model
 
-## 🚀 Quick Start
-
-```bash
-# Clone the repository
-git clone https://github.com/tkpepper15/nei-viz-project.git
-
-# Install dependencies
-npm install
-
-# Start the development server
-npm run dev
-```
-
-Then open [http://localhost:3000](http://localhost:3000) to see the application.
-
-## 🎯 Overview
-
-SpideyPlot empowers researchers and students to:
-- 🔬 Explore RPE electrical properties through a sophisticated equivalent circuit model
-- 🕸️ Visualize parameter relationships using advanced spider plot technology
-- 🚀 Leverage Web Workers for parallel computation of large parameter spaces
-- 📊 Analyze impedance data with industry-standard resnorm calculations
-- 🎛️ Navigate through an intuitive tabbed interface for different analysis modes
-- 📈 Track computation progress with real-time performance monitoring
-- 💾 Export data and visualizations for further analysis
-
-## ✨ Key Features
-
-### 🎛️ Modern Interface
-- **Tabbed Navigation**: Visualizer, Math Details, Data Table, and Activity Log
-- **Collapsible Panels**: Left navigation and right toolbox for customizable workspace
-- **Real-time Updates**: Live parameter changes with instant visual feedback
-- **Dark Theme**: Professional dark interface optimized for data visualization
-- **Responsive Design**: Works seamlessly across different screen sizes
-
-### 🔧 Advanced Circuit Model
-Interactive Randles equivalent circuit model with:
-- **Series Resistance (Rs)**: 10 - 10,000 Ω
-- **Apical Resistance (Ra)**: 10 - 10,000 Ω  
-- **Apical Capacitance (Ca)**: 0.1 - 50 µF
-- **Basal Resistance (Rb)**: 10 - 10,000 Ω
-- **Basal Capacitance (Cb)**: 0.1 - 50 µF
-- **Frequency Range**: 0.1 Hz - 10 kHz (configurable)
-- **Frequency Points**: 10 - 200 points (logarithmic spacing)
-
-### 🚀 High-Performance Computation
-- **Web Workers**: Parallel processing using all available CPU cores
-- **Grid Computation**: Explore up to 25^5 parameter combinations (9.7M+ points)
-- **Real-time Progress**: Live computation tracking with cancellation support
-- **Memory Optimization**: Intelligent sampling for large datasets
-- **Performance Monitoring**: CPU usage, memory tracking, and throughput metrics
-
-### 🕸️ Advanced Spider Plot Visualization
-- **Interactive Spider Charts**: Navigate parameter space with zoom and pan
-- **Resnorm Categorization**: Dynamic percentile-based grouping (25%, 50%, 75%, 90%)
-- **Reference Model**: Overlay ground truth parameters for comparison
-- **Group Toggling**: Show/hide different quality categories
-- **Color Coding**: Intuitive color scheme from excellent (green) to poor (red) fits
-- **Opacity Controls**: Adjust transparency for better data visibility
-
-### 📊 Comprehensive Data Analysis
-- **Sortable Data Table**: Explore all computed parameter combinations
-- **Dynamic Categorization**: Resnorm groups update based on current sort order
-- **Export Functionality**: Download data in multiple formats
-- **Mathematical Insights**: Detailed equation display with LaTeX rendering
-- **Activity Logging**: Complete computation history with timestamps
-
-### 🎯 Smart Performance Features
-- **Load Indicators**: Visual feedback for different computational loads:
-  - 🟢 Lo Load (≤3,000 points): Green indicator
-  - 🟡 Med Load (3,001-8,000 points): Yellow indicator  
-  - 🔴 Hi Load (>8,000 points): Red indicator
-- **Predicted Counts**: See estimated grid points before computation
-- **Adaptive Limits**: Automatic performance optimization for large datasets
-- **Background Processing**: Non-blocking computation with UI responsiveness
-
-## 📐 Mathematical Model
-
-### Equivalent Circuit Architecture
-
-The RPE cellular layer is modeled using a modified Randles circuit:
+The application implements a modified Randles equivalent circuit model:
 
 ```
-       Rs (Series Resistance)
+       Rs (Shunt Resistance)
    ────[Rs]────┬──────────┬──────
                │          │
            [Ra]│      [Rb]│
@@ -106,232 +27,215 @@ The RPE cellular layer is modeled using a modified Randles circuit:
                └──────────┘
 ```
 
-**Circuit Components:**
-- **Rs**: Series resistance (solution + electrode resistance)
-- **Ra**: Apical membrane resistance  
-- **Ca**: Apical membrane capacitance
-- **Rb**: Basal membrane resistance
-- **Cb**: Basal membrane capacitance
+Complex impedance calculation: `Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`
 
-### Impedance Calculation
+## Project Structure
 
-The total circuit impedance is calculated as a parallel combination:
+### Core Application Files
 
-```
-Z_total(ω) = (Rs × Z_membranes) / (Rs + Z_membranes)
-```
+#### `/app` - Next.js Application Directory
+- `layout.tsx` - Root application layout with theme and provider setup
+- `page.tsx` - Main application entry point
+- `globals.css` - Global styles and TailwindCSS imports
 
-Where the membrane impedances are:
+#### `/app/components` - React Components
+- `CircuitSimulator.tsx` - Main orchestrator component managing entire application state
+- `TabSelector.tsx` - Main navigation component for switching between application views
 
-```
-Za(ω) = Ra / (1 + jωRaCa)
-Zb(ω) = Rb / (1 + jωRbCb)
-Z_membranes = Za(ω) + Zb(ω)
-```
+#### `/app/components/circuit-simulator` - Circuit Simulation Engine
+- `types/` - TypeScript definitions
+  - `index.ts` - Core data structures (ModelSnapshot, ResnormGroup, BackendMeshPoint)
+  - `parameters.ts` - Circuit parameter definitions (CircuitParameters interface)
+  - `gpuSettings.ts` - WebGPU acceleration settings
+  - `savedProfiles.ts` - User profile persistence types
+- `hooks/` - React Hooks
+  - `useComputationState.ts` - Main state management hook for computation results and progress
+  - `useSerializedComputation.ts` - Hook for compressed serialized computation workflow
+- `utils/` - Core Computation Utilities
+  - `workerManager.ts` - Web Worker orchestration for parallel computation
+  - `hybridComputeManager.ts` - GPU/CPU hybrid computation pipeline
+  - `webgpuManager.ts` - WebGPU acceleration for large-scale computations
+  - `serializedComputationManager.ts` - Memory-efficient serialized storage system (67x compression)
+  - `resnorm.ts` - Residual norm calculation with multiple methods (MAE, MSE, RMSE)
+  - `configSerializer.ts` - Parameter configuration compression and decompression
+  - `frequencySerializer.ts` - Frequency range serialization for efficient storage
+- `controls/` - UI Control Components
+  - `ParameterControls.tsx` - Circuit parameter input controls with validation
+  - `ProfileCard.tsx` - User profile management and switching interface
+  - `SavedProfiles.tsx` - Profile persistence and organization system
+  - `OptimizationControls.tsx` - Advanced computation optimization settings
+  - `StaticRenderControls.tsx` - Visualization rendering configuration
+- `visualizations/` - Data Visualization Components
+  - `SpiderPlot3D.tsx` - Primary 3D spider plot visualization with interactive parameter exploration
+  - `TiledSpiderPlot.tsx` - Grid-based visualization for large datasets
+- `insights/` - Analysis and Insights
+  - `ResnormDisplay.tsx` - Residual norm analysis with percentile grouping
+- `notifications/` - User Feedback
+  - `ComputationNotification.tsx` - Real-time computation progress and results
+- `config/` - Configuration Management
+  - Circuit parameter presets and default configurations
+- `examples/` - Example Implementations
+  - `SerializedSpiderPlotDemo.tsx` - Demonstration of serialized computation workflow
+- `test/` - Testing Utilities
+  - Component testing helpers and mock data generation
+- `npz-manager/` - NPZ File Management
+  - `NPZManager.tsx` - Main NPZ dataset management interface
+  - `NPZExportPanel.tsx` - Export computation results to NPZ format
+  - `NPZImportPanel.tsx` - Import existing NPZ datasets
+  - `NPZLibraryManager.tsx` - Dataset library organization and management
 
-**Complex Division Implementation:**
-```
-For Z = (num_real + j×num_imag) / (denom_real + j×denom_imag):
+#### `/app/components/settings` - Application Settings
+- `SettingsModal.tsx` - User preferences and application configuration
+- `SettingsModal.module.css` - Settings modal styling
 
-real_part = (num_real × denom_real + num_imag × denom_imag) / |denom|²
-imag_part = (num_imag × denom_real - num_real × denom_imag) / |denom|²
+#### `/app/components/npz` - NPZ Data Management
+- `NPZDatasetManager.tsx` - External NPZ dataset integration and management
 
-where |denom|² = denom_real² + denom_imag²
-```
+#### `/app/hooks` - Global React Hooks
+- `useUserSettings.ts` - User preference persistence and synchronization
+- `useNPZData.ts` - NPZ dataset loading and caching
 
-### Enhanced Resnorm Calculation
+#### `/lib` - External Service Integration
+- `supabase.ts` - Supabase client configuration and authentication
+- `circuitConfigService.ts` - Circuit configuration persistence service
+- `profilesService.ts` - User profile storage and retrieval service
 
-Our industry-standard resnorm calculation includes sophisticated weighting:
+#### `/public` - Static Assets
+- `grid-worker.js` - Web Worker for grid computation
+- `enhanced-tile-worker.js` - Optimized tile-based computation worker
+- `tile-worker.js` - Basic tile computation worker
+- `webgpu-compute.wgsl` - WebGPU compute shader for acceleration
+- `spiderweb.png` - Application icon and branding assets
+- `screenshot.png` - Application screenshot for documentation
 
-**1. Frequency Weighting**
-```
-weight_freq = 1 / max(0.1, log₁₀(frequency))
-```
-Emphasizes low-frequency capacitive behavior crucial for membrane characterization.
+### Configuration Files
 
-**2. Component-Specific Weighting**
-```
-For f < 100 Hz:  w_real = 1.0, w_imag = 1.5
-For f ≥ 100 Hz:  w_real = 1.5, w_imag = 1.0
-```
-Balances resistive and capacitive contributions across frequency ranges.
+- `next.config.ts` - Next.js configuration with performance optimizations
+- `tailwind.config.ts` - TailwindCSS configuration with custom theme
+- `tsconfig.json` - TypeScript compiler configuration
+- `package.json` - Node.js dependencies and scripts
+- `vercel.json` - Vercel deployment configuration
+- `webgpu.d.ts` - WebGPU TypeScript definitions
+- `next-env.d.ts` - Next.js TypeScript environment definitions
+- `CLAUDE.md` - Development guidelines and project instructions for AI assistance
 
-**3. Magnitude Normalization**
-```
-normalized_residual = (Z_test - Z_reference) / |Z_reference|
-```
-Ensures scale-independent comparison across different impedance magnitudes.
+### Organized Supporting Files
 
-**4. Final Resnorm**
-```
-resnorm = √(Σ(weighted_residuals²) / Σ(weights)) × range_amplifier
-```
+#### `/docs` - Documentation and Context
+All documentation files moved here for organization:
+- `SETUP_INSTRUCTIONS.md` - Initial project setup and installation
+- `COMPUTATION_PIPELINE_DOCUMENTATION.md` - Detailed computation architecture
+- `SERIALIZATION_INTEGRATION_COMPLETE.md` - Serialized storage system documentation
+- `PERFORMANCE_ANALYSIS.md` - Performance benchmarking and optimization results
+- `OPTIMIZATION_MATHEMATICS.md` - Mathematical foundations and algorithms
+- `SUPABASE_IMPLEMENTATION_PLAN.md` - Database integration architecture
+- `ML_IMPLEMENTATION_PLAN.md` - Machine learning enhancement roadmap
+- `UI_SETTINGS_DATABASE_SCHEMA.md` - Database schema documentation
+- Multiple deployment and integration guides
 
-**Range Amplification**
-```
-range_amplifier = {
-  3.0  if frequency_ratio < 100    (narrow range)
-  2.5  if frequency_ratio < 1000   (moderate range)  
-  2.0  otherwise                   (wide range)
-}
-```
+#### `/docs/context-images` - Visual Context and Screenshots
+- `img_1.png`, `img_2.png`, `img_3.png`, `img_4.png` - Development context images
+- `nyquist_inspiration.png`, `inspo.png` - Design inspiration references
+- `reworks/reworks_1.png` - Historical development iterations
 
-### Dynamic Percentile Grouping
+#### `/data` - Sample Data and Testing
+- `sample-outputs/` - Example computation results
+  - `detailed_spectrum_data_grid_5.csv` - 5x5 grid computation results
+  - `user_config_grid_9_detailed.csv` - 9x9 grid detailed analysis
+  - `test_1.json`, `test_1_small.json` - JSON test datasets
+- `demo_grid_5/`, `demo_grid_10/`, `demo_grid_15/` - Demonstration datasets for different grid sizes
+- `test_1_based/` - Unit test data and validation sets
+- `measurement_presets/` - Predefined measurement configurations
+- `query_demo/` - Database query examples and test cases
 
-Results are categorized using adaptive percentiles:
-- **Excellent Fit** (Top 25%): resnorm ≤ P₂₅ 
-- **Good Fit** (25-50%): P₂₅ < resnorm ≤ P₅₀
-- **Moderate Fit** (50-75%): P₅₀ < resnorm ≤ P₇₅
-- **Acceptable Fit** (75-90%): P₇₅ < resnorm ≤ P₉₀
-- **Poor Fit** (Bottom 10%): resnorm > P₉₀
+#### `/python-scripts` - Backend Processing Scripts
+- `circuit_computation.py` - Core circuit simulation engine
+- `circuit_api.py` - Flask API for Python integration
+- `config_serializer.py` - Python implementation of configuration serialization
+- `frequency_serializer.py` - Frequency range serialization utilities
+- `npz_loader.py` - NPZ file loading and processing
+- `npz_supabase_sync.py` - Database synchronization for NPZ datasets
+- `measurement_config.py` - Measurement parameter configuration
+- `serialization_demo.py` - Demonstration of serialization capabilities
+- `lightweight_storage.py` - Optimized storage implementations
+- Testing and debugging scripts: `debug_comparison.py`, `test_full_1_based_system.py`
 
-This approach ensures meaningful categorization regardless of parameter space size.
+#### `/sql-scripts` - Database Schema and Setup
+- `create_missing_tables.sql` - Initial database table creation
+- `supabase_npz_table.sql` - NPZ dataset table schema
+- `create-user-profiles-table.sql` - User profile storage schema
+- `ui_settings_schema_changes.sql` - Settings persistence schema
+- `npz_integration_final.sql` - Complete NPZ integration schema
+- `auto_register_npz_datasets.sql` - Automated dataset registration
+- Setup and migration scripts for database initialization
 
-## 🏗️ Project Structure
+#### `/external-modules` - External Dependencies
+- `wasm-impedance/` - WebAssembly module for high-performance impedance calculations
+  - `Cargo.toml` - Rust dependencies
+  - `build.sh` - Build script for WASM compilation
+  - `src/` - Rust source code for impedance computation
 
-```
-nei-viz-project/
-├── app/
-│   ├── components/
-│   │   ├── circuit-simulator/
-│   │   │   ├── controls/           # UI control components
-│   │   │   │   ├── ExportModal.tsx
-│   │   │   │   ├── PerformanceControls.tsx
-│   │   │   │   ├── SystemMonitor.tsx
-│   │   │   │   └── ToolboxComponent.tsx
-│   │   │   ├── insights/           # Analysis components
-│   │   │   │   └── ResnormDisplay.tsx
-│   │   │   ├── notifications/      # Status notifications
-│   │   │   ├── types/              # TypeScript definitions
-│   │   │   ├── utils/              # Computation utilities
-│   │   │   │   ├── complex.ts      # Complex number operations
-│   │   │   │   ├── impedance.ts    # EIS calculations
-│   │   │   │   ├── resnorm.ts      # Residual norm algorithms
-│   │   │   │   ├── spider.ts       # Spider plot mathematics
-│   │   │   │   └── workerManager.ts # Web Worker coordination
-│   │   │   ├── visualizations/     # Plot components
-│   │   │   │   ├── SpiderPlot.tsx
-│   │   │   │   └── TiledSpiderPlot.tsx
-│   │   │   ├── DataTableTab.tsx    # Data analysis interface
-│   │   │   ├── MathDetailsTab.tsx  # Mathematical documentation
-│   │   │   └── VisualizerTab.tsx   # Main visualization
-│   │   └── CircuitSimulator.tsx    # Root component
-│   ├── globals.css                 # Global styles
-│   ├── layout.tsx                  # App layout
-│   └── page.tsx                    # Main page
-├── public/
-│   ├── enhanced-tile-worker.js     # Web Worker for computation
-│   ├── grid-worker.js              # Grid generation worker
-│   └── tile-worker.js              # Tile rendering worker
-├── types/                          # Global type definitions
-└── README.md                       # This file
-```
+## Key Features
 
-## 🛠️ Technical Stack
+### Computation Engine
+- **Parallel Processing**: Multi-core Web Worker computation for parameter space exploration
+- **Memory Optimization**: SerializedComputationManager provides 67x memory reduction
+- **GPU Acceleration**: WebGPU support for large-scale computations
+- **Streaming Results**: Real-time computation progress and result streaming
 
-- **Framework**: [Next.js 14](https://nextjs.org/) with App Router
-- **Language**: [TypeScript](https://www.typescriptlang.org/) for type safety
-- **Styling**: [TailwindCSS](https://tailwindcss.com/) with custom dark theme
-- **Math Rendering**: [KaTeX](https://katex.org/) for LaTeX equations
-- **Visualization**: Custom React components with D3.js mathematics
-- **Computation**: Web Workers for parallel processing
-- **Performance**: Optimized for large-scale parameter exploration
+### Visualization
+- **3D Spider Plots**: Interactive multi-dimensional parameter visualization
+- **Resnorm Analysis**: Dynamic percentile-based categorization (25%, 50%, 75%, 90%)
+- **Reference Models**: Ground truth parameter comparison and overlay
+- **Performance Scaling**: Adaptive rendering limits for datasets up to 1M+ models
 
-## 🧑‍💻 Development
+### Data Management
+- **Profile System**: Save and restore parameter configurations
+- **NPZ Integration**: Import/export NumPy ZIP format datasets
+- **Supabase Storage**: Cloud-based profile and data persistence
+- **Serialized Storage**: Ultra-compressed in-memory result storage
 
-### Getting Started
-1. Clone the repository
-2. Install dependencies: `npm install`
-3. Start development server: `npm run dev`
-4. Open [http://localhost:3000](http://localhost:3000)
+### Mathematical Accuracy
+- **Resnorm Methods**: Mean Absolute Error (MAE) following battery EIS research standards
+- **Frequency Weighting**: Low-frequency emphasis for biological systems
+- **Parameter Validation**: Automatic range capping and scientific notation support
+- **Spectrum Generation**: Real-time impedance spectrum calculation
 
-### Key Development Features
-- **Hot Reloading**: Instant updates during development
-- **TypeScript**: Full type safety and IntelliSense
-- **Modular Architecture**: Clean separation of concerns
-- **Performance Monitoring**: Built-in computation profiling
-- **Error Handling**: Comprehensive error boundaries and logging
+## Development Commands
 
-### Performance Considerations
-- Computation complexity scales as O(n⁵) where n is grid size
-- Web Workers prevent UI blocking during large computations
-- Memory usage is optimized for datasets up to 10M+ parameter combinations
-- Adaptive rendering limits ensure smooth visualization performance
-
-## 📊 Usage Examples
-
-### Basic Parameter Exploration
-1. Adjust circuit parameters using the toolbox sliders
-2. Click "Compute Grid" to explore parameter space
-3. View results in the spider plot visualization
-4. Analyze data quality using resnorm categorization
-
-### Large-Scale Analysis
-1. Set grid size to 15-20 for comprehensive exploration
-2. Monitor computation progress in real-time
-3. Use the data table to examine specific parameter combinations
-4. Export results for external analysis
-
-### Mathematical Validation
-1. Switch to "Math Details" tab to view equations
-2. Verify impedance calculations against literature
-3. Understand resnorm weighting through detailed explanations
-4. Check frequency response characteristics
-
-## 📄 License
-
-MIT License - feel free to use this project for research, education, or any other purpose.
-
-## 🙏 Acknowledgments
-
-This project was created to support research in retinal physiology and provide an interactive tool for understanding RPE electrical properties. Special thanks to:
-
-- The NEI Visual Function Core for supporting this work
-- The research community for valuable feedback and suggestions
-
-## 📚 References
-
-1. [New technique enhances quality control of lab-grown cells for AMD treatment](https://www.nei.nih.gov/about/news-and-events/news/new-technique-enhances-quality-control-lab-grown-cells-amd-treatment)
-2. [NEI Ocular and Stem Cell Translational Research Section](https://www.nei.nih.gov/research/research-labs-and-branches/ocular-and-stem-cell-translational-research-section)
-3. [Basics of Electrochemical Impedance Spectroscopy](https://www.gamry.com/application-notes/EIS/basics-of-electrochemical-impedance-spectroscopy/)
-4. [Impedance Spectroscopy: Theory, Experiment, and Applications](https://onlinelibrary.wiley.com/doi/book/10.1002/9781119333623)
-
----
-
-<div align="center">
-  <sub>Built with ❤️ to accelerate Vision Research</sub>
-</div>
-
-## Features
-
-### Grid Computation with Advanced Tracking
-
-The system now provides detailed tracking of grid computation statistics:
-
-#### Symmetric Grid Optimization
-- **Skipped Points**: Shows how many parameter combinations were skipped due to symmetric optimization
-- **Example**: For a 20-point grid (3.2M total combinations), symmetric optimization typically skips ~1.6M duplicate combinations
-- **Display**: Orange text shows "X skipped" in the grid status
-
-#### Memory Management
-- **Adaptive Limits**: Automatically limits displayed points based on estimated memory usage
-- **Performance Thresholds**:
-  - > 500MB estimated: Limit to 50,000 displayed points
-  - > 200MB estimated: Limit to 75,000 displayed points
-- **Display**: Red text shows "X hidden" when memory limits are applied
-
-#### Enhanced Grid Status Display
-
-The grid status bar now shows:
-```
-Showing: 50,000 of 1,600,000 computed / 3,200,000 total • 1,600,000 skipped • 1,550,000 hidden | Freq: 0.10 - 10000 Hz | 320MB
+```bash
+npm run dev         # Start development server (8GB memory allocated)
+npm run build       # Build production application
+npm run start       # Start production server
+npm run lint        # Run ESLint checks
 ```
 
-Where:
-- **Showing**: Points currently displayed in visualizations
-- **Computed**: Points actually computed (after symmetric optimization)
-- **Total**: Theoretical maximum points (gridSize^5)
-- **Skipped**: Points skipped by symmetric optimization
-- **Hidden**: Points hidden due to memory management
-- **Memory**: Estimated memory usage (when > 100MB)
-# Auto-update ready
+## Performance Characteristics
+
+- **Computation Complexity**: O(n^5) scaling where n is grid size per parameter
+- **Memory Usage**: ~60 bytes per model (serialized) vs ~4KB per model (traditional)
+- **Maximum Scale**: Supports up to 9.7M+ parameter combinations (25^5 grid)
+- **Browser Requirements**: Modern browsers with Web Worker and optional WebGPU support
+
+## Architecture Highlights
+
+### Serialized Storage System
+The application uses an innovative serialized storage approach that:
+- Stores only configuration IDs and resnorm values (60 bytes per result)
+- Generates full ModelSnapshot objects procedurally on-demand
+- Provides 67x memory reduction compared to traditional storage
+- Enables browser-based analysis of massive parameter spaces
+
+### Hybrid Computation Pipeline
+- **Web Workers**: CPU-based parallel computation for standard workloads
+- **WebGPU**: GPU acceleration for compute-intensive operations
+- **Streaming**: Real-time result processing and visualization updates
+- **Cancellation**: User-controlled computation termination
+
+### Component Architecture
+- **Modular Design**: Self-contained components with clear responsibilities
+- **Type Safety**: Comprehensive TypeScript coverage with strict typing
+- **State Management**: Centralized computation state with React hooks
+- **Error Boundaries**: Graceful degradation and error recovery
+
+This project represents a comprehensive solution for electrochemical impedance spectroscopy research with modern web technologies, providing researchers with powerful tools for circuit parameter exploration and analysis.
