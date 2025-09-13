@@ -45,6 +45,7 @@ next-env.d.ts
 **/*.so
 **/.Python
 **/env/
+.venv/
 **/build/
 **/develop-eggs/
 **/dist/
@@ -75,3 +76,10 @@ test-supabase-profiles.js
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Data files and generated content
+/data/npz/
+/data/demo_grid_*/
+/data/sample-outputs/
+*.db
+render_jobs.db
