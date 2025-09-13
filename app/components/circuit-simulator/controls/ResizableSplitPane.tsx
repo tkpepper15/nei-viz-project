@@ -61,7 +61,7 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
         onSplitChange(constrainedHeight);
       }
     });
-  }, [isDragging, minTopHeight, minBottomHeight]);
+  }, [isDragging, minTopHeight, minBottomHeight, onSplitChange]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);

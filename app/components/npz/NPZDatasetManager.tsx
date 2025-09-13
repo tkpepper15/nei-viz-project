@@ -36,15 +36,18 @@ interface NPZDatasetManagerProps {
 export const NPZDatasetManager: React.FC<NPZDatasetManagerProps> = ({ 
   onDatasetSelect
 }) => {
-  const { 
-    mergedDatasets, 
-    publicDatasets, 
-    isLoading, 
-    error, 
+  const {
+    mergedDatasets: rawMergedDatasets,
+    publicDatasets: rawPublicDatasets,
+    isLoading,
+    error,
     user,
     fetchDatasets,
     loadDataset
   } = useNPZData();
+
+  const mergedDatasets = rawMergedDatasets as NPZDataset[];
+  const publicDatasets = rawPublicDatasets as NPZDataset[];
 
   const [selectedDataset, setSelectedDataset] = useState<NPZDataset | null>(null);
   const [apiStatus, setApiStatus] = useState<'checking' | 'online' | 'offline'>('checking');
@@ -175,17 +178,16 @@ export const NPZDatasetManager: React.FC<NPZDatasetManagerProps> = ({
           ) : (
             <div className="grid gap-4">
               {mergedDatasets.map((dataset) => (
-                <div key={(dataset as any).filename} 
+                <div key={dataset.filename} 
                      className={`p-4 border rounded-lg hover:shadow-md transition-shadow cursor-pointer ${
-                       selectedDataset?.filename === (dataset as any).filename ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                       selectedDataset?.filename === dataset.filename ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
                      }`}
-                     onClick={() => handleLoadDataset(dataset as NPZDataset)}>
+                     onClick={() => handleLoadDataset(dataset)}>
                   
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                        {getStorageIcon(dataset.storageType, (dataset as any).is_available !== false)}
+                        {getStorageIcon(dataset.storageType || 'local', dataset.is_available !== false)}
                         <h4 className="font-medium text-gray-900 flex items-center gap-2">
                           {dataset.configurationName || dataset.filename}
                           {/* Server-side indicator */}
@@ -292,13 +294,13 @@ export const NPZDatasetManager: React.FC<NPZDatasetManagerProps> = ({
           
           <div className="grid gap-4">
             {publicDatasets.map((dataset) => (
-              <div key={dataset.id} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
+              <div key={dataset.filename} className="p-4 border border-gray-200 rounded-lg bg-gray-50">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
                       <CloudIcon className="w-5 h-5 text-blue-500" />
                       <h4 className="font-medium text-gray-900">
-                        {dataset.saved_configurations?.name}
+                        {dataset.configurationName || dataset.filename}
                       </h4>
                       <span className="px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700">
                         Public
@@ -306,19 +308,18 @@ export const NPZDatasetManager: React.FC<NPZDatasetManagerProps> = ({
                     </div>
                     
                     <div className="text-sm text-gray-600 mb-2">
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      By {(dataset.saved_configurations as any)?.user_profiles?.full_name || 'Unknown User'}
+                      By {dataset.username || 'Unknown User'}
                     </div>
                     
                     <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
                       <div>
-                        <span className="font-medium">Parameters:</span> {dataset.n_parameters.toLocaleString()}
+                        <span className="font-medium">Parameters:</span> {(dataset.n_parameters || 0).toLocaleString()}
                       </div>
                       <div>
                         <span className="font-medium">Frequencies:</span> {dataset.n_frequencies}
                       </div>
                       <div>
-                        <span className="font-medium">Size:</span> {formatFileSize(dataset.file_size_mb)}
+                        <span className="font-medium">Size:</span> {formatFileSize(dataset.file_size_mb || 0)}
                       </div>
                     </div>
                   </div>

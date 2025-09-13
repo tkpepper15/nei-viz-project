@@ -711,12 +711,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setIsComputingGrid(false);
     }
   }, [
-    isComputingGrid, gridSize, parameters, minFreq, maxFreq, numPoints, 
-    performanceSettings, resnormConfig, hybridComputeManager.computeGridHybrid, 
+    isComputingGrid, gridSize, parameters, minFreq, maxFreq, numPoints,
+    performanceSettings, resnormConfig, hybridComputeManager.computeGridHybrid,
     setIsComputingGrid, setGridError, setComputationProgress, setComputationSummary,
     setGridResults, setTotalGridPoints, setActualComputedPoints,
     savedProfilesState.selectedProfile, profileActions,
-    updateStatusMessage, configurationName
+    updateStatusMessage, configurationName, extendedSettings,
+    hybridComputeManager, maxComputationResults
   ]);
   
 
@@ -724,7 +725,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const handleToggleMultiSelect = useCallback(() => {
     setIsMultiSelectMode(!isMultiSelectMode);
     setSelectedCircuits([]);
-  }, [isMultiSelectMode]);
+  }, [isMultiSelectMode, setIsMultiSelectMode, setSelectedCircuits]);
   
   const handleSelectCircuit = useCallback((configId: string) => {
     if (isMultiSelectMode) {
@@ -980,7 +981,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setManuallyHidden(false);
       updateStatusMessage('Reference model shown');
     }
-  }, [referenceModelId, createReferenceModel, updateStatusMessage]);
+  }, [referenceModelId, createReferenceModel, updateStatusMessage, setManuallyHidden]);
 
   // Create and show reference model by default
   useEffect(() => {
@@ -1122,7 +1123,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       window.removeEventListener('toggleReferenceModel', handleToggleReference);
       window.removeEventListener('toggleResnormGroup', handleToggleResnormGroup);
     };
-  }, [toggleReferenceModel, hiddenGroups, referenceModelId, createReferenceModel, updateStatusMessage, setHiddenGroups]);
+  }, [toggleReferenceModel, hiddenGroups, referenceModelId, createReferenceModel, updateStatusMessage, setHiddenGroups, setManuallyHidden]);
   
   // Optimized helper function to map BackendMeshPoint to ModelSnapshot
   const mapBackendMeshToSnapshot = (meshPoint: BackendMeshPoint, index: number): ModelSnapshot => {
@@ -1453,7 +1454,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         return [];
       }
     }
-  }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig]);
+  }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig, extendedSettings, hybridComputeManager, maxComputationResults]);
 
   // Updated grid computation using Web Workers for parallel processing
   // eslint-disable-next-line @typescript-eslint/no-unused-vars

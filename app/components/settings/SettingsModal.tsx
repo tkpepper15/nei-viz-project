@@ -339,7 +339,7 @@ export function SettingsModal({
     return () => {
       webgpuManager.dispose();
     };
-  }, [isOpen]);
+  }, [isOpen, currentSettings.gpuAcceleration, webgpuManager]);
 
   const handleSettingsUpdate = async (newSettings: Partial<ExtendedPerformanceSettings>) => {
     const updated = { ...currentSettings, ...newSettings };
