@@ -12,8 +12,9 @@ import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/work
 import { useHybridComputeManager } from './circuit-simulator/utils/hybridComputeManager';
 import { useOptimizedComputeManager, OptimizedComputeManagerConfig } from './circuit-simulator/utils/optimizedComputeManager';
 import { SerializedComputationManager, createSerializedComputationManager } from './circuit-simulator/utils/serializedComputationManager';
+import { createParameterConfigManager } from './circuit-simulator/utils/parameterConfigManager';
 import { ExtendedPerformanceSettings, DEFAULT_GPU_SETTINGS, DEFAULT_CPU_SETTINGS } from './circuit-simulator/types/gpuSettings';
-import { SettingsModal } from './settings/SettingsModal';
+import SimplifiedSettingsModal from './settings/SimplifiedSettingsModal';
 import { SettingsButton } from './settings/SettingsButton';
 import { useComputationState } from './circuit-simulator/hooks/useComputationState';
 import { useUserProfiles } from '../hooks/useUserProfiles';
@@ -21,11 +22,11 @@ import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useCircuitConfigurations } from '../hooks/useCircuitConfigurations';
 import { useUISettingsManager } from '../hooks/useUISettingsManager';
 import { ProfilesService } from '../../lib/profilesService';
+import { CentralizedLimitsManager, setGlobalLimitsManager } from './circuit-simulator/utils/centralizedLimits';
 
 // Add imports for the new tab components at the top of the file
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
-import { NPZManager } from './circuit-simulator/npz-manager/NPZManager';
 // import { SerializedSpiderPlotDemo } from './circuit-simulator/examples/SerializedSpiderPlotDemo';
 // Removed OrchestratorTab - functionality integrated into VisualizerTab
 
@@ -50,6 +51,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   
   // State for user's default grid size
   const [defaultGridSize, setDefaultGridSize] = useState<number>(9);
+
+  // Centralized limits manager - single variable to control all computation limits
+  const [centralizedLimits, setCentralizedLimits] = useState<CentralizedLimitsManager>(
+    CentralizedLimitsManager.fromGridSize(9, 100) // Force: 100% of grid to ensure complete computation
+  );
   
   // Initialize session management
   const sessionManagement = useSessionManagement();
@@ -102,7 +108,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const { cancelComputation } = cpuWorkerManager;
 
   // Initialize optimization manager with fallback to hybrid compute
-  const [optimizationConfig, setOptimizationConfig] = useState<OptimizedComputeManagerConfig>({
+  const [optimizationConfig] = useState<OptimizedComputeManagerConfig>({
     enableOptimizedPipeline: true,
     optimizationThreshold: 10000,
     fallbackToOriginal: true,
@@ -126,10 +132,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     optimizationConfig
   );
 
-  const handleOptimizationConfigChange = useCallback((config: Partial<OptimizedComputeManagerConfig>) => {
-    setOptimizationConfig(prev => ({ ...prev, ...config }));
-    optimizedComputeManager.updateConfig(config);
-  }, [optimizedComputeManager]);
   
   // Add frequency control state - extended range for full Nyquist closure
   const [minFreq, setMinFreq] = useState<number>(0.1); // 0.1 Hz for full low-frequency closure
@@ -149,13 +151,32 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [performanceSettings] = useState<PerformanceSettings>(DEFAULT_PERFORMANCE_SETTINGS);
   const [extendedSettings, setExtendedSettings] = useState<ExtendedPerformanceSettings>({
     useSymmetricGrid: true,
-    maxComputationResults: 5000,
+    maxComputationResults: 500000, // Compute all data, limit display separately
     gpuAcceleration: DEFAULT_GPU_SETTINGS,
     cpuSettings: DEFAULT_CPU_SETTINGS
   });
   
   // Settings modal state
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+
+  // Memory optimization settings
+  const [visibleResultsLimit, setVisibleResultsLimit] = useState(100000); // Increased limit for comprehensive data analysis
+  const [memoryOptimizationEnabled, setMemoryOptimizationEnabled] = useState(true);
+
+  // SRD upload state
+  const [, setSrdUploadMessage] = useState('');
+
+  // Streamlined parameter configuration manager - initialized with defaults to avoid circular deps
+  const [paramConfigManager] = useState(() => createParameterConfigManager({
+    gridSize: 9,
+    minFreq: 0.1,
+    maxFreq: 100000,
+    numPoints: 100,
+    maxVisibleResults: 1000,
+    memoryOptimizationEnabled: true
+  }));
+
+  // Parameter change subscription will be added after all state declarations
   
   // Use the new computation state hook
   const {
@@ -175,7 +196,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     maxVisualizationPoints,
     isUserControlledLimits,
     calculateEffectiveVisualizationLimit,
-    maxComputationResults, setMaxComputationResults,
+    // maxComputationResults, setMaxComputationResults, // Now using centralizedLimits instead
     resnormGroups, setResnormGroups,
     hiddenGroups, setHiddenGroups,
     logMessages,
@@ -189,15 +210,66 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     updateDefaultGridSize
   } = useComputationState(defaultGridSize);
 
+  // Handle master limit changes from settings modal (simplified version without status message)
+  const handleMasterLimitChange = useCallback((percentage: number) => {
+    console.log(`🎛️ Master limit changed to ${percentage}% (${Math.floor((percentage / 100) * Math.pow(gridSize, 5)).toLocaleString()} models)`);
+
+    // DEBUG: If percentage is around 58%, log where this is coming from
+    if (Math.abs(percentage - 58) < 1) {
+      console.error(`🔥 FOUND THE CULPRIT! Master limit being set to ${percentage}% - this explains the incomplete grid!`);
+      console.trace('Stack trace for 58% limit setting:');
+    }
+
+    const newLimits = centralizedLimits.updateMasterLimit(percentage);
+    setCentralizedLimits(newLimits);
+    setGlobalLimitsManager(newLimits);
+  }, [centralizedLimits, gridSize]);
+
   // Serialized computation manager for efficient memory storage
   const [serializedManager, setSerializedManager] = useState<SerializedComputationManager | null>(null);
 
-  // Initialize serialized computation manager when grid size changes
+  // SINGLE-CIRCUIT MEMORY MANAGEMENT: Only keep current circuit in memory
   useEffect(() => {
+    // Clear previous manager and force cleanup of all cached data
+    if (serializedManager) {
+      serializedManager.clearCaches();
+      console.log('🧹 Cleared previous SerializedComputationManager and all caches');
+    }
+
+    // Clear UI state to prevent memory accumulation across computations
+    setGridResults([]);
+    setResnormGroups([]);
+    setComputationSummary(null);
+
+    // Update centralized limits manager for new grid size
+    const newCentralizedLimits = CentralizedLimitsManager.fromGridSize(gridSize, centralizedLimits.masterLimitPercentage);
+    setCentralizedLimits(newCentralizedLimits);
+    setGlobalLimitsManager(newCentralizedLimits);
+    console.log(`🎛️ Updated centralized limits manager for grid ${gridSize} (${newCentralizedLimits.masterLimitPercentage}% = ${newCentralizedLimits.masterLimitResults.toLocaleString()} models)`);
+
+    // DEBUG: Check if the percentage is not 100%
+    if (newCentralizedLimits.masterLimitPercentage !== 100) {
+      console.warn(`⚠️ LIMITS DEBUG: Master limit is ${newCentralizedLimits.masterLimitPercentage}% instead of 100%! This explains incomplete grid generation.`);
+      console.log(`🔧 FIXING: Forcing master limit back to 100% to compute complete grid`);
+
+      // Force reset to 100% for complete grid computation
+      const fixedLimits = CentralizedLimitsManager.fromGridSize(gridSize, 100);
+      setCentralizedLimits(fixedLimits);
+      setGlobalLimitsManager(fixedLimits);
+      console.log(`✅ Fixed: Master limit reset to 100% (${fixedLimits.masterLimitResults.toLocaleString()} models)`);
+    }
+
+    // Create new optimized manager for current grid configuration
     const manager = createSerializedComputationManager(gridSize, 'standard');
     setSerializedManager(manager);
-    console.log('🚀 Initialized SerializedComputationManager for main pipeline');
-  }, [gridSize]);
+
+    const estimatedTraditionalMemory = Math.pow(gridSize, 5) * 4000 / (1024 * 1024);
+    const estimatedOptimizedMemory = Math.pow(gridSize, 5) * 61 / (1024 * 1024);
+    const reductionFactor = estimatedTraditionalMemory / estimatedOptimizedMemory;
+
+    console.log(`🚀 SINGLE-CIRCUIT MODE: New manager for ${gridSize}^5 grid`);
+    console.log(`📊 Memory optimization: ${estimatedTraditionalMemory.toFixed(1)}MB → ${estimatedOptimizedMemory.toFixed(1)}MB (${reductionFactor.toFixed(1)}x reduction)`);
+  }, [gridSize, centralizedLimits.masterLimitPercentage, setGridResults, setResnormGroups, setComputationSummary]);
 
   // Convert CircuitConfigurations to SavedProfiles format for backward compatibility
   const convertedProfiles = useMemo((): SavedProfile[] => {
@@ -343,7 +415,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   
   // Visualization settings - these are now passed to child components but setters not used
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   // Opacity level is now managed by UI settings
   const opacityLevel = uiSettings.opacityLevel;
   // Log scalar and opacity exponent are now managed by UI settings
@@ -454,6 +526,227 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     frequency_range: [0.1, 100000]
   });
   
+  // Subscribe to parameter changes for automatic UI synchronization
+  useEffect(() => {
+    const unsubscribe = paramConfigManager.subscribe((state, change) => {
+      if (change) {
+        console.log(`🔄 Parameter change detected: ${change.type}.${change.field}`);
+
+        // Auto-sync UI state with parameter manager
+        switch (change.type) {
+          case 'parameter':
+            if (JSON.stringify(state.parameters) !== JSON.stringify(parameters)) {
+              setParameters(state.parameters);
+            }
+            break;
+          case 'grid':
+            if (state.gridSize !== gridSize) {
+              setGridSize(state.gridSize);
+            }
+            break;
+          case 'frequency':
+            if (state.minFreq !== minFreq) setMinFreq(state.minFreq);
+            if (state.maxFreq !== maxFreq) setMaxFreq(state.maxFreq);
+            if (state.numPoints !== numPoints) setNumPoints(state.numPoints);
+            break;
+          case 'optimization':
+            if (state.maxVisibleResults !== visibleResultsLimit) {
+              setVisibleResultsLimit(state.maxVisibleResults);
+            }
+            if (state.memoryOptimizationEnabled !== memoryOptimizationEnabled) {
+              setMemoryOptimizationEnabled(state.memoryOptimizationEnabled);
+            }
+            break;
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [paramConfigManager, parameters, gridSize, minFreq, maxFreq, numPoints, visibleResultsLimit, memoryOptimizationEnabled]);
+
+  // Auto-save configuration when parameters are adjusted
+  useEffect(() => {
+    const autoSaveTimer = setTimeout(async () => {
+      // Only auto-save if we have an active config and the user is signed in
+      if (activeConfigId && sessionManagement.sessionState.userId) {
+        try {
+          console.log('💾 Auto-saving configuration changes...', {
+            activeConfigId,
+            parameters: Object.keys(parameters),
+            gridSize,
+            frequency: { min: minFreq, max: maxFreq, points: numPoints }
+          });
+
+          const success = await updateConfiguration(activeConfigId, {
+            circuitParameters: parameters,
+            gridSize,
+            minFreq,
+            maxFreq,
+            numPoints
+          });
+
+          if (success) {
+            console.log('✅ Configuration auto-saved successfully');
+
+            // Log activity with timestamp
+            const currentConfig = circuitConfigurations?.find(c => c.id === activeConfigId);
+            const activityMessage = `Auto-saved "${currentConfig?.name || 'Current Profile'}" - Parameters: ${Object.entries(parameters).map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(3) : v}`).join(', ')}, Grid: ${gridSize}^5, Freq: ${minFreq}-${maxFreq}Hz (${numPoints}pts)`;
+
+            // Update status with detailed info but don't spam
+            const timestamp = new Date().toLocaleTimeString();
+            updateStatusMessage(`[${timestamp}] Auto-saved configuration changes`);
+
+            console.log('📝 Activity logged:', activityMessage);
+          } else {
+            console.warn('⚠️ Configuration auto-save failed');
+            updateStatusMessage('⚠️ Auto-save failed - changes may be lost');
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error('❌ Auto-save error:', errorMsg, error);
+          updateStatusMessage(`❌ Auto-save failed: ${errorMsg}`);
+        }
+      }
+    }, 2000); // 2-second delay to avoid excessive saves during parameter adjustment
+
+    return () => clearTimeout(autoSaveTimer);
+  }, [parameters, gridSize, minFreq, maxFreq, numPoints, activeConfigId, sessionManagement.sessionState.userId, updateConfiguration, circuitConfigurations]);
+
+  // SRD Upload Handlers
+  const handleSRDUploaded = useCallback(async (manager: SerializedComputationManager, metadata: { title: string; totalResults: number; gridSize: number }) => {
+    try {
+      // Set the serialized manager as the active one
+      setSerializedManager(manager);
+
+      // Update grid size and frequency settings to match the SRD
+      setGridSize(metadata.gridSize);
+      // Extract frequency settings from manager config
+      const configData = manager.config;
+      if (configData.frequencyPreset) {
+        // Update frequency settings based on preset
+        switch (configData.frequencyPreset) {
+          case 'Standard (0.1-100K Hz)':
+            setMinFreq(0.1);
+            setMaxFreq(100000);
+            break;
+          case 'Extended (0.01-1M Hz)':
+            setMinFreq(0.01);
+            setMaxFreq(1000000);
+            break;
+          case 'High Resolution (1-10K Hz)':
+            setMinFreq(1);
+            setMaxFreq(10000);
+            break;
+        }
+      }
+
+      // Generate ModelSnapshots for visualization using intelligent limits
+      const smartLimit = calculateEffectiveVisualizationLimit(metadata.totalResults);
+      const effectiveLimit = Math.min(smartLimit, metadata.totalResults);
+      const modelSnapshots = manager.generateModelSnapshots(effectiveLimit);
+      setGridResults(modelSnapshots);
+
+      // Get first model parameters as reference circuit parameters
+      if (modelSnapshots.length > 0) {
+        const bestModel = modelSnapshots[0]; // First model should be best (lowest resnorm)
+        setParameters(bestModel.parameters);
+      }
+
+      // Update statistics
+      setTotalGridPoints(Math.pow(metadata.gridSize, 5));
+      setActualComputedPoints(metadata.totalResults);
+
+      // Auto-save as profile with file icon indicator
+      const profileName = `📁 ${metadata.title}`;
+      const profileDescription = `Loaded from SRD file: ${metadata.totalResults.toLocaleString()} precomputed results (Grid: ${metadata.gridSize}^5)`;
+
+      // Schedule profile saving for after this callback completes (only if user is authenticated)
+      setTimeout(async () => {
+        if (!sessionManagement.sessionState.userId) {
+          console.log('💾 SRD upload: User not authenticated, skipping auto-save profile creation');
+          updateStatusMessage('SRD loaded successfully - sign in to save configurations');
+          return;
+        }
+
+        try {
+          const savedProfileId = await handleSaveProfile(profileName, profileDescription, true); // Force new profile
+          if (savedProfileId) {
+            // Set as active config to maintain tagged models and other data
+            setActiveConfigId(savedProfileId);
+            console.log(`💾 Auto-saved SRD config as profile: ${savedProfileId}`);
+          }
+        } catch (saveError) {
+          console.warn('Failed to auto-save SRD profile:', saveError);
+        }
+      }, 100); // Small delay to ensure handleSaveProfile is available
+
+      // Update status
+      const memoryReduction = manager.getStorageStats().reductionFactor;
+      updateStatusMessage(`🚀 SRD uploaded: "${metadata.title}" - ${modelSnapshots.length.toLocaleString()}/${metadata.totalResults.toLocaleString()} models loaded (${memoryReduction.toFixed(1)}x memory optimized)`);
+      setSrdUploadMessage(`Successfully loaded ${metadata.totalResults.toLocaleString()} results from "${metadata.title}"`);
+
+      // Clear any previous errors
+      setGridError('');
+
+      console.log(`📥 SRD Upload Success:`, {
+        title: metadata.title,
+        totalResults: metadata.totalResults,
+        gridSize: metadata.gridSize,
+        visibleModels: modelSnapshots.length,
+        memoryReduction: memoryReduction.toFixed(1) + 'x',
+        referenceParams: modelSnapshots[0]?.parameters
+      });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to process uploaded SRD data';
+      setGridError(errorMessage);
+      updateStatusMessage(`❌ SRD upload failed: ${errorMessage}`);
+      setSrdUploadMessage('');
+      console.error('SRD upload processing error:', error);
+    }
+  }, [visibleResultsLimit, setGridResults, setTotalGridPoints, setActualComputedPoints, setGridError, updateStatusMessage, setGridSize, setMinFreq, setMaxFreq, setParameters]); // handleSaveProfile used in setTimeout closure intentionally not in deps
+
+  const handleSRDUploadError = useCallback((error: string) => {
+    setGridError(`SRD Upload Error: ${error}`);
+    updateStatusMessage(`❌ SRD upload error: ${error}`);
+    setSrdUploadMessage('');
+    console.error('SRD upload error:', error);
+  }, [setGridError, updateStatusMessage]);
+
+  // SRD Download Handler
+  const handleSRDDownload = useCallback(() => {
+    if (!serializedManager) {
+      updateStatusMessage('❌ No computation data available for download');
+      return;
+    }
+
+    const exportCheck = serializedManager.canExport();
+    if (!exportCheck.canExport) {
+      updateStatusMessage(`❌ Cannot export: ${exportCheck.reason}`);
+      return;
+    }
+
+    try {
+      const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+      const filename = `circuit-analysis-${gridSize}x5-${timestamp}`;
+      const title = configurationName || `Circuit Analysis ${gridSize}^5 Grid`;
+
+      serializedManager.exportToSRD(filename, {
+        title,
+        description: `Electrochemical impedance spectroscopy analysis results from ${gridSize}^5 parameter grid computation`,
+        author: user?.email || 'SpideyPlot User'
+      });
+
+      const preview = serializedManager.getExportPreview();
+      updateStatusMessage(`📥 SRD downloaded: ${filename}.srd (${preview.estimatedFileSize}, ${preview.resultCount.toLocaleString()} results)`);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Download failed';
+      updateStatusMessage(`❌ SRD download failed: ${errorMessage}`);
+      console.error('SRD download error:', error);
+    }
+  }, [serializedManager, gridSize, configurationName, user?.email, updateStatusMessage]);
+
   // Helper function to generate unique circuit names
   const generateUniqueCircuitName = useCallback((baseName: string): string => {
     if (!circuitConfigurations) return baseName;
@@ -478,64 +771,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return uniqueName;
   }, [circuitConfigurations]);
   
-  // Function to create a new circuit with standard configuration
-  const handleNewCircuit = useCallback(async () => {
-    // Clear any existing results
-    resetComputationState();
-    
-    // Reset to requested default configuration
-    const newParameters = {
-      Rsh: 870,
-      Ra: 7500,
-      Ca: 0.0000042000000000000004,
-      Rb: 6210,
-      Cb: 0.0000035,
-      frequency_range: [0.1, 100000] as [number, number]
-    };
-    
-    setParameters(newParameters);
-    
-    // Reset frequency settings
-    setMinFreq(0.1);
-    setMaxFreq(100000);
-    setNumPoints(100);
-    
-    // Reset grid size to user's default
-    setGridSize(defaultGridSize);
-    
-    // Generate unique name for new circuit
-    const timestamp = new Date().toLocaleString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-    const baseCircuitName = `New Circuit ${timestamp}`;
-    const uniqueCircuitName = generateUniqueCircuitName(baseCircuitName);
-    setConfigurationName(uniqueCircuitName);
-    
-    // Automatically create and select the new circuit profile
-    try {
-      console.log('🆕 Creating new circuit profile automatically...');
-      const newProfileId = await handleSaveProfile(
-        uniqueCircuitName, 
-        'Last action: New circuit configuration created',
-        true  // forceNew: true to ensure a new circuit is created
-      );
-      
-      if (newProfileId) {
-        console.log('New circuit profile created:', newProfileId);
-        updateStatusMessage(`New circuit "${uniqueCircuitName}" created and selected - ready to customize and compute`);
-      } else {
-        console.error('Failed to create new circuit profile');
-        updateStatusMessage('New circuit created but failed to save profile - you can save manually');
-      }
-    } catch (error) {
-      console.error('Error creating new circuit profile:', error);
-      updateStatusMessage('New circuit created - profile creation failed, you can save manually');
-    }
-  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName, defaultGridSize]);
+  // Moved handleNewCircuit after handleSaveProfile definition
   
   // Compute grid function
   const handleCompute = useCallback(async () => {
@@ -590,6 +826,18 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       updateStatusMessage(`Starting grid computation with ${gridSize}x${gridSize} grid...`);
 
+      // AGGRESSIVE DEBUG: Check and force 100% limit before computation
+      const expectedFullGrid = Math.pow(gridSize, 5);
+      const masterLimitToUse = centralizedLimits.masterLimitPercentage !== 100 ?
+        expectedFullGrid : // Force full grid if not 100%
+        centralizedLimits.masterLimitResults;
+
+      console.log(`🔥 COMPUTATION DEBUG: masterLimitPercentage=${centralizedLimits.masterLimitPercentage}%, masterLimitResults=${centralizedLimits.masterLimitResults.toLocaleString()}, expected=${expectedFullGrid.toLocaleString()}, using=${masterLimitToUse.toLocaleString()}`);
+
+      if (centralizedLimits.masterLimitPercentage !== 100) {
+        console.error(`🚨 FORCING 100% COMPUTATION: Detected ${centralizedLimits.masterLimitPercentage}% limit, forcing full ${expectedFullGrid.toLocaleString()} results`);
+      }
+
       const hybridResult = await hybridComputeManager.computeGridHybrid(
         parameters,
         gridSize,
@@ -609,7 +857,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           setGridError(error);
           updateStatusMessage(`Computation error: ${error}`);
         },
-        maxComputationResults
+        masterLimitToUse // Force full computation if needed
       );
       
       const results = hybridResult.results;
@@ -625,27 +873,50 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           isReference: false
         }));
 
-        // Store in serialized format for efficient memory usage
-        if (serializedManager) {
+        // MEMORY OPTIMIZATION: Ultra-compact serialized storage with lazy loading
+        if (serializedManager && memoryOptimizationEnabled) {
+          // Clear previous results to prevent memory accumulation
+          serializedManager.clearCaches();
+
+          // Store results in ultra-compact format (98% memory reduction)
           const serializedCount = serializedManager.storeResults(processedResults, 'standard');
-          console.log(`🗜️ Stored ${serializedCount} results in compressed format`);
-          
-          // Generate ModelSnapshots from serialized data for visualization
-          const modelSnapshots = serializedManager.generateModelSnapshots();
+          const stats = serializedManager.getStorageStats();
+
+          console.log(`🚀 MEMORY OPTIMIZED: ${serializedCount} results stored`);
+          console.log(`📊 Memory: ${stats.traditionalSizeMB.toFixed(1)}MB → ${stats.serializedSizeMB.toFixed(1)}MB (${stats.reductionFactor.toFixed(1)}x reduction)`);
+
+          // Generate results using intelligent visualization limits
+          const smartLimit = calculateEffectiveVisualizationLimit(serializedCount);
+          const effectiveLimit = Math.min(smartLimit, serializedCount);
+          const modelSnapshots = serializedManager.generateModelSnapshots(effectiveLimit);
+
           setGridResults(modelSnapshots);
-          
-          updateStatusMessage(`Computation completed! Generated ${modelSnapshots.length} models using compressed storage (${Math.round((serializedCount/processedResults.length)*100)}% compression).`);
+
+          // Force garbage collection of large arrays
+          processedResults.length = 0;
+          console.log(`🧹 Cleared ${processedResults.length} large arrays for memory cleanup`);
+
+          updateStatusMessage(`✅ Optimized computation: ${effectiveLimit}/${serializedCount} models (${stats.reductionFactor.toFixed(1)}x memory saved)`);
         } else {
-          // Fallback to direct storage if serialized manager not ready
-          console.warn('⚠️ SerializedManager not ready, using direct storage');
-          const modelSnapshots = processedResults.map((result, index) => mapBackendMeshToSnapshot(result, index));
+          // Legacy mode or disabled optimization
+          console.warn('⚠️ Using legacy memory model - consider enabling optimization for large grids');
+          const smartLimit = calculateEffectiveVisualizationLimit(processedResults.length);
+          const limitedResults = processedResults.slice(0, Math.min(smartLimit, processedResults.length));
+          const modelSnapshots = limitedResults.map((result, index) => mapBackendMeshToSnapshot(result, index));
           setGridResults(modelSnapshots);
-          updateStatusMessage(`Computation completed! Generated ${modelSnapshots.length} models ready for visualization.`);
+          updateStatusMessage(`Legacy storage: ${modelSnapshots.length} models loaded (memory optimization disabled)`);
         }
         
         // Update computation statistics
-        setTotalGridPoints(Math.pow(gridSize, 5));
+        const expectedGridPoints = Math.pow(gridSize, 5);
+        setTotalGridPoints(expectedGridPoints);
         setActualComputedPoints(results.length);
+
+        console.log(`🏁 COMPUTATION COMPLETE: gridSize=${gridSize}, expected=${expectedGridPoints}, computed=${results.length}, previous_actualComputedPoints=${actualComputedPoints}`);
+
+        if (results.length !== actualComputedPoints) {
+          console.warn(`⚠️ MISMATCH: Final results (${results.length}) != generated count (${actualComputedPoints})`);
+        }
         
         // Grid parameter arrays removed - functionality moved to visualization layer
 
@@ -705,10 +976,38 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+      // Enhanced error tracking with memory context
+      const memoryInfo = {
+        gridSize,
+        totalPoints: Math.pow(gridSize, 5),
+        estimatedMemory: Math.pow(gridSize, 5) * 800 / (1024 * 1024),
+        memoryOptimization: memoryOptimizationEnabled,
+        timestamp: new Date().toISOString()
+      };
+
+      console.error('❌ Computation Error Details:', {
+        error: errorMessage,
+        memoryContext: memoryInfo,
+        parameters,
+        serializedManagerAvailable: !!serializedManager
+      });
+
+      // Clear any partial results to prevent memory leaks
+      if (serializedManager) {
+        serializedManager.clearCaches();
+      }
+
       setGridError(errorMessage);
-      updateStatusMessage(`Computation failed: ${errorMessage}`);
+      updateStatusMessage(`⚠️ Computation failed: ${errorMessage} (Grid: ${gridSize}^5, Est. Memory: ${memoryInfo.estimatedMemory.toFixed(1)}MB)`);
     } finally {
       setIsComputingGrid(false);
+
+      // Force garbage collection attempt
+      if (typeof window !== 'undefined' && window.gc) {
+        window.gc();
+        console.log('🧹 Forced garbage collection after computation');
+      }
     }
   }, [
     isComputingGrid, gridSize, parameters, minFreq, maxFreq, numPoints,
@@ -717,7 +1016,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setGridResults, setTotalGridPoints, setActualComputedPoints,
     savedProfilesState.selectedProfile, profileActions,
     updateStatusMessage, configurationName, extendedSettings,
-    hybridComputeManager, maxComputationResults
+    hybridComputeManager, centralizedLimits.masterLimitResults
   ]);
   
 
@@ -725,24 +1024,49 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const handleToggleMultiSelect = useCallback(() => {
     setIsMultiSelectMode(!isMultiSelectMode);
     setSelectedCircuits([]);
-  }, [isMultiSelectMode, setIsMultiSelectMode, setSelectedCircuits]);
+  }, [isMultiSelectMode]);
   
-  const handleSelectCircuit = useCallback((configId: string) => {
+  const handleSelectCircuit = useCallback(async (configId: string) => {
     if (isMultiSelectMode) {
-      const newSelectedCircuits = selectedCircuits.includes(configId) 
+      const newSelectedCircuits = selectedCircuits.includes(configId)
         ? selectedCircuits.filter(id => id !== configId)
         : [...selectedCircuits, configId];
       setSelectedCircuits(newSelectedCircuits);
     } else {
-      
+      // Auto-save current profile before switching (if there's an active one)
+      if (activeConfigId && activeConfigId !== configId && sessionManagement.sessionState.userId) {
+        try {
+          console.log('💾 Auto-saving current profile before switching...', activeConfigId);
+          const success = await updateConfiguration(activeConfigId, {
+            circuitParameters: parameters,
+            gridSize,
+            minFreq,
+            maxFreq,
+            numPoints
+          });
+
+          if (success) {
+            console.log('✅ Profile auto-saved before switch');
+            updateStatusMessage(`Auto-saved changes to current profile before switching`);
+          } else {
+            console.warn('⚠️ Failed to auto-save before switching - proceeding anyway');
+            updateStatusMessage(`⚠️ Could not auto-save before switching`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          console.warn('⚠️ Failed to auto-save before profile switch:', errorMsg);
+          updateStatusMessage(`⚠️ Auto-save failed: ${errorMsg}`);
+        }
+      }
+
       // Normal single selection behavior for regular profiles
       // Clear existing grid results when switching configurations
       resetComputationState();
-      
+
       // Set active configuration in both hooks
       setActiveConfiguration(configId);
       sessionManagement.actions.setActiveCircuitConfig(configId);
-      
+
       const config = circuitConfigurations?.find(c => c.id === configId);
       if (config) {
         // Load configuration settings into current state
@@ -752,20 +1076,32 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         setMaxFreq(config.maxFreq);
         setNumPoints(config.numPoints);
         setParameters(config.circuitParameters);
-        
+
         // Auto-fill configuration name with config name
         setConfigurationName(config.name);
-        
-        // Update frequencies based on loaded settings
-        updateFrequencies(config.minFreq, config.maxFreq, config.numPoints);
-        
+
+        // Update frequencies based on loaded settings (direct update instead of using updateFrequencies)
+        setMinFreq(config.minFreq);
+        setMaxFreq(config.maxFreq);
+        setNumPoints(config.numPoints);
+
         // Mark parameters as changed to enable recompute
         setParameterChanged(true);
-        
+
         updateStatusMessage(`Loaded configuration: ${config.name} - Previous grid data cleared, ready to compute`);
+
+        console.log('🔄 Loaded profile settings:', {
+          name: config.name,
+          parameters: config.circuitParameters,
+          gridSize: config.gridSize,
+          frequency: { min: config.minFreq, max: config.maxFreq, points: config.numPoints }
+        });
+      } else {
+        console.warn('⚠️ Configuration not found:', configId);
+        updateStatusMessage(`⚠️ Configuration not found`);
       }
     }
-  }, [isMultiSelectMode, selectedCircuits, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations, setGridSize, setMinFreq, setMaxFreq, setNumPoints, setParameters, setParameterChanged, updateStatusMessage, setIsMultiSelectMode, setSelectedCircuits, convertedProfiles, updateDefaultGridSize]);
+  }, [isMultiSelectMode, selectedCircuits, activeConfigId, sessionManagement.sessionState.userId, updateConfiguration, parameters, gridSize, minFreq, maxFreq, numPoints, resetComputationState, setActiveConfiguration, sessionManagement.actions, circuitConfigurations]);
   
   const handleBulkDelete = useCallback(async () => {
     if (selectedCircuits.length === 0) return;
@@ -797,7 +1133,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     } else {
       updateStatusMessage('Failed to delete selected circuits');
     }
-  }, [selectedCircuits, activeConfigId, resetComputationState, setActiveConfiguration, updateStatusMessage, deleteMultipleConfigurations]);
+  }, [selectedCircuits, activeConfigId, deleteMultipleConfigurations]);
   
   // Current memory usage for performance monitoring
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -809,8 +1145,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return 0;
   }, []);
   
-  // Initialize parameters
+  // Initialize parameters only when no active profile is loaded
   useEffect(() => {
+    // Only initialize defaults if no active profile is selected
+    if (activeConfigId || sessionManagement.sessionState.activeCircuitConfig) {
+      console.log('🔄 Skipping parameter initialization - active profile loaded:', activeConfigId || sessionManagement.sessionState.activeCircuitConfig);
+      return;
+    }
+
     // Calculate 50% values for each parameter range
     const rsRange = { min: 10, max: 10000 };
     const raRange = { min: 10, max: 10000 };
@@ -824,7 +1166,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const ca50 = caRange.min + (caRange.max - caRange.min) * 0.5;
     const cb50 = cbRange.min + (cbRange.max - cbRange.min) * 0.5;
 
-    // Set default starting values at 50% of ranges
+    console.log('🏁 Initializing default parameters (no active profile)');
     setParameters({
       Rsh: rs50,
       Ra: ra50,
@@ -833,10 +1175,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       Cb: cb50,
       frequency_range: [minFreq, maxFreq]
     });
-    
-    // Initial reference params will be set after the state updates
+
     updateStatusMessage('Initialized with default parameters at 50% of ranges');
-  }, [updateStatusMessage, minFreq, maxFreq]);
+  }, [updateStatusMessage, minFreq, maxFreq, activeConfigId, sessionManagement.sessionState.activeCircuitConfig]);
 
   // Update reference parameters when slider values are initialized
   useEffect(() => {
@@ -1389,7 +1730,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             console.error('Profile generation error:', error);
             throw new Error(`Worker error: ${error}`);
           },
-          maxComputationResults
+          centralizedLimits.masterLimitResults
         ),
         // 5 minute timeout to prevent infinite hangs
         new Promise<never>((_, reject) => 
@@ -1454,7 +1795,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         return [];
       }
     }
-  }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig, extendedSettings, hybridComputeManager, maxComputationResults]);
+  }, [hybridComputeManager.computeGridHybrid, updateStatusMessage, generateSyntheticProfileData, resnormConfig, extendedSettings, hybridComputeManager, centralizedLimits.masterLimitResults]);
 
   // Updated grid computation using Web Workers for parallel processing
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -1588,6 +1929,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             startPhase('grid-generation', 'Generating parameter space grid combinations');
           }
           if (progress.generated && progress.generated > 0) {
+            console.log(`📊 GENERATION DEBUG: generated=${progress.generated}, total=${progress.total}, processed=${progress.processed || 'unknown'}, skipped=${progress.skipped || 'unknown'}`);
             setActualComputedPoints(progress.generated);
             const skipped = progress.skipped || (progress.total - progress.generated);
             setSkippedPoints(skipped);
@@ -2087,8 +2429,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     console.log('💾 Starting circuit configuration save:', { name, description, parameters, gridSize, minFreq, maxFreq, numPoints, isAutoSave, forceNew });
     
     if (!sessionManagement.sessionState.userId) {
-      console.error('❌ No user ID for saving circuit configuration');
-      updateStatusMessage('Please sign in to save circuit configurations');
+      console.log('💾 No user ID for saving circuit configuration - user not authenticated');
+      if (!isAutoSave) {
+        // Only show message for manual saves, not auto-saves
+        updateStatusMessage('Please sign in to save circuit configurations');
+      }
       return null;
     }
 
@@ -2108,10 +2453,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         });
         
         if (success) {
-          updateStatusMessage(`✅ Circuit configuration "${name}" updated`);
+          // Enhanced activity logging for updates
+          const timestamp = new Date().toLocaleTimeString();
+          const activityDetails = `Updated "${name}" - Grid: ${gridSize}^5, Freq: ${minFreq}-${maxFreq}Hz (${numPoints}pts), Parameters: Rs=${parameters.Rsh?.toFixed(1)}, Ra=${parameters.Ra?.toFixed(1)}, Ca=${(parameters.Ca * 1e6)?.toFixed(2)}µF, Rb=${parameters.Rb?.toFixed(1)}, Cb=${(parameters.Cb * 1e6)?.toFixed(2)}µF`;
+
+          updateStatusMessage(`[${timestamp}] ✅ Updated "${name}" successfully`);
+          console.log('📝 Profile Update Activity:', activityDetails);
           return activeConfigId;
         } else {
-          updateStatusMessage(`Failed to update configuration "${name}"`);
+          updateStatusMessage(`❌ Failed to update configuration "${name}"`);
           return null;
         }
       } catch (error) {
@@ -2137,7 +2487,11 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         });
         
         if (success) {
-          updateStatusMessage(`Auto-saved to configuration`);
+          // Enhanced activity logging for auto-saves
+          const timestamp = new Date().toLocaleTimeString();
+          const currentConfig = circuitConfigurations?.find(c => c.id === activeConfigId);
+          updateStatusMessage(`[${timestamp}] 💾 Auto-saved "${currentConfig?.name || 'Current Profile'}"`);
+          console.log('📝 Manual Save Activity: Auto-saved existing profile');
           return activeConfigId;
         }
       } catch (error) {
@@ -2166,7 +2520,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         console.log('✅ Circuit configuration created:', newConfig.id);
         // Set as active and sync with session
         await sessionManagement.actions.setActiveCircuitConfig(newConfig.id);
-        updateStatusMessage(`Configuration "${newConfig.name}" saved successfully`);
+        // Enhanced activity logging for new profile creation
+        const timestamp = new Date().toLocaleTimeString();
+        const activityDetails = `Created "${newConfig.name}" - Grid: ${gridSize}^5, Freq: ${minFreq}-${maxFreq}Hz (${numPoints}pts), Parameters: Rs=${parameters.Rsh?.toFixed(1)}, Ra=${parameters.Ra?.toFixed(1)}, Ca=${(parameters.Ca * 1e6)?.toFixed(2)}µF, Rb=${parameters.Rb?.toFixed(1)}, Cb=${(parameters.Cb * 1e6)?.toFixed(2)}µF`;
+
+        updateStatusMessage(`[${timestamp}] 🆕 Created "${newConfig.name}" successfully`);
+        console.log('📝 New Profile Activity:', activityDetails);
         return newConfig.id;
       } else {
         console.error('❌ Configuration creation returned null');
@@ -2179,6 +2538,65 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return null;
     }
   }, [gridSize, minFreq, maxFreq, numPoints, parameters, updateStatusMessage, activeConfigId, createConfiguration, updateConfiguration, sessionManagement, generateUniqueCircuitName]);
+
+  // Function to create a new circuit with standard configuration (moved after handleSaveProfile)
+  const handleNewCircuit = useCallback(async () => {
+    // Clear any existing results
+    resetComputationState();
+
+    // Reset to requested default configuration
+    const newParameters = {
+      Rsh: 870,
+      Ra: 7500,
+      Ca: 0.0000042000000000000004,
+      Rb: 6210,
+      Cb: 0.0000035,
+      frequency_range: [0.1, 100000] as [number, number]
+    };
+
+    setParameters(newParameters);
+
+    // Reset frequency settings
+    setMinFreq(0.1);
+    setMaxFreq(100000);
+    setNumPoints(100);
+
+    // Reset grid size to user's default
+    setGridSize(defaultGridSize);
+
+    // Generate unique name for new circuit
+    const timestamp = new Date().toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    const baseCircuitName = `New Circuit ${timestamp}`;
+    const uniqueCircuitName = generateUniqueCircuitName(baseCircuitName);
+    setConfigurationName(uniqueCircuitName);
+
+    // Automatically create and select the new circuit profile
+    try {
+      console.log('🆕 Creating new circuit profile automatically...');
+      const newProfileId = await handleSaveProfile(
+        uniqueCircuitName,
+        'Last action: New circuit configuration created',
+        true  // forceNew: true to ensure a new circuit is created
+      );
+
+      if (newProfileId) {
+        console.log('New circuit profile created:', newProfileId);
+        updateStatusMessage(`New circuit "${uniqueCircuitName}" created and selected - ready to customize and compute`);
+      } else {
+        console.error('Failed to create new circuit profile');
+        updateStatusMessage('New circuit created but failed to save profile - you can save manually');
+      }
+    } catch (error) {
+      console.error('Error creating new circuit profile:', error);
+      updateStatusMessage('New circuit created - profile creation failed, you can save manually');
+    }
+  }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName, defaultGridSize, handleSaveProfile]);
 
   // Handle configuration name changes with auto-save
   const handleConfigurationNameChange = useCallback(async (newName: string) => {
@@ -2624,21 +3042,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
                 </svg>
                 <span>Model</span>
-              </div>
-            </button>
-            <button 
-              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'data' 
-                  ? 'bg-neutral-800 text-white' 
-                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('data')}
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span>Data Table</span>
               </div>
             </button>
             <button 
@@ -3146,17 +3549,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   referenceModel={referenceModel}
                 />
               </div>
-            ) : visualizationTab === 'data' ? (
-              <div className="h-full overflow-y-auto">
-                <NPZManager 
-                  results={gridResults}
-                  onLoadDataset={(loadedResults) => {
-                    setGridResults(loadedResults);
-                    updateStatusMessage(`Loaded ${loadedResults.length.toLocaleString()} results from dataset`);
-                  }}
-                  className="h-full"
-                />
-              </div>
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
@@ -3224,6 +3616,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     onGroupPortionChange={(value) => setStaticRenderSettings({...staticRenderSettings, groupPortion: value})}
                     taggedModels={taggedModels}
                     onModelTag={handleModelTag}
+                    onSRDDownload={handleSRDDownload}
+                    canDownloadSRD={!!serializedManager && serializedManager.canExport().canExport}
+                    serializedManager={serializedManager || undefined}
+                    enablePagination={!!serializedManager && memoryOptimizationEnabled}
                   />
                 </div>
               ) : (
@@ -3248,8 +3644,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       configurationName={configurationName}
                       onConfigurationNameChange={handleConfigurationNameChange}
                       selectedProfileId={savedProfilesState.selectedProfile}
-                      maxComputationResults={maxComputationResults}
-                      onMaxComputationResultsChange={setMaxComputationResults}
+                      maxComputationResults={centralizedLimits.masterLimitResults}
+                      onMaxComputationResultsChange={(value) => {
+                        const percentage = (value / Math.pow(gridSize, 5)) * 100;
+                        handleMasterLimitChange(percentage);
+                      }}
+                      onSRDUploaded={handleSRDUploaded}
+                      onUploadError={handleSRDUploadError}
                     />
                   </div>
                 </div>
@@ -3272,14 +3673,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
 
       {/* Settings Modal */}
-      <SettingsModal
+      <SimplifiedSettingsModal
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
         onSettingsChange={setExtendedSettings}
-        optimizationConfig={optimizationConfig}
-        onOptimizationConfigChange={handleOptimizationConfigChange}
-        optimizationStats={optimizedComputeManager.getOptimizationStats() || undefined}
+        gridSize={gridSize}
+        totalPossibleResults={totalGridPoints}
         isComputing={isComputingGrid}
+        centralizedLimits={centralizedLimits}
+        onMasterLimitChange={handleMasterLimitChange}
       />
 
       {/* Authentication Modal */}

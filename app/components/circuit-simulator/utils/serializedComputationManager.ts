@@ -10,6 +10,7 @@ import { BackendMeshPoint, ModelSnapshot } from '../types';
 import { CircuitParameters } from '../types/parameters';
 import { ConfigSerializer, ConfigId, SerializedCircuitParameters } from './configSerializer';
 import { FrequencySerializer, FrequencyConfig } from './frequencySerializer';
+import { SRDFileHandler, SRDMetadata } from './srdFileHandler';
 
 // Serialized computation result - ultra-compact storage
 interface SerializedResult {
@@ -185,11 +186,50 @@ export class SerializedComputationManager {
   }
   
   /**
+   * Generate paginated ModelSnapshots for efficient browsing
+   */
+  generatePaginatedModelSnapshots(pageNumber: number, pageSize: number = 1000): {
+    modelSnapshots: ModelSnapshot[];
+    pagination: {
+      totalPages: number;
+      currentPage: number;
+      hasNextPage: boolean;
+      hasPrevPage: boolean;
+      totalResults: number;
+      resnormRange: { min: number; max: number; avgCurrentPage: number };
+      pageInfo: { startIndex: number; endIndex: number };
+    };
+  } {
+    const paginatedData = this.getPaginatedResults(pageNumber, pageSize);
+    const modelSnapshots = this.generateModelSnapshotsFromResults(paginatedData.results);
+
+    return {
+      modelSnapshots,
+      pagination: {
+        totalPages: paginatedData.totalPages,
+        currentPage: paginatedData.currentPage,
+        hasNextPage: paginatedData.hasNextPage,
+        hasPrevPage: paginatedData.hasPrevPage,
+        totalResults: paginatedData.totalResults,
+        resnormRange: paginatedData.resnormRange,
+        pageInfo: paginatedData.pageInfo
+      }
+    };
+  }
+
+  /**
    * Generate ModelSnapshot[] for spider plot rendering - procedural reconstruction
    */
   generateModelSnapshots(maxResults?: number): ModelSnapshot[] {
+    const results = maxResults ? this.getBestResults(maxResults) : this.results;
+    return this.generateModelSnapshotsFromResults(results);
+  }
+
+  /**
+   * Helper method to generate ModelSnapshots from SerializedResult[]
+   */
+  private generateModelSnapshotsFromResults(results: SerializedResult[]): ModelSnapshot[] {
     const startTime = Date.now();
-    const results = maxResults ? this.results.slice(0, maxResults) : this.results;
     const modelSnapshots: ModelSnapshot[] = [];
     
     let cacheHits = 0;
@@ -333,7 +373,7 @@ export class SerializedComputationManager {
   }
   
   /**
-   * Get paginated results with global resnorm ordering
+   * Get paginated results with global resnorm ordering and enhanced metadata
    */
   getPaginatedResults(pageNumber: number, pageSize: number = 100): {
     results: SerializedResult[];
@@ -342,6 +382,8 @@ export class SerializedComputationManager {
     currentPage: number;
     hasNextPage: boolean;
     hasPrevPage: boolean;
+    resnormRange: { min: number; max: number; avgCurrentPage: number };
+    pageInfo: { startIndex: number; endIndex: number };
   } {
     const startTime = Date.now();
     
@@ -361,13 +403,32 @@ export class SerializedComputationManager {
     const duration = Date.now() - startTime;
     console.log(`📄 Page ${pageNumber}/${totalPages}: ${pageResults.length} results in ${duration}ms`);
     
+    // Calculate resnorm statistics for current page
+    const currentPageResnorms = pageResults.map(r => r.resnorm);
+    const avgCurrentPage = currentPageResnorms.length > 0
+      ? currentPageResnorms.reduce((sum, val) => sum + val, 0) / currentPageResnorms.length
+      : 0;
+
+    const allResnorms = this.sortedResults.map(r => r.resnorm);
+    const minResnorm = allResnorms[0] || 0;
+    const maxResnorm = allResnorms[allResnorms.length - 1] || 0;
+
     return {
       results: pageResults,
       totalPages,
       totalResults,
       currentPage: pageNumber,
       hasNextPage: pageNumber < totalPages,
-      hasPrevPage: pageNumber > 1
+      hasPrevPage: pageNumber > 1,
+      resnormRange: {
+        min: minResnorm,
+        max: maxResnorm,
+        avgCurrentPage
+      },
+      pageInfo: {
+        startIndex,
+        endIndex: endIndex - 1
+      }
     };
   }
   
@@ -402,6 +463,155 @@ export class SerializedComputationManager {
     this.sortedResults = [];
     this.resultsSorted = false;
     console.log('🧹 All caches cleared including pagination cache');
+  }
+
+  /**
+   * Export all data to SRD file format
+   */
+  exportToSRD(filename: string, metadata: Partial<SRDMetadata> & Pick<SRDMetadata, 'title'>): void {
+    const startTime = Date.now();
+
+    try {
+      // Create SRD data structure
+      const srdData = SRDFileHandler.createSRDData(this.results, {
+        ...metadata,
+        gridSize: this.config.gridSize,
+        frequencyPreset: this.config.frequencyPreset,
+        description: metadata.description || `Serialized computation results from ${this.config.gridSize}^5 grid`,
+        author: metadata.author || 'SpideyPlot User',
+        tags: metadata.tags || ['circuit-analysis', 'eis', 'resnorm-data']
+      });
+
+      // Download the file
+      SRDFileHandler.download(srdData, filename);
+
+      const duration = Date.now() - startTime;
+      const stats = this.getStorageStats();
+
+      console.log(`📤 SRD Export completed in ${duration}ms`);
+      console.log(`📊 Exported ${this.results.length.toLocaleString()} results (${stats.reductionFactor.toFixed(1)}x compression)`);
+
+    } catch (error) {
+      console.error('❌ SRD export failed:', error);
+      throw new Error(`Failed to export SRD: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Import data from SRD file and create new manager instance
+   */
+  static async importFromSRD(file: File): Promise<SerializedComputationManager> {
+    const startTime = Date.now();
+
+    try {
+      // Upload and validate SRD file
+      const srdData = await SRDFileHandler.upload(file);
+
+      // Create new manager with imported configuration
+      const manager = new SerializedComputationManager({
+        gridSize: srdData.metadata.gridSize,
+        frequencyPreset: srdData.metadata.frequencyPreset,
+        cacheEnabled: true,
+        maxCacheSize: 10000
+      });
+
+      // Load serialized results
+      manager.results = [...srdData.serializedResults];
+      manager.resultsSorted = false;
+      manager.sortedResults = [];
+
+      const duration = Date.now() - startTime;
+
+      console.log(`📥 SRD Import completed in ${duration}ms`);
+      console.log(`📊 Imported ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
+      console.log(`🔍 Grid: ${srdData.metadata.gridSize}^5, Frequency: ${srdData.metadata.frequencyPreset}`);
+
+      return manager;
+
+    } catch (error) {
+      console.error('❌ SRD import failed:', error);
+      throw new Error(`Failed to import SRD: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Import SRD data into existing manager (replaces current data)
+   */
+  async importSRDData(file: File): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      // Upload and validate SRD file
+      const srdData = await SRDFileHandler.upload(file);
+
+      // Validate compatibility
+      if (srdData.metadata.gridSize !== this.config.gridSize) {
+        console.warn(`⚠️ Grid size mismatch: current=${this.config.gridSize}, import=${srdData.metadata.gridSize}`);
+        // Update configuration to match imported data
+        this.config.gridSize = srdData.metadata.gridSize;
+        this.configSerializer = new ConfigSerializer(this.config.gridSize);
+      }
+
+      if (srdData.metadata.frequencyPreset !== this.config.frequencyPreset) {
+        console.warn(`⚠️ Frequency preset mismatch: current=${this.config.frequencyPreset}, import=${srdData.metadata.frequencyPreset}`);
+        this.config.frequencyPreset = srdData.metadata.frequencyPreset;
+      }
+
+      // Clear existing data and caches
+      this.clearCaches();
+      this.results = [];
+
+      // Load new data
+      this.results = [...srdData.serializedResults];
+      this.resultsSorted = false;
+      this.sortedResults = [];
+
+      const duration = Date.now() - startTime;
+
+      console.log(`🔄 SRD Data replaced in ${duration}ms`);
+      console.log(`📊 Loaded ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
+
+    } catch (error) {
+      console.error('❌ SRD data import failed:', error);
+      throw new Error(`Failed to import SRD data: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Get export preview information
+   */
+  getExportPreview(): {
+    resultCount: number;
+    estimatedFileSize: string;
+    compressionRatio: number;
+    gridConfiguration: string;
+    frequencyPreset: string;
+  } {
+    const stats = this.getStorageStats();
+    const { sizeFormatted } = SRDFileHandler.estimateFileSize(this.results.length);
+
+    return {
+      resultCount: this.results.length,
+      estimatedFileSize: sizeFormatted,
+      compressionRatio: stats.reductionFactor,
+      gridConfiguration: `${this.config.gridSize}^5 parameters`,
+      frequencyPreset: this.config.frequencyPreset
+    };
+  }
+
+  /**
+   * Validate if current data can be exported
+   */
+  canExport(): { canExport: boolean; reason?: string } {
+    if (this.results.length === 0) {
+      return { canExport: false, reason: 'No results to export' };
+    }
+
+    if (this.results.length > 10_000_000) {
+      return { canExport: false, reason: 'Too many results (limit: 10M)' };
+    }
+
+    return { canExport: true };
   }
   
   // Private helper methods

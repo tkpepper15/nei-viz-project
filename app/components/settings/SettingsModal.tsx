@@ -282,7 +282,7 @@ export function SettingsModal({
   const [activeTab, setActiveTab] = useState<'performance' | 'computation' | 'optimization' | 'datasets' | 'system'>('performance');
   const [currentSettings, setCurrentSettings] = useState<ExtendedPerformanceSettings>({
     useSymmetricGrid: true,
-    maxComputationResults: 5000,
+    maxComputationResults: 500000,
     gpuAcceleration: DEFAULT_GPU_SETTINGS,
     cpuSettings: DEFAULT_CPU_SETTINGS
   });
@@ -648,9 +648,22 @@ export function SettingsModal({
                     </div>
                     
                     <div className="flex items-center justify-between p-3 bg-neutral-700 rounded-lg">
-                      <div>
-                        <label className="text-sm font-medium text-white">Symmetric Grid</label>
-                        <p className="text-xs text-neutral-400">Use symmetric parameter sampling</p>
+                      <div className="flex-1 mr-3">
+                        <label className="text-sm font-medium text-white">Symmetric Grid Optimization</label>
+                        <p className="text-xs text-neutral-400 mt-1">
+                          Skip parameter combinations where τA &gt; τB (where τ = RC)
+                        </p>
+                        <div className="mt-2 p-2 bg-neutral-800 rounded text-xs">
+                          <div className="text-yellow-400 font-medium mb-1">⚠️ EIS/Biology Note:</div>
+                          <div className="text-neutral-300 leading-relaxed">
+                            Reduces computation by ~37% but may eliminate valid biological parameter combinations.
+                            For RPE cell research, branches A/B often represent different membrane domains (apical/basolateral)
+                            with naturally asymmetric properties.
+                          </div>
+                          <div className="text-blue-400 mt-1">
+                            Math: Skips when Ra×Ca &gt; Rb×Cb (time constants comparison)
+                          </div>
+                        </div>
                       </div>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input

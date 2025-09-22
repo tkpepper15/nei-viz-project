@@ -137,11 +137,12 @@ export const useCircuitConfigurations = (userId?: string, sessionConfigId?: stri
       return true;
 
     } catch (error) {
-      console.error('❌ Error updating circuit configuration:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('❌ Error updating circuit configuration:', errorMsg, error);
       setState(prev => ({
         ...prev,
         loading: false,
-        error: error instanceof Error ? error.message : 'Failed to update configuration'
+        error: errorMsg
       }));
       return false;
     }

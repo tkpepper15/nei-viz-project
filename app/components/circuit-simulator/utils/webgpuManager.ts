@@ -1,5 +1,6 @@
 import { CircuitParameters } from '../types/parameters';
 import { WebGPUCapabilities, WebGPUBenchmarkResult, GPUAccelerationSettings } from '../types/gpuSettings';
+import { getWebGPUManagerLimit } from './centralizedLimits';
 
 export interface WebGPUComputeResult {
   results: Array<{
@@ -196,7 +197,7 @@ export class WebGPUManager {
     frequencies: number[],
     referenceSpectrum: Array<{ freq: number; real: number; imag: number; mag: number; phase: number }>,
     settings: GPUAccelerationSettings,
-    maxResults: number = 5000,
+    maxResults: number = getWebGPUManagerLimit(),
     progressCallback?: (progress: number) => void
   ): Promise<WebGPUComputeResult> {
     if (!this.isInitialized || !this.device || !this.computeShader) {

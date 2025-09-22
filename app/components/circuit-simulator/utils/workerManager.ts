@@ -3,6 +3,7 @@ import { BackendMeshPoint } from '../types';
 import { CircuitParameters } from '../types/parameters';
 import { PerformanceSettings } from '../controls/PerformanceControls';
 import { ResnormConfig } from './resnorm';
+import { getWorkerManagerLimit } from './centralizedLimits';
 
 export interface WorkerProgress {
   type: 'CHUNK_PROGRESS' | 'GENERATION_PROGRESS' | 'COMPUTATION_START' | 'MATHEMATICAL_OPERATION' | 'MEMORY_STATUS' | 'WORKER_STATUS' | 'STREAMING_UPDATE' | 'THROTTLE_UPDATE';
@@ -96,7 +97,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       console.log('Massive dataset detected - using maximum parallelism for best results');
       return Math.min(cores, 8); // Use all available cores for massive datasets
     }
-    if (totalPoints > 500000) {
+    if (totalPoints > getWorkerManagerLimit()) {
       console.log('Very large dataset - high parallelism');
       return Math.min(cores - 1, 6); // High parallelism for large datasets
     }
@@ -402,7 +403,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void,
-    maxComputationResults: number = 5000
+    maxComputationResults: number = getWorkerManagerLimit()
   ): Promise<BackendMeshPoint[]> => {
     
     if (isComputingRef.current) {
@@ -506,24 +507,11 @@ export function useWorkerManager(): UseWorkerManagerReturn {
         operation: 'Circuit model initialization'
       });
 
-      // For large grids (>100k points), use streaming approach
-      if (totalPoints > 100000) {
-        return await computeGridStreaming(
-          gridSize,
-          frequencies,
-          referenceSpectrum,
-          minFreq,
-          maxFreq,
-          workerCount,
-          chunkSize,
-          performanceSettings,
-          resnormConfig,
-          onProgress,
-          onError,
-          groundTruthParams,
-          maxComputationResults
-        );
-      }
+      // DISABLED: computeGridStreaming call to prevent duplicate processing
+      // The optimized parallel approach efficiently handles all grid sizes
+      // if (totalPoints > 100000) {
+      //   return await computeGridStreaming(...);
+      // }
 
       // Initialize worker pool for enhanced performance
       initializeWorkerPool(workerCount);
@@ -727,7 +715,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                       streamedResults.push(...data.currentBestResults);
                       // Keep only the best overall results
                       streamedResults.sort((a, b) => a.resnorm - b.resnorm);
-                      streamedResults = streamedResults.slice(0, 2000); // Keep top 2000 progressive results
+                      streamedResults = streamedResults.slice(0, maxComputationResults); // Keep top results based on user limit
                     }
                     
                     // More aggressive throttling for large datasets  
@@ -748,7 +736,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                         phase: 'impedance_calculation',
                         message: `Streaming batch ${Math.floor(batchStart / maxConcurrentChunks) + 1}: Processing chunk ${chunkIndex + 1}/${chunks.length} (${streamedResults?.length || 0} models computed, best: ${bestResnormSoFar?.toExponential(3) || 'N/A'})`,
                         // Progressive refinement data
-                        progressiveResults: (streamedResults || []).slice(0, 500), // Send top 500 for immediate visualization
+                        progressiveResults: (streamedResults || []).slice(0, Math.min(maxComputationResults, 10000)), // Send top results for immediate visualization (capped at 10K for UI performance)
                         bestResnormSoFar: bestResnormSoFar ?? undefined,
                         operation: 'Streaming computation',
                         streamingBatch: Math.floor(batchStart / maxConcurrentChunks) + 1,
@@ -985,7 +973,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     returnWorkerToPool
   ]);  
 
-  // New streaming computation function for large grids
+  // New streaming computation function for large grids (currently unused)
+  /*
   const computeGridStreaming = useCallback(async (
     gridSize: number,
     frequencies: number[],
@@ -999,7 +988,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void,
     groundTruthParams: CircuitParameters,
-    maxComputationResults: number = 5000
+    maxComputationResults: number = getWorkerManagerLimit()
   ): Promise<BackendMeshPoint[]> => {
     
     const totalPoints = Math.pow(gridSize, 5);
@@ -1197,6 +1186,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     
     return allResults;
   }, [initializeWorkerPool, initializeSharedData]);
+  */
 
   // Enhanced cancel computation with immediate force termination
   const cancelComputation = useCallback(() => {

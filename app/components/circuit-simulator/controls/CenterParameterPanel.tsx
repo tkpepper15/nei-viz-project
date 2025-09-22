@@ -5,6 +5,8 @@ import { CircuitParameters } from '../types/parameters';
 import { StaticRenderSettings } from './StaticRenderControls';
 import { EnhancedInput } from './EnhancedInput';
 import { groupPortionSampler, groupPortionToPercentage, percentageToGroupPortion, calculateShownModels } from '../utils/parameterSampling';
+import { SRDUploadInterface } from './SRDUploadInterface';
+import { SerializedComputationManager } from '../utils/serializedComputationManager';
 
 
 // Collapsible section component
@@ -97,6 +99,9 @@ interface CenterParameterPanelProps {
   selectedProfileId?: string | null; // To know if there's a current profile to update
   maxComputationResults: number;
   onMaxComputationResultsChange: (limit: number) => void;
+  // New SRD upload functionality
+  onSRDUploaded?: (manager: SerializedComputationManager, metadata: { title: string; totalResults: number; gridSize: number }) => void;
+  onUploadError?: (error: string) => void;
   // Removed resnorm config props since method is fixed to SSR
 }
 
@@ -120,9 +125,13 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
   onConfigurationNameChange,
   selectedProfileId,
   maxComputationResults,
-  onMaxComputationResultsChange
+  onMaxComputationResultsChange,
+  onSRDUploaded,
+  onUploadError
   // Removed resnorm config params since method is fixed to SSR
 }) => {
+  // Operation mode state - compute or upload
+  const [operationMode, setOperationMode] = useState<'compute' | 'upload'>('compute');
   // Circuit parameter change handlers
   const handleCircuitParamChange = useCallback((param: keyof CircuitParameters, value: number) => {
     if (param === 'frequency_range') return; // Handle separately
@@ -265,7 +274,51 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
         </div>
       )}
 
-      <div className="space-y-6">
+      {/* Operation Mode Toggle */}
+      <div className="mb-6">
+        <div className="flex bg-neutral-800 border border-neutral-600 rounded-lg p-1">
+          <button
+            className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-md transition-all duration-200 ${
+              operationMode === 'compute'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-700'
+            }`}
+            onClick={() => setOperationMode('compute')}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+              </svg>
+              Compute Grid
+            </div>
+          </button>
+          <button
+            className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-md transition-all duration-200 ${
+              operationMode === 'upload'
+                ? 'bg-green-600 text-white shadow-sm'
+                : 'text-neutral-400 hover:text-white hover:bg-neutral-700'
+            }`}
+            onClick={() => setOperationMode('upload')}
+          >
+            <div className="flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              Upload Data
+            </div>
+          </button>
+        </div>
+        <div className="mt-2 text-xs text-neutral-500 text-center">
+          {operationMode === 'compute'
+            ? 'Configure parameters and compute new grid results'
+            : 'Upload pre-computed serialized resnorm data (.srd files)'
+          }
+        </div>
+      </div>
+
+      {/* Conditional Content Based on Operation Mode */}
+      {operationMode === 'compute' ? (
+        <div className="space-y-6">
           {/* Configuration Section */}
           <CollapsibleSection title="Configuration" defaultOpen={true}>
             <div className="space-y-6 mt-4">
@@ -572,6 +625,75 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
             </div>
           )}
         </div>
+      ) : (
+        /* Upload Mode */
+        <div className="space-y-6">
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-semibold text-white mb-2">Upload Serialized Data</h2>
+            <p className="text-neutral-400">
+              Skip computation entirely by uploading pre-computed .srd files with resnorm analysis results
+            </p>
+          </div>
+
+          {/* Upload Interface */}
+          {onSRDUploaded && onUploadError ? (
+            <SRDUploadInterface
+              onSRDUploaded={(manager, metadata) => {
+                // Update grid configuration to match uploaded data
+                onGridSizeChange(metadata.gridSize);
+
+                // Create a descriptive configuration name if none exists
+                if (onConfigurationNameChange && !configurationName) {
+                  const timestamp = new Date().toLocaleDateString();
+                  onConfigurationNameChange(`${metadata.title} (Uploaded ${timestamp})`);
+                }
+
+                // Call the parent handler
+                onSRDUploaded(manager, metadata);
+              }}
+              onError={onUploadError}
+              className="w-full"
+            />
+          ) : (
+            <div className="bg-orange-900/20 border border-orange-600/50 rounded-lg p-6 text-center">
+              <svg className="w-12 h-12 text-orange-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <h3 className="text-lg font-semibold text-orange-200 mb-2">Upload Not Available</h3>
+              <p className="text-orange-300 text-sm">
+                SRD upload functionality is not configured for this component instance.
+              </p>
+            </div>
+          )}
+
+          {/* Upload Benefits */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gradient-to-br from-green-900/20 to-blue-900/20 border border-green-600/30 rounded-lg p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <h4 className="font-semibold text-green-200">Instant Results</h4>
+              </div>
+              <p className="text-sm text-green-300">
+                Load pre-computed analysis results immediately without waiting for grid computation
+              </p>
+            </div>
+
+            <div className="bg-gradient-to-br from-purple-900/20 to-pink-900/20 border border-purple-600/30 rounded-lg p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+                </svg>
+                <h4 className="font-semibold text-purple-200">Memory Optimized</h4>
+              </div>
+              <p className="text-sm text-purple-300">
+                Ultra-compressed format provides 98% memory reduction compared to traditional data
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

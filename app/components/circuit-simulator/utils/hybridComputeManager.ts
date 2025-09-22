@@ -7,6 +7,7 @@ import { WorkerProgress, UseWorkerManagerReturn } from './workerManager';
 import { WebGPUManager, WebGPUComputeResult } from './webgpuManager';
 import { ExtendedPerformanceSettings, WebGPUCapabilities } from '../types/gpuSettings';
 import { CANONICAL_PARAMETER_RANGES } from '../config/parameterRanges';
+import { getHybridComputeManagerLimit } from './centralizedLimits';
 
 export interface HybridComputeResult {
   results: BackendMeshPoint[];
@@ -153,7 +154,7 @@ export function useHybridComputeManager(
     resnormConfig: ResnormConfig,
     onProgress: (progress: WorkerProgress) => void,
     onError: (error: string) => void,
-    maxComputationResults: number = 5000
+    maxComputationResults: number = getHybridComputeManagerLimit()
   ): Promise<HybridComputeResult> => {
     
     if (isComputingRef.current) {

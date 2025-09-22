@@ -9,6 +9,7 @@ import { ResnormConfig, calculateResnormWithConfig, calculate_impedance_spectrum
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { calculateTimeConstants } from './math/utils';
 import ResnormDisplay from './insights/ResnormDisplay';
+import { CollapsibleBottomPanel } from './panels/CollapsibleBottomPanel';
 
 interface VisualizationSettings {
   groupPortion: number;
@@ -179,6 +180,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   
   // Loading state for smooth initialization
   const [isInitializing, setIsInitializing] = useState(true);
+
+  // Bottom panel state management
+  const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
+  const [bottomPanelHeight, setBottomPanelHeight] = useState(400);
   
 
   // Handle resnorm range change from ResnormDisplay
@@ -552,6 +557,21 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     resnormGroupsLength: resnormGroups?.length || 0
   });
 
+  // Log the data being passed to bottom panel
+  const bottomPanelConfigs = resnormGroups.length > 0 ? resnormGroups : [{
+    range: [0, 100],
+    color: '#3B82F6',
+    label: 'Computed Results',
+    description: 'All computed circuit models',
+    items: modelsWithUpdatedResnorm || []
+  }];
+
+  console.log('🔧 Bottom panel configurations:', {
+    configCount: bottomPanelConfigs.length,
+    firstConfigItems: bottomPanelConfigs[0]?.items?.length || 0,
+    sampleModel: bottomPanelConfigs[0]?.items?.[0]
+  });
+
 
   return (
     <div className="h-full flex flex-col bg-neutral-900">
@@ -569,14 +589,43 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 <option value="spider3d">Spider 3D</option>
                 <option value="nyquist">Nyquist Plot</option>
               </select>
-            </div>
 
-          </div>
+              {/* Debug Info - Grid Stats and Frequency Range */}
+              <div className="text-xs text-neutral-400 font-mono">
+                {(() => {
+                  const computedCount = gridResults?.length || 0;
+                  const totalPossible = Math.pow(gridSize, 5);
+                  const freqMin = effectiveGroundTruthParams.frequency_range?.[0] || 0.1;
+                  const freqMax = effectiveGroundTruthParams.frequency_range?.[1] || 100000;
+                  return `${computedCount.toLocaleString()} computed/${totalPossible.toLocaleString()} total | Freq: ${freqMin} - ${freqMax.toLocaleString()} Hz`;
+                })()}
+              </div>
+            </div> {/* End left toolbar controls */}
+
+            {/* Right side toolbar controls */}
+            <div className="flex items-center gap-3">
+              {/* Bottom panel toggle */}
+              <button
+                onClick={() => setBottomPanelCollapsed(!bottomPanelCollapsed)}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded-md text-neutral-200 transition-colors"
+                title={bottomPanelCollapsed ? 'Show Data Panel' : 'Hide Data Panel'}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5v6m4-6v6m4-6v6" />
+                </svg>
+                <span>{bottomPanelCollapsed ? 'Data Panel' : 'Hide Panel'}</span>
+              </button>
+            </div> {/* End right toolbar controls */}
+
+          </div> {/* End toolbar */}
 
           {/* Main Content Area */}
-          <div className="flex-1 flex overflow-hidden">
-            {/* Primary Visualization Area */}
-            <div className="flex-1 relative bg-black">
+          <div className="flex-1 flex min-h-0">
+            {/* Visualization and Bottom Panel Container */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Primary Visualization Area */}
+              <div className="flex-1 relative bg-black min-h-0">
               {visualizationType === 'spider3d' ? (
                 /* Spider 3D Visualization */
                 <div className="w-full h-full relative overflow-hidden">
@@ -589,32 +638,32 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     </div>
                   ) : (
                     <SpiderPlot3D
-                    models={visibleModelsWithOpacity}
-                    referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
-                      id: 'ground-truth',
-                      name: 'Ground Truth Reference',
-                      timestamp: Date.now(),
-                      parameters: effectiveGroundTruthParams,
-                      data: [],
-                      resnorm: 0,
-                      color: '#FFFFFF',
-                      isVisible: true,
-                      opacity: 1
-                    } : null}
-                    responsive={true} // Enable responsive sizing
-                    showControls={true}
-                    gridSize={gridSize}
-                    resnormSpread={staticRenderSettings.resnormSpread}
-                    useResnormCenter={staticRenderSettings.useResnormCenter}
-                    resnormRange={selectedResnormRange}
-                    onModelTag={handleModelTag}
-                    taggedModels={localTaggedModels}
-                    currentResnorm={currentResnorm}
-                    onResnormSelect={handleResnormSelect}
-                    onCurrentResnormChange={handleCurrentResnormChange}
-                    highlightedModelId={highlightedModelId}
-                    selectedResnormRange={selectedResnormRange}
-                  />
+                      models={visibleModelsWithOpacity}
+                      referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
+                        id: 'ground-truth',
+                        name: 'Ground Truth Reference',
+                        timestamp: Date.now(),
+                        parameters: effectiveGroundTruthParams,
+                        data: [],
+                        resnorm: 0,
+                        color: '#FFFFFF',
+                        isVisible: true,
+                        opacity: 1
+                      } : null}
+                      responsive={true} // Enable responsive sizing
+                      showControls={true}
+                      gridSize={gridSize}
+                      resnormSpread={staticRenderSettings.resnormSpread}
+                      useResnormCenter={staticRenderSettings.useResnormCenter}
+                      resnormRange={selectedResnormRange}
+                      onModelTag={handleModelTag}
+                      taggedModels={localTaggedModels}
+                      currentResnorm={currentResnorm}
+                      onResnormSelect={handleResnormSelect}
+                      onCurrentResnormChange={handleCurrentResnormChange}
+                      highlightedModelId={highlightedModelId}
+                      selectedResnormRange={selectedResnormRange}
+                    />
                   )}
                 </div>
               ) : (
@@ -706,10 +755,28 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   )}
                 </div>
               )}
-            </div>
+              </div> {/* End Primary Visualization Area */}
+
+              {/* Bottom Panel - PyCharm Style with Enhanced Scrolling */}
+              <CollapsibleBottomPanel
+                gridResults={gridResults || []}
+                topConfigurations={bottomPanelConfigs}
+                currentParameters={groundTruthParams}
+                selectedConfigIndex={0}
+                onConfigurationSelect={() => {}}
+                highlightedModelId={highlightedModelId}
+                gridSize={gridSize}
+                isCollapsed={bottomPanelCollapsed}
+                onToggleCollapse={setBottomPanelCollapsed}
+                height={bottomPanelHeight}
+                onHeightChange={setBottomPanelHeight}
+                minHeight={120}
+                maxHeight={500}
+              />
+            </div> {/* End Visualization and Bottom Panel Container */}
 
             {/* Right Sidebar - Scrollable Control Panels */}
-            <div className="w-80 bg-neutral-800 border-l border-neutral-700 flex flex-col overflow-hidden">
+            <div className="w-80 bg-neutral-800 border-l border-neutral-700 flex flex-col">
               {/* Scrollable Content Container */}
               <div className="flex-1 overflow-y-auto p-3 space-y-4">
                 {/* Ground Truth Control */}
@@ -953,7 +1020,8 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
               </div> {/* End scrollable container */}
             </div> {/* End right sidebar */}
-          </div>
+
+          </div> {/* End main layout container */}
         </>
       ) : (
         /* Empty State */
@@ -973,4 +1041,4 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
       )}
     </div>
   );
-}; 
+};

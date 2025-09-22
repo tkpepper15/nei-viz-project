@@ -303,7 +303,7 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
 }
 
 // Optimized chunk processing function with minimal data transfer
-async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId, maxComputationResults = 5000) {
+async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId, maxComputationResults = 500000) {
   // Ultra-efficient Top-N heap for massive datasets
   const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
   const FINAL_TOP_RESULTS = maxComputationResults; // Final top results to return (user configurable)
@@ -584,7 +584,7 @@ self.onmessage = async function(e) {
           totalChunks, 
           resnormConfig = { method: 'mae' },
           taskId,
-          maxComputationResults = 5000
+          maxComputationResults = 500000
         } = data;
         
         // Use cached shared data instead of transferring it each time
@@ -605,213 +605,8 @@ self.onmessage = async function(e) {
         break;
       }
 
-      case 'COMPUTE_GRID_CHUNK': {
-        const { 
-          chunkParams, 
-          frequencyArray, 
-          chunkIndex, 
-          totalChunks,
-          referenceSpectrum,
-          resnormConfig = { method: 'mae' },
-          maxComputationResults = 5000
-        } = data;
-        
-        // Process chunk with ultra-efficient Top-N heap for massive datasets
-        const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
-        
-        // Efficient min-heap implementation for Top-N results (O(log n) operations)
-        class MinHeap {
-          constructor(maxSize) {
-            this.heap = [];
-            this.maxSize = maxSize;
-          }
-          
-          parent(index) { return Math.floor((index - 1) / 2); }
-          leftChild(index) { return 2 * index + 1; }
-          rightChild(index) { return 2 * index + 2; }
-          
-          swap(i, j) {
-            [this.heap[i], this.heap[j]] = [this.heap[j], this.heap[i]];
-          }
-          
-          heapifyUp(index) {
-            if (index > 0 && this.heap[this.parent(index)].resnorm > this.heap[index].resnorm) {
-              this.swap(index, this.parent(index));
-              this.heapifyUp(this.parent(index));
-            }
-          }
-          
-          heapifyDown(index) {
-            let smallest = index;
-            const left = this.leftChild(index);
-            const right = this.rightChild(index);
-            
-            if (left < this.heap.length && this.heap[left].resnorm < this.heap[smallest].resnorm) {
-              smallest = left;
-            }
-            if (right < this.heap.length && this.heap[right].resnorm < this.heap[smallest].resnorm) {
-              smallest = right;
-            }
-            if (smallest !== index) {
-              this.swap(index, smallest);
-              this.heapifyDown(smallest);
-            }
-          }
-          
-          insert(item) {
-            if (this.heap.length < this.maxSize) {
-              // Heap not full, just add
-              this.heap.push(item);
-              this.heapifyUp(this.heap.length - 1);
-            } else if (item.resnorm < this.heap[0].resnorm) {
-              // Replace worst (root) with better item
-              this.heap[0] = item;
-              this.heapifyDown(0);
-            }
-            // Otherwise ignore (item is worse than our worst)
-          }
-          
-          getAll() {
-            return [...this.heap].sort((a, b) => a.resnorm - b.resnorm);
-          }
-          
-          size() {
-            return this.heap.length;
-          }
-        }
-        
-        // Initialize heap with lightweight data structure
-        const topResults = new MinHeap(MAX_RESULTS_DURING_COMPUTATION);
-        let processedCount = 0;
-        
-        // Ultra-aggressive adaptive batch sizing with enhanced memory pressure monitoring
-        let batchSize = 25; // Start conservative
-        let memoryThreshold = 100 * 1024 * 1024; // 100MB default memory limit per worker
-        
-        // Adaptive thresholds based on dataset size to prevent UI blocking at 80k points
-        if (chunkParams.length > 80000) {
-          batchSize = 3; // Micro-batches for massive chunks (unresponsive at 80k)
-          memoryThreshold = 40 * 1024 * 1024; // Stricter memory limit for large datasets
-        } else if (chunkParams.length > 50000) {
-          batchSize = 5; // Very small batches for huge chunks
-          memoryThreshold = 60 * 1024 * 1024; // Reduced memory threshold
-        } else if (chunkParams.length > 25000) {
-          batchSize = 8; // Smaller batches for very large chunks
-        } else if (chunkParams.length > 10000) {
-          batchSize = 15; // Small batches for large chunks
-        } else if (chunkParams.length < 1000) {
-          batchSize = 50; // Larger batches for small chunks
-        }
-        
-        // Lightweight memory estimation (much lower with heap approach)
-        const bytesPerResult = 150; // Much smaller without spectrum data during computation
-        
-        for (let i = 0; i < chunkParams.length; i += batchSize) {
-          const batch = chunkParams.slice(i, i + batchSize);
-          
-          // Critical: Frequent async yields to prevent worker thread blocking
-          if (i % (batchSize * 2) === 0) {  // Yield every 2 batches
-            // Non-blocking yield to event loop - prevents 55% hang
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
-          
-          // Additional yields for massive datasets
-          if (chunkParams.length > 100000 && i % batchSize === 0) {
-            // Yield every single batch for very large datasets
-            await new Promise(resolve => setTimeout(resolve, 1));
-          }
-          
-          for (const params of batch) {
-            try {
-              // Validate parameters before computation
-              if (!params || typeof params.Rsh !== 'number' || 
-                  typeof params.Ra !== 'number' || typeof params.Ca !== 'number' ||
-                  typeof params.Rb !== 'number' || typeof params.Cb !== 'number') {
-                continue; // Skip invalid parameters
-              }
-              
-              // Calculate spectrum
-              const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
-              
-              // Calculate resnorm
-              const resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
-              
-              // Skip infinite or NaN resnorms
-              if (!isFinite(resnorm) || isNaN(resnorm)) {
-                continue;
-              }
-              
-              // Ultra-efficient Top-N: store minimal data during computation
-              // Only store parameters + resnorm during computation phase
-              topResults.insert({
-                parameters: params,
-                resnorm: resnorm
-                // NO spectrum data during computation - saves massive memory
-              });
-              
-              processedCount++;
-            } catch (error) {
-              // Continue processing even if one parameter set fails
-              console.warn('Error processing parameter set:', params, error.message);
-              continue;
-            }
-          }
-          
-          // Report progress within chunk
-          const progress = Math.min(100, Math.round((i + batchSize) / chunkParams.length * 100));
-          self.postMessage({
-            type: 'CHUNK_PROGRESS',
-            data: {
-              chunkIndex,
-              totalChunks,
-              chunkProgress: progress,
-              processed: Math.min(i + batchSize, chunkParams.length),
-              total: chunkParams.length
-            }
-          });
-        }
-        
-        // Get final results from heap (already optimized)
-        const finalResults = topResults.getAll();
-        
-        // Now add spectrum data ONLY to top results for final output
-        const FINAL_TOP_RESULTS = maxComputationResults;
-        const topResultsWithSpectra = [];
-        const otherResults = [];
-        
-        // Re-compute spectra only for the top results
-        for (let i = 0; i < finalResults.length; i++) {
-          const result = finalResults[i];
-          
-          if (i < FINAL_TOP_RESULTS) {
-            // Re-calculate spectrum for top results only  
-            const spectrum = calculateImpedanceSpectrum(result.parameters, frequencyArray);
-            topResultsWithSpectra.push({
-              parameters: result.parameters,
-              resnorm: result.resnorm,
-              spectrum: spectrum
-            });
-          } else {
-            // No spectrum for lower-priority results
-            otherResults.push({
-              parameters: result.parameters,
-              resnorm: result.resnorm
-            });
-          }
-        }
-        
-        self.postMessage({
-          type: 'CHUNK_COMPLETE',
-          data: {
-            chunkIndex,
-            topResults: topResultsWithSpectra,
-            otherResults: otherResults,
-            totalProcessed: processedCount
-          }
-        });
-        
-        break;
-      }
+      // Legacy COMPUTE_GRID_CHUNK case removed to prevent duplicate processing
+      // All chunk processing now uses COMPUTE_GRID_CHUNK_OPTIMIZED for efficiency
       
       case 'GENERATE_GRID_POINTS': {
         const { gridSize, useSymmetricGrid, resnormConfig = { method: 'mae' }, groundTruthParams: inputGroundTruth } = data;

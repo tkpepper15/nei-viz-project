@@ -71,13 +71,15 @@ interface Camera3D {
 // Navigation modes for different interaction behaviors  
 type NavigationMode = 'orbit' | 'pan' | 'zoom';
 
-// Enhanced interaction state
+// Enhanced interaction state with momentum tracking
 interface InteractionState {
   isDragging: boolean;
   dragMode: NavigationMode;
   lastMousePos: { x: number; y: number };
   isShiftPressed: boolean;
   isCtrlPressed: boolean;
+  velocity: { x: number; y: number }; // Track mouse velocity for momentum
+  lastUpdateTime: number; // For calculating momentum
 }
 
 // Dynamic parameter configuration based on CircuitParameters type
@@ -215,7 +217,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     dragMode: 'orbit',
     lastMousePos: { x: 0, y: 0 },
     isShiftPressed: false,
-    isCtrlPressed: false
+    isCtrlPressed: false,
+    velocity: { x: 0, y: 0 },
+    lastUpdateTime: performance.now()
   });
   
   // Model selection and tagging state
@@ -233,11 +237,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   const lastComputationalResnorm = useRef<number | null>(null);
   const computationalUpdateThreshold = 0.005; // Only update parent for significant changes
   
-  // High-performance throttling for ultra-smooth interactions
+  // Enhanced performance throttling for ultra-smooth interactions
   const lastMouseMoveTime = useRef<number>(0);
   const lastDragTime = useRef<number>(0);
-  const mouseMoveThrottleMs = 10; // ~100fps for balanced performance and smoothness
-  const dragThrottleMs = 3; // ~333fps for buttery-smooth rotation
+  const mouseMoveThrottleMs = 8; // ~125fps for improved smoothness
+  const dragThrottleMs = 2; // ~500fps for ultra-buttery rotation
+  const wheelThrottleMs = 16; // ~60fps for smooth wheel events
+  const lastWheelTime = useRef<number>(0);
   
   // Performance optimization refs
   const lastRenderTime = useRef<number>(0);
@@ -1416,150 +1422,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   }, [filteredModels, project3D, camera.scale, resnormSpread, currentResnorm, selectedResnormRange, isModelSelected, visualResnorm]);
 
 
-  // Draw parameter values list with clean table formatting
-  const drawParameterValuesList = React.useCallback((ctx: CanvasRenderingContext2D) => {
-    const params = circuitParams;
-    const listWidth = 380;
-    const listHeight = 200;
-    const margin = 10;
-    const listX = margin;
-    const listY = actualHeight - listHeight - margin;
-    
-    ctx.save();
-    
-    // Draw background with subtle styling
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-    ctx.fillRect(listX, listY, listWidth, listHeight);
-    ctx.strokeStyle = '#666666';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(listX, listY, listWidth, listHeight);
-    
-    // Draw header with circuit icon
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 14px Arial';
-    ctx.textAlign = 'left';
-
-    // Draw circuit icon (simple resistor/capacitor symbol)
-    const iconX = listX + 10;
-    const iconY = listY + 8;
-    const iconSize = 12;
-
-    // Resistor symbol (zig-zag)
-    ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(iconX, iconY + iconSize/2);
-    ctx.lineTo(iconX + 2, iconY + 2);
-    ctx.lineTo(iconX + 4, iconY + iconSize - 2);
-    ctx.lineTo(iconX + 6, iconY + 2);
-    ctx.lineTo(iconX + 8, iconY + iconSize - 2);
-    ctx.lineTo(iconX + 10, iconY + iconSize/2);
-    ctx.stroke();
-
-    // Connection lines
-    ctx.beginPath();
-    ctx.moveTo(iconX - 2, iconY + iconSize/2);
-    ctx.lineTo(iconX, iconY + iconSize/2);
-    ctx.moveTo(iconX + 10, iconY + iconSize/2);
-    ctx.lineTo(iconX + 12, iconY + iconSize/2);
-    ctx.stroke();
-
-    ctx.fillText('Circuit Configuration Matrix', listX + 25, listY + 18);
-    
-    const numPoints = gridSize || 5;
-    ctx.fillStyle = '#CCCCCC';
-    ctx.font = '10px Arial';
-    ctx.fillText(`Grid: ${numPoints} points per parameter`, listX + 10, listY + 32);
-    
-    // Table setup
-    const tableStartY = listY + 45;
-    const rowHeight = 24;
-    const colWidth = (listWidth - 20) / (numPoints + 1); // +1 for parameter name column
-    
-    // Draw table header with grid points
-    ctx.fillStyle = '#888888';
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'center';
-    for (let j = 0; j < numPoints; j++) {
-      const colX = listX + 10 + (j + 1) * colWidth + colWidth / 2;
-      ctx.fillText(`${j + 1}`, colX, tableStartY - 5);
-    }
-    
-    // Draw parameter rows with clean formatting
-    params.forEach((param, i) => {
-      if (i >= 6) return; // Limit to fit in available space
-      
-      const rowY = tableStartY + (i * rowHeight);
-      
-      // Parameter name column
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'left';
-      const paramLabel = param.key; // Use short form (Ra, Rb, Ca, Cb, Rsh)
-      ctx.fillText(paramLabel, listX + 10, rowY + 12);
-      
-      // Generate and display values in fixed columns
-      for (let j = 0; j < numPoints; j++) {
-        const ratio = j / (numPoints - 1);
-        let value: number;
-        let displayValue: string;
-        
-        if (param.name.includes('Ω')) {
-          // Logarithmic scale for resistance
-          const logMin = Math.log10(param.range.min);
-          const logMax = Math.log10(param.range.max);
-          value = Math.pow(10, logMin + ratio * (logMax - logMin));
-          
-          if (value >= 10000) {
-            displayValue = `${(value/1000).toFixed(0)}k`;
-          } else if (value >= 1000) {
-            displayValue = `${(value/1000).toFixed(1)}k`;
-          } else {
-            displayValue = `${value.toFixed(0)}`;
-          }
-        } else {
-          // Linear scale for capacitance
-          value = param.range.min + ratio * (param.range.max - param.range.min);
-          if (value < 1) {
-            displayValue = `${value.toFixed(1)}`;
-          } else if (value < 10) {
-            displayValue = `${value.toFixed(1)}`;
-          } else {
-            displayValue = `${value.toFixed(0)}`;
-          }
-        }
-        
-        // Draw value in column with monospace alignment
-        const colX = listX + 10 + (j + 1) * colWidth + colWidth / 2;
-        ctx.fillStyle = '#CCCCCC';
-        ctx.font = '9px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(displayValue, colX, rowY + 12);
-      }
-      
-      // Draw subtle row separator
-      if (i < params.length - 1) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(listX + 5, rowY + rowHeight - 2);
-        ctx.lineTo(listX + listWidth - 5, rowY + rowHeight - 2);
-        ctx.stroke();
-      }
-    });
-    
-    // Draw vertical column separators
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-    for (let j = 0; j <= numPoints; j++) {
-      const colX = listX + 10 + j * colWidth;
-      ctx.beginPath();
-      ctx.moveTo(colX, tableStartY - 10);
-      ctx.lineTo(colX, tableStartY + params.length * rowHeight - 5);
-      ctx.stroke();
-    }
-    
-    ctx.restore();
-  }, [actualHeight, circuitParams, gridSize]);
+  // Circuit configuration matrix moved to bottom panel - overlay removed from 3D view
 
   // Throttled 3D rendering for optimal performance
   const render3D = React.useCallback(() => {
@@ -1681,13 +1544,12 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     drawResnormAxis(ctx);
     
     
-    // Draw parameter values list
-    drawParameterValuesList(ctx);
+    // Circuit configuration matrix moved to bottom panel - overlay removed
     
     // Draw pentagonal outline
     drawPentagonalOutline(ctx);
 
-  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, drawGroundTruthCrossSection, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawParameterValuesList, drawPentagonalOutline, paramKeys]);
+  }, [convert3DPolygons, project3D, referenceModel, actualWidth, actualHeight, draw3DRadarGrid, drawGroundTruthCrossSection, draw3DPolygon, draw3DRadarLabels, drawResnormAxis, drawPentagonalOutline, paramKeys]);
 
   // Professional 3D navigation handlers (Blender/Onshape-style) with model selection
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -1901,64 +1763,109 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const currentDragTime = performance.now();
     if ((currentDragTime - lastDragTime.current) < dragThrottleMs) {
       // Update interaction state but skip heavy operations
-      setInteraction(prev => ({ ...prev, lastMousePos: { x: e.clientX, y: e.clientY } }));
+      setInteraction(prev => ({
+        ...prev,
+        lastMousePos: { x: e.clientX, y: e.clientY },
+        lastUpdateTime: currentDragTime
+      }));
       return;
     }
     lastDragTime.current = currentDragTime;
 
     const deltaX = e.clientX - interaction.lastMousePos.x;
     const deltaY = e.clientY - interaction.lastMousePos.y;
-    
-    // Enhanced sensitivity with acceleration for ultra-smooth controls
-    const baseSensitivity = 0.5;
-    const accelerationFactor = Math.min(1.5, Math.sqrt(deltaX * deltaX + deltaY * deltaY) / 10);
-    const sensitivity = baseSensitivity * accelerationFactor;
+    const currentTime = performance.now();
+    const deltaTime = currentTime - interaction.lastUpdateTime;
+
+    // Calculate velocity for momentum-based smoothing
+    const currentVelocity = {
+      x: deltaTime > 0 ? deltaX / deltaTime * 16.67 : 0, // Normalize to ~60fps
+      y: deltaTime > 0 ? deltaY / deltaTime * 16.67 : 0
+    };
+
+    // Smooth velocity with exponential averaging
+    const velocitySmoothing = 0.3;
+    const prevVelocity = interaction.velocity || { x: 0, y: 0 };
+    const smoothedVelocity = {
+      x: prevVelocity.x * (1 - velocitySmoothing) + currentVelocity.x * velocitySmoothing,
+      y: prevVelocity.y * (1 - velocitySmoothing) + currentVelocity.y * velocitySmoothing
+    };
+
+    // Enhanced sensitivity with velocity-based acceleration for ultra-smooth controls
+    const velocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const baseSensitivity = 0.65; // Slightly increased for better responsiveness
+    const velocityFactor = Math.min(1.8, 1 + (velocity / 18)); // Progressive acceleration
+    const sensitivity = baseSensitivity * velocityFactor;
 
     if (interaction.dragMode === 'orbit') {
-      // Ultra-smooth orbit with momentum-based smoothing
-      const smoothedDeltaX = deltaX * sensitivity * 0.8; // Reduced for smoothness
-      const smoothedDeltaY = deltaY * sensitivity * 0.8;
-      const newRotation = {
-        x: Math.max(-89, Math.min(89, rotation.x + smoothedDeltaY)),
-        y: (rotation.y + smoothedDeltaX) % 360,
-        z: rotation.z
-      };
-      setRotation(newRotation);
-      if (onRotationChange) {
-        onRotationChange(newRotation);
-      }
-    } else if (interaction.dragMode === 'pan') {
-      // Pan the target with smooth movement
-      const panSensitivity = 0.004 * camera.distance; // Slightly increased for responsiveness
-      setCamera(prev => ({
-        ...prev,
-        target: {
-          x: prev.target.x - deltaX * panSensitivity,
-          y: prev.target.y + deltaY * panSensitivity,
-          z: prev.target.z
+      // Ultra-smooth orbit with adaptive smoothing based on velocity
+      const smoothingFactor = Math.max(0.7, 1 - (velocity / 50)); // Less smoothing for fast movements
+      const smoothedDeltaX = deltaX * sensitivity * smoothingFactor;
+      const smoothedDeltaY = deltaY * sensitivity * smoothingFactor;
+
+      // Apply rotation with smooth interpolation
+      setRotation(prev => {
+        const targetX = Math.max(-89, Math.min(89, prev.x + smoothedDeltaY));
+        const targetY = (prev.y + smoothedDeltaX) % 360;
+        const newRotation = {
+          x: prev.x + (targetX - prev.x) * 0.85, // Smooth interpolation
+          y: prev.y + (targetY - prev.y) * 0.85,
+          z: prev.z
+        };
+        if (onRotationChange) {
+          onRotationChange(newRotation);
         }
-      }));
+        return newRotation;
+      });
+    } else if (interaction.dragMode === 'pan') {
+      // Enhanced pan with velocity-aware smoothing
+      const panSensitivity = 0.005 * camera.distance * (1 + velocity * 0.01);
+      const smoothingFactor = Math.max(0.8, 1 - (velocity / 30));
+
+      setCamera(prev => {
+        const targetX = prev.target.x - deltaX * panSensitivity;
+        const targetY = prev.target.y + deltaY * panSensitivity;
+        return {
+          ...prev,
+          target: {
+            x: prev.target.x + (targetX - prev.target.x) * smoothingFactor,
+            y: prev.target.y + (targetY - prev.target.y) * smoothingFactor,
+            z: prev.target.z
+          }
+        };
+      });
     } else if (interaction.dragMode === 'zoom') {
-      // Zoom by dragging with smooth scaling
-      const zoomSensitivity = 0.01; // Slightly increased for responsiveness
+      // Enhanced zoom by dragging with progressive sensitivity
+      const zoomSensitivity = 0.012 * (1 + velocity * 0.001); // Velocity-aware zoom
       const zoomDelta = 1 + (deltaY * zoomSensitivity);
-      setCamera(prev => ({
-        ...prev,
-        distance: Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomDelta))
-      }));
+
+      setCamera(prev => {
+        const targetDistance = Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomDelta));
+        return {
+          ...prev,
+          distance: prev.distance + (targetDistance - prev.distance) * 0.85 // Smooth interpolation
+        };
+      });
     }
 
+    // Update interaction state with velocity tracking
     setInteraction(prev => ({
       ...prev,
-      lastMousePos: { x: e.clientX, y: e.clientY }
+      lastMousePos: { x: e.clientX, y: e.clientY },
+      velocity: smoothedVelocity,
+      lastUpdateTime: currentTime
     }));
   };
 
-  const handleMouseUp = () => {
-    setInteraction(prev => ({ ...prev, isDragging: false }));
-  };
+  const handleMouseUp = useCallback(() => {
+    setInteraction(prev => ({
+      ...prev,
+      isDragging: false,
+      velocity: { x: 0, y: 0 } // Reset velocity when drag ends
+    }));
+  }, []);
 
-  const handleMouseLeave = () => {
+  const handleMouseLeave = useCallback(() => {
     // Clear hover states and stop dragging when mouse leaves the canvas
     setHoveredModel(null);
     // Clear computational state
@@ -1966,35 +1873,58 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (onCurrentResnormChange) {
       onCurrentResnormChange(null);
     }
-    setInteraction(prev => ({ ...prev, isDragging: false }));
-  };
+    setInteraction(prev => ({
+      ...prev,
+      isDragging: false,
+      velocity: { x: 0, y: 0 } // Reset velocity when leaving canvas
+    }));
+  }, [onCurrentResnormChange]);
 
-  const handleWheel = (e: React.WheelEvent) => {
+  const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const zoomSpeed = 0.05; // Reduced for smoother zooming
-    const zoomFactor = e.deltaY > 0 ? (1 + zoomSpeed) : (1 - zoomSpeed);
-    
-    if (e.shiftKey) {
-      // Shift+scroll for smooth scale adjustment
-      setCamera(prev => ({
-        ...prev,
-        scale: Math.max(0.1, Math.min(10, prev.scale * zoomFactor))
-      }));
-    } else {
-      // Normal scroll for smooth distance zoom
-      setCamera(prev => ({
-        ...prev,
-        distance: Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomFactor))
-      }));
-    }
-  };
 
-  // Keyboard shortcuts for navigation
+    // Throttle wheel events for smoother performance
+    const currentTime = performance.now();
+    if ((currentTime - lastWheelTime.current) < wheelThrottleMs) {
+      return;
+    }
+    lastWheelTime.current = currentTime;
+
+    // Enhanced zoom with progressive sensitivity
+    const baseZoomSpeed = 0.03; // Reduced for ultra-smooth zooming
+    const wheelDelta = Math.abs(e.deltaY);
+    const progressiveMultiplier = Math.min(1.5, 1 + (wheelDelta / 200)); // Accelerate for faster scrolling
+    const zoomSpeed = baseZoomSpeed * progressiveMultiplier;
+    const zoomFactor = e.deltaY > 0 ? (1 + zoomSpeed) : (1 - zoomSpeed);
+
+    if (e.shiftKey) {
+      // Shift+scroll for smooth scale adjustment with easing
+      setCamera(prev => {
+        const newScale = Math.max(0.1, Math.min(10, prev.scale * zoomFactor));
+        return {
+          ...prev,
+          scale: prev.scale + (newScale - prev.scale) * 0.8 // Smooth interpolation
+        };
+      });
+    } else {
+      // Normal scroll for smooth distance zoom with easing
+      setCamera(prev => {
+        const newDistance = Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomFactor));
+        return {
+          ...prev,
+          distance: prev.distance + (newDistance - prev.distance) * 0.9 // Smooth interpolation
+        };
+      });
+    }
+  }, [wheelThrottleMs]);
+
+  // Enhanced keyboard shortcuts for smooth navigation
   const handleKeyDown = React.useCallback((e: KeyboardEvent) => {
     if (e.target !== canvasRef.current) return;
-    
-    const moveSpeed = 0.5;
-    const rotateSpeed = 5;
+
+    // Adaptive speeds based on current camera distance and scale
+    const moveSpeed = 0.3 * camera.distance * 0.1; // Scale with distance
+    const rotateSpeed = 3; // Reduced for smoother rotation
     
     switch (e.key.toLowerCase()) {
       case 'w': // Move forward

@@ -132,7 +132,7 @@ class OptimizedSpiderRenderer {
 
   // Intelligent model virtualization for performance
   private virtualizeModels(models: ModelSnapshot[]): ModelSnapshot[] {
-    const maxRenderPoints = 100000; // Maximum points to render for performance
+    const maxRenderPoints = 500000; // Increased maximum points to render for comprehensive data analysis
     
     if (models.length <= maxRenderPoints) {
       return models;
@@ -914,7 +914,7 @@ const SpiderPlotComponent: React.FC<SpiderPlotProps> = ({
         <g fill="none" strokeWidth="1">
           {(() => {
             // Calculate consistent quartile-based colors for SVG rendering
-            const modelsToRender = visibleModels.slice(0, 1000); // Limit for SVG performance
+            const modelsToRender = visibleModels.slice(0, 10000); // Increased SVG rendering limit for better data representation
             const resnorms = modelsToRender.map(m => m.resnorm || 0).filter(r => r > 0);
             
             // Calculate quartile thresholds (same logic as SpiderPlot3D)

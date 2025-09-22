@@ -97,6 +97,36 @@ export const ProfileCard: React.FC<ProfileCardProps> = ({
             <span className="text-xs text-neutral-300">
               {profile.minFreq}-{profile.maxFreq} Hz
             </span>
+          </div>
+
+          {/* Circuit Parameters Display */}
+          {profile.groundTruthParams && (
+            <div className="grid grid-cols-2 gap-1 text-xs text-neutral-400 mb-1">
+              <div className="flex justify-between">
+                <span>Rsh:</span>
+                <span className="text-neutral-300">{profile.groundTruthParams.Rsh.toFixed(1)}Ω</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Ra:</span>
+                <span className="text-neutral-300">{profile.groundTruthParams.Ra.toFixed(1)}Ω</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Ca:</span>
+                <span className="text-neutral-300">{(profile.groundTruthParams.Ca * 1e6).toFixed(2)}µF</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Rb:</span>
+                <span className="text-neutral-300">{profile.groundTruthParams.Rb.toFixed(1)}Ω</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Cb:</span>
+                <span className="text-neutral-300">{(profile.groundTruthParams.Cb * 1e6).toFixed(2)}µF</span>
+              </div>
+            </div>
+          )}
+
+          {/* Additional Tags */}
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             {/* NPZ Tag for server-side datasets */}
             {false && (
               <span className="text-xs text-blue-300 bg-blue-900/40 border border-blue-700/50 px-2 py-0.5 rounded">

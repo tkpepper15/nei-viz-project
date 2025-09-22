@@ -250,6 +250,17 @@ export class CircuitConfigService {
 
     } catch (error) {
       console.error('❌ Exception in updateCircuitConfiguration:', error);
+      // Provide more detailed error information
+      if (error && typeof error === 'object') {
+        const errorDetails = {
+          message: (error as any).message || 'Unknown error',
+          code: (error as any).code,
+          details: (error as any).details,
+          hint: (error as any).hint
+        };
+        console.error('❌ Detailed error info:', errorDetails);
+        throw new Error(`Update failed: ${errorDetails.message}${errorDetails.hint ? ` (${errorDetails.hint})` : ''}`);
+      }
       throw error;
     }
   }

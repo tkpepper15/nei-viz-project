@@ -6,6 +6,20 @@
   <component name="ChangeListManager">
     <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/CenterParameterPanel.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/CenterParameterPanel.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ProfileCard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ProfileCard.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/StaticRenderControls.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/StaticRenderControls.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/hooks/useComputationState.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/hooks/useComputationState.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/hybridComputeManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/hybridComputeManager.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/serializedComputationManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/serializedComputationManager.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/webgpuManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/webgpuManager.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/workerManager.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/settings/SettingsModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/settings/SettingsModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/public/grid-worker.js" beforeDir="false" afterPath="$PROJECT_DIR$/public/grid-worker.js" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,6 +55,9 @@
   &quot;associatedIndex&quot;: 0
 }</component>
   <component name="ProjectId" id="2zQ7kWHdFnLsXKPZWysyk42rZlg" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="1" id="Add" />
+  </component>
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
