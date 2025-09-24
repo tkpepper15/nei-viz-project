@@ -15,7 +15,6 @@ import { SerializedComputationManager, createSerializedComputationManager } from
 import { createParameterConfigManager } from './circuit-simulator/utils/parameterConfigManager';
 import { ExtendedPerformanceSettings, DEFAULT_GPU_SETTINGS, DEFAULT_CPU_SETTINGS } from './circuit-simulator/types/gpuSettings';
 import SimplifiedSettingsModal from './settings/SimplifiedSettingsModal';
-import { SettingsButton } from './settings/SettingsButton';
 import { useComputationState } from './circuit-simulator/hooks/useComputationState';
 import { useUserProfiles } from '../hooks/useUserProfiles';
 import { useSessionManagement } from '../hooks/useSessionManagement';
@@ -38,8 +37,8 @@ import { SavedProfile } from './circuit-simulator/types/savedProfiles';
 import { CenterParameterPanel } from './circuit-simulator/controls/CenterParameterPanel';
 import { ResnormConfig, ResnormMethod } from './circuit-simulator/utils/resnorm';
 import { AuthModal } from './auth/AuthModal';
-import { UserProfile } from './auth/UserProfile';
 import { useAuth } from './auth/AuthProvider';
+import { SlimNavbar } from './circuit-simulator/SlimNavbar';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;
@@ -166,6 +165,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // SRD upload state
   const [, setSrdUploadMessage] = useState('');
 
+  // Tagged models state - for model tagging and highlighting functionality
+  const [taggedModels, setTaggedModels] = useState<Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>>(new Map());
+
   // Streamlined parameter configuration manager - initialized with defaults to avoid circular deps
   const [paramConfigManager] = useState(() => createParameterConfigManager({
     gridSize: 9,
@@ -186,10 +188,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     isComputingGrid, setIsComputingGrid,
     computationProgress, setComputationProgress,
     computationSummary, setComputationSummary,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     skippedPoints, setSkippedPoints,
     totalGridPoints, setTotalGridPoints,
     actualComputedPoints, setActualComputedPoints,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     memoryLimitedPoints, setMemoryLimitedPoints,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     estimatedMemoryUsage, setEstimatedMemoryUsage,
     userVisualizationPercentage,
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -621,7 +626,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       // Update grid size and frequency settings to match the SRD
       setGridSize(metadata.gridSize);
       // Extract frequency settings from manager config
-      const configData = manager.config;
+      const configData = manager.getConfig();
       if (configData.frequencyPreset) {
         // Update frequency settings based on preset
         switch (configData.frequencyPreset) {
@@ -646,6 +651,18 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       const modelSnapshots = manager.generateModelSnapshots(effectiveLimit);
       setGridResults(modelSnapshots);
 
+      // Generate resnorm groups for visualization (required for spider plot display)
+      if (modelSnapshots.length > 0) {
+        const resnormValues = modelSnapshots.map(m => m.resnorm);
+        const minResnorm = Math.min(...resnormValues);
+        const maxResnorm = Math.max(...resnormValues);
+        const groups = createResnormGroups(modelSnapshots, minResnorm, maxResnorm);
+        setResnormGroups(groups);
+
+        // Switch to VisualizerTab to show the uploaded results
+        setActiveTab('visualizer');
+      }
+
       // Get first model parameters as reference circuit parameters
       if (modelSnapshots.length > 0) {
         const bestModel = modelSnapshots[0]; // First model should be best (lowest resnorm)
@@ -657,7 +674,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setActualComputedPoints(metadata.totalResults);
 
       // Auto-save as profile with file icon indicator
-      const profileName = `📁 ${metadata.title}`;
+      const profileName = `📄 ${metadata.title}`;
       const profileDescription = `Loaded from SRD file: ${metadata.totalResults.toLocaleString()} precomputed results (Grid: ${metadata.gridSize}^5)`;
 
       // Schedule profile saving for after this callback completes (only if user is authenticated)
@@ -672,7 +689,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           const savedProfileId = await handleSaveProfile(profileName, profileDescription, true); // Force new profile
           if (savedProfileId) {
             // Set as active config to maintain tagged models and other data
-            setActiveConfigId(savedProfileId);
+            setActiveConfiguration(savedProfileId);
             console.log(`💾 Auto-saved SRD config as profile: ${savedProfileId}`);
           }
         } catch (saveError) {
@@ -704,7 +721,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       setSrdUploadMessage('');
       console.error('SRD upload processing error:', error);
     }
-  }, [visibleResultsLimit, setGridResults, setTotalGridPoints, setActualComputedPoints, setGridError, updateStatusMessage, setGridSize, setMinFreq, setMaxFreq, setParameters]); // handleSaveProfile used in setTimeout closure intentionally not in deps
+  }, [visibleResultsLimit, setGridResults, setTotalGridPoints, setActualComputedPoints, setGridError, updateStatusMessage, setGridSize, setMinFreq, setMaxFreq, setParameters, setResnormGroups, createResnormGroups, calculateEffectiveVisualizationLimit, setActiveTab]); // handleSaveProfile used in setTimeout closure intentionally not in deps
 
   const handleSRDUploadError = useCallback((error: string) => {
     setGridError(`SRD Upload Error: ${error}`);
@@ -713,39 +730,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     console.error('SRD upload error:', error);
   }, [setGridError, updateStatusMessage]);
 
-  // SRD Download Handler
-  const handleSRDDownload = useCallback(() => {
-    if (!serializedManager) {
-      updateStatusMessage('❌ No computation data available for download');
-      return;
-    }
-
-    const exportCheck = serializedManager.canExport();
-    if (!exportCheck.canExport) {
-      updateStatusMessage(`❌ Cannot export: ${exportCheck.reason}`);
-      return;
-    }
-
-    try {
-      const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-      const filename = `circuit-analysis-${gridSize}x5-${timestamp}`;
-      const title = configurationName || `Circuit Analysis ${gridSize}^5 Grid`;
-
-      serializedManager.exportToSRD(filename, {
-        title,
-        description: `Electrochemical impedance spectroscopy analysis results from ${gridSize}^5 parameter grid computation`,
-        author: user?.email || 'SpideyPlot User'
-      });
-
-      const preview = serializedManager.getExportPreview();
-      updateStatusMessage(`📥 SRD downloaded: ${filename}.srd (${preview.estimatedFileSize}, ${preview.resultCount.toLocaleString()} results)`);
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Download failed';
-      updateStatusMessage(`❌ SRD download failed: ${errorMessage}`);
-      console.error('SRD download error:', error);
-    }
-  }, [serializedManager, gridSize, configurationName, user?.email, updateStatusMessage]);
 
   // Helper function to generate unique circuit names
   const generateUniqueCircuitName = useCallback((baseName: string): string => {
@@ -1148,8 +1132,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Initialize parameters only when no active profile is loaded
   useEffect(() => {
     // Only initialize defaults if no active profile is selected
-    if (activeConfigId || sessionManagement.sessionState.activeCircuitConfig) {
-      console.log('🔄 Skipping parameter initialization - active profile loaded:', activeConfigId || sessionManagement.sessionState.activeCircuitConfig);
+    if (activeConfigId || sessionManagement.sessionState.currentCircuitConfigId) {
+      console.log('🔄 Skipping parameter initialization - active profile loaded:', activeConfigId || sessionManagement.sessionState.currentCircuitConfigId);
       return;
     }
 
@@ -1177,7 +1161,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     });
 
     updateStatusMessage('Initialized with default parameters at 50% of ranges');
-  }, [updateStatusMessage, minFreq, maxFreq, activeConfigId, sessionManagement.sessionState.activeCircuitConfig]);
+  }, [updateStatusMessage, minFreq, maxFreq, activeConfigId, sessionManagement.sessionState.currentCircuitConfigId]);
 
   // Update reference parameters when slider values are initialized
   useEffect(() => {
@@ -1491,7 +1475,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         frequency_range: frequency_range || parameters.frequency_range
       },
       data: spectrumData,
-      color: '#3B82F6',
+      color: '#f97316',
       isVisible: true,
       opacity: 1,
       resnorm: meshPoint.resnorm,
@@ -1762,7 +1746,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           parameters: result.parameters,
           data,
           resnorm: result.resnorm,
-          color: '#3B82F6',
+          color: '#f97316',
           opacity: 0.7,
           isVisible: true,
           timestamp: Date.now(),
@@ -2690,8 +2674,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [circuitConfigurations, updateStatusMessage]);
 
-  // Tagged models state - track models tagged in visualizations
-  const [taggedModels, setTaggedModels] = useState<Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>>(new Map());
+  // Removed unused tagged models state
 
   // Load tagged models from database for current user and profile
   const loadTaggedModelsFromDatabase = useCallback(async () => {
@@ -2762,119 +2745,57 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [user, sessionManagement.isReady, activeConfigId, loadTaggedModelsFromDatabase]);
 
-
-  // Handle model tagging from visualization components
+  // Handle model tagging
   const handleModelTag = useCallback(async (model: ModelSnapshot, tagName: string) => {
-    console.log('HandleModelTag called:', {
-      modelId: model.id,
-      tagName,
-      hasUser: !!user,
-      activeConfigId,
-      sessionReady: sessionManagement.isReady,
-      sessionError: sessionManagement.hasError,
-      sessionState: sessionManagement.sessionState
-    });
-
-    if (!user) {
-      console.warn('No authenticated user for tagging model');
-      updateStatusMessage('Please sign in to tag models');
-      return;
-    }
-
-    if (!sessionManagement.isReady) {
-      console.warn('Session not ready for tagging model');
-      updateStatusMessage('Session not ready - please wait for initialization');
-      return;
-    }
-
-    // Check if we have an active circuit configuration
-    if (!activeConfigId) {
-      updateStatusMessage('Please create or select a circuit configuration first');
+    if (!user || !activeConfigId) {
+      console.warn('⚠️ Cannot tag model: no user or active circuit config');
       return;
     }
 
     try {
-      // Handle tag deletion (empty tagName)
       if (!tagName || tagName.trim() === '') {
-        console.log('Removing tag for model:', model.id);
-        
-        // Find the tagged model to delete from database
-        const currentTag = taggedModels.get(model.id);
-        if (currentTag) {
-          // Use session management to remove tag
-          const success = await sessionManagement.actions.untagModel({
-            modelId: model.id,
-            circuitConfigId: activeConfigId
-          });
-
-          if (success) {
-            console.log('Model tag removed successfully');
-            updateStatusMessage('Model tag removed');
-            
-            // Update local state
-            setTaggedModels(prev => {
-              const newMap = new Map(prev);
-              newMap.delete(model.id);
-              return newMap;
-            });
-          } else {
-            console.error('Failed to remove model tag');
-            updateStatusMessage('Failed to remove tag');
-          }
-        } else {
-          // Just remove from local state if not in database
-          setTaggedModels(prev => {
-            const newMap = new Map(prev);
-            newMap.delete(model.id);
-            return newMap;
-          });
-          updateStatusMessage('Tag removed');
+        // Remove tag if tagName is empty
+        const modelKey = model.id;
+        if (taggedModels.has(modelKey)) {
+          // TODO: Remove from database
+          const newTaggedModels = new Map(taggedModels);
+          newTaggedModels.delete(modelKey);
+          setTaggedModels(newTaggedModels);
+          updateStatusMessage(`🗑️ Removed tag for model`);
         }
         return;
       }
 
-      // Handle tag creation/update
-      const success = await sessionManagement.actions.tagModel({
+      // Add new tag
+      const { TaggedModelsService } = await import('../../lib/taggedModelsService');
+
+      const taggedModel = await TaggedModelsService.createTaggedModel(user.id, {
         circuitConfigId: activeConfigId,
         modelId: model.id,
-        tagName,
+        tagName: tagName.trim(),
         tagCategory: 'user',
-        circuitParameters: model.parameters as unknown as Record<string, unknown>,
-        resnormValue: model.resnorm || 0,
-        notes: `Tagged from visualization at ${new Date().toLocaleString()}`,
-        isInteresting: false
+        circuitParameters: model.parameters,
+        resnormValue: model.resnorm,
+        isInteresting: true
       });
 
-      if (success) {
-        console.log('Model tagged successfully via session management');
-        updateStatusMessage(`Model tagged as "${tagName}" and saved to database`);
-        
-        // Update local tagged models state for immediate UI feedback
-        setTaggedModels(prev => {
-          const newMap = new Map(prev);
-          newMap.set(model.id, {
-            tagName,
-            profileId: activeConfigId,
-            resnormValue: model.resnorm || 0,
-            taggedAt: Date.now(),
-            notes: `Tagged from visualization at ${new Date().toLocaleString()}`
-          });
-          return newMap;
-        });
-      } else {
-        console.error('Failed to tag model via session management');
-        console.log('Session state debug:', {
-          isReady: sessionManagement.isReady,
-          hasError: sessionManagement.hasError,
-          sessionState: sessionManagement.sessionState
-        });
-        updateStatusMessage('Failed to tag model - session not ready or authentication issue');
-      }
+      // Update local state
+      const newTaggedModels = new Map(taggedModels);
+      newTaggedModels.set(model.id, {
+        tagName: taggedModel.tagName,
+        profileId: taggedModel.circuitConfigId,
+        resnormValue: taggedModel.resnormValue || 0,
+        taggedAt: new Date(taggedModel.taggedAt).getTime(),
+        notes: taggedModel.notes
+      });
+      setTaggedModels(newTaggedModels);
+      updateStatusMessage(`🏷️ Tagged model: ${tagName}`);
+
     } catch (error) {
-      console.error('Error during model tagging:', error);
-      updateStatusMessage(`Failed to tag model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('❌ Failed to tag model:', error);
+      updateStatusMessage('❌ Failed to tag model');
     }
-  }, [activeConfigId, updateStatusMessage, user, sessionManagement, taggedModels]);
+  }, [user, activeConfigId, taggedModels, updateStatusMessage]);
 
   // Handle static render job creation
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -2947,7 +2868,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               title={leftNavCollapsed ? "SpideyPlot" : "Refresh page"}
             >
               <Image 
-                src="/spiderweb.png" 
+                src="/logo.png"
                 alt="SpideyPlot" 
                 width={24}
                 height={24}
@@ -2962,13 +2883,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-neutral-700 transition-all duration-200"
                 title="Collapse sidebar"
               >
-                <svg 
+                <svg
                   className="w-4 h-4"
-                  fill="none" 
-                  stroke="currentColor" 
+                  fill="none"
+                  stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                  <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth={2} />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v18" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 8l-3 4 3 4" />
                 </svg>
               </button>
             )}
@@ -2985,13 +2908,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center rounded-md bg-neutral-700 hover:bg-neutral-600 transition-all duration-200 opacity-0 group-hover:opacity-100 z-10"
               title="Expand sidebar"
             >
-              <svg 
+              <svg
                 className="w-4 h-4"
-                fill="none" 
-                stroke="currentColor" 
+                fill="none"
+                stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                <rect x="3" y="3" width="18" height="18" rx="2" strokeWidth={2} />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v18" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 8l3 4-3 4" />
               </svg>
             </button>
           )}
@@ -3003,7 +2928,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           <div className="p-3 pb-2 flex-shrink-0">
             <button
               onClick={handleNewCircuit}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
+              className="w-full bg-orange-600 hover:bg-orange-700 text-white px-4 py-2.5 rounded-md text-sm font-medium transition-colors duration-200 flex items-center justify-center gap-2"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -3210,7 +3135,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           <div className="flex-shrink-0 px-3 pb-2">
             <button
               onClick={handleNewCircuit}
-              className="w-10 h-10 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors duration-200"
+              className="w-10 h-10 flex items-center justify-center rounded-md bg-orange-600 hover:bg-orange-700 text-white transition-colors duration-200"
               title="New Circuit"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3278,124 +3203,28 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {/* Main Content Area - Full Width Layout */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Clean Header with integrated status */}
-        <header className="px-6 py-3 flex items-center justify-between z-30 flex-shrink-0 bg-neutral-950">
-          {/* Left side: compact status indicator */}
-          <div className="flex items-center gap-3">
-            {statusMessage && (
-              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs max-w-xs truncate flex items-center">
-                <svg className="w-3 h-3 mr-1.5 flex-shrink-0 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="truncate text-neutral-300">{statusMessage}</span>
-              </div>
-            )}
-          </div>
+        {/* Slim Navbar */}
+        <SlimNavbar
+          statusMessage={statusMessage}
+          gridResults={gridResults}
+          gridSize={parameters.gridSize}
+          onSettingsOpen={() => setSettingsModalOpen(true)}
+          user={user}
+          onSignOut={signOut}
+        />
 
-          {/* Right side: Tab-specific info, user profile, and toolbox button */}
-          <div className="flex items-center gap-3">
-            {/* Tab-specific status info */}
-            {visualizationTab === 'visualizer' && (
-              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-                <span className="text-neutral-400">Showing: </span>
-                <span className="text-white font-medium">{gridResults.length.toLocaleString()}</span>
-                
-                {/* Show actual computed vs theoretical points */}
-                {actualComputedPoints > 0 && actualComputedPoints !== totalGridPoints && (
-                  <>
-                    <span className="text-neutral-400 ml-1.5">of</span>
-                    <span className="text-green-300 font-medium ml-1">{actualComputedPoints.toLocaleString()}</span>
-                    <span className="text-neutral-400 ml-1">computed</span>
-                  </>
-                )}
-                
-                <span className="text-neutral-400 ml-1.5">/</span>
-                <span className="text-amber-300 font-semibold ml-1">{totalGridPoints.toLocaleString()}</span>
-                <span className="text-neutral-400 ml-1">total</span>
-                
-                {/* Show skipped points from symmetric optimization */}
-                {skippedPoints > 0 && (
-                  <>
-                    <span className="text-neutral-400 ml-1.5">•</span>
-                    <span className="text-orange-300 ml-1">{skippedPoints.toLocaleString()} skipped</span>
-                  </>
-                )}
-                
-                {/* Show memory-limited points */}
-                {memoryLimitedPoints > 0 && memoryLimitedPoints < gridResults.length && (
-                  <>
-                    <span className="text-neutral-400 ml-1.5">•</span>
-                    <span className="text-red-300 ml-1">{(gridResults.length - memoryLimitedPoints).toLocaleString()} hidden</span>
-                  </>
-                )}
-                
-                <span className="text-neutral-400 ml-1.5">|</span>
-                <span className="text-neutral-400 ml-1.5">Freq: </span>
-                <span className="text-white font-medium">{minFreq.toFixed(2)} - {maxFreq.toFixed(0)} Hz</span>
-                
-                {/* Show memory usage if significant */}
-                {estimatedMemoryUsage > 100 && (
-                  <>
-                    <span className="text-neutral-400 ml-1.5">|</span>
-                    <span className="text-purple-300 ml-1">{estimatedMemoryUsage.toFixed(0)}MB</span>
-                  </>
-                )}
-              </div>
-            )}
-            
-            {/* Orchestrator status removed - functionality integrated into Playground */}
-            
-            {visualizationTab === 'data' && (
-              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-                <span className="text-neutral-400">Data: </span>
-                <span className="text-white font-medium">{gridResults.length.toLocaleString()} models</span>
-                <span className="text-neutral-400 ml-1.5">•</span>
-                <span className="text-neutral-400 ml-1.5">Sortable view</span>
-              </div>
-            )}
-            
-            {visualizationTab === 'math' && (
-              <div className="bg-neutral-800 rounded-md px-3 py-1.5 text-xs">
-                <span className="text-neutral-400">Circuit: </span>
-                <span className="text-white font-medium">Randles Model</span>
-                <span className="text-neutral-400 ml-1.5">•</span>
-                <span className="text-neutral-400 ml-1.5">Mathematical reference</span>
-              </div>
-            )}
-            
-            {/* Settings and User Profile */}
-            <div className="flex items-center space-x-2">
-              <SettingsButton onClick={() => setSettingsModalOpen(true)} />
-              {user ? (
-                <UserProfile 
-                  user={user}
-                  onSignOut={() => signOut()}
-                />
-              ) : (
-                <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  Sign In
-                </button>
-              )}
-            </div>
-            
-          </div>
-        </header>
-        
-        {/* Main visualization area */}
+        {/* Main visualization area with right sidebar */}
         <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 p-4 bg-neutral-950 overflow-hidden">
+          <div className={`flex-1 p-4 bg-neutral-950 overflow-hidden transition-all duration-300 ${leftNavCollapsed ? 'ml-0' : ''}`}>
             {isComputingGrid ? (
               <div className="flex flex-col h-full bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md overflow-hidden">
                 {/* Header with Progress */}
                 <div className="flex-shrink-0 p-4 border-b border-neutral-700">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center">
-                      <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-400 mr-3"></div>
+                      <div className="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-orange-400 mr-3"></div>
                       <div>
                         <p className="text-lg text-neutral-200 font-medium">
                           Mathematical Circuit Analysis
@@ -3424,7 +3253,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     <div className="w-full">
                       <div className="w-full bg-neutral-700 rounded-full h-2">
                         <div 
-                          className="bg-blue-500 h-2 rounded-full transition-all duration-300" 
+                          className="bg-orange-500 h-2 rounded-full transition-all duration-300" 
                           style={{ width: `${computationProgress.overallProgress}%` }}
                         ></div>
                       </div>
@@ -3474,7 +3303,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                         {computationProgress?.processed && computationProgress?.total && (
                           <div className="flex justify-between">
                             <span className="text-neutral-400">Progress:</span>
-                            <span className="text-blue-400 font-mono">{Math.round((computationProgress.processed / computationProgress.total) * 100)}%</span>
+                            <span className="text-orange-400 font-mono">{Math.round((computationProgress.processed / computationProgress.total) * 100)}%</span>
                           </div>
                         )}
                         {computationProgress?.chunkIndex && computationProgress?.totalChunks && (
@@ -3517,7 +3346,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                           {/* Current status at top */}
                           {statusMessage && (
                             <div className="flex border-t border-neutral-700 pt-2 mt-2">
-                              <span className="text-blue-400 mr-2 flex-shrink-0">NOW</span>
+                              <span className="text-orange-400 mr-2 flex-shrink-0">NOW</span>
                               <span className="text-blue-300 font-medium truncate">{statusMessage}</span>
                             </div>
                           )}
@@ -3563,7 +3392,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       <div className="text-neutral-400">Bottleneck:</div>
                       <div className="text-orange-400 font-mono">{performanceLog.bottleneck}</div>
                       <div className="text-neutral-400">Throughput:</div>
-                      <div className="text-blue-400 font-mono">{performanceLog.efficiency.throughput.toFixed(0)} pts/s</div>
+                      <div className="text-orange-400 font-mono">{performanceLog.efficiency.throughput.toFixed(0)} pts/s</div>
                       <div className="text-neutral-400">Memory:</div>
                       <div className="text-purple-400 font-mono">~{performanceLog.efficiency.memoryUsage.toFixed(1)}MB</div>
                     </div>
@@ -3596,7 +3425,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               // Show visualization if we have grid results (current portion-based system)
               gridResults && gridResults.length > 0 ? (
                 <div className="h-full">
-                  <VisualizerTab 
+                  <VisualizerTab
                     resnormGroups={resnormGroups.length > 0 ? resnormGroups : []}
                     gridResults={gridResults}
                     hiddenGroups={hiddenGroups}
@@ -3616,10 +3445,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     onGroupPortionChange={(value) => setStaticRenderSettings({...staticRenderSettings, groupPortion: value})}
                     taggedModels={taggedModels}
                     onModelTag={handleModelTag}
-                    onSRDDownload={handleSRDDownload}
-                    canDownloadSRD={!!serializedManager && serializedManager.canExport().canExport}
-                    serializedManager={serializedManager || undefined}
-                    enablePagination={!!serializedManager && memoryOptimizationEnabled}
                   />
                 </div>
               ) : (

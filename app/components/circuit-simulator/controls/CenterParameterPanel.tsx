@@ -269,7 +269,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
             value={configurationName}
             onChange={(e) => onConfigurationNameChange(e.target.value)}
             placeholder="Enter configuration name..."
-            className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
           />
         </div>
       )}
@@ -280,7 +280,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
           <button
             className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-md transition-all duration-200 ${
               operationMode === 'compute'
-                ? 'bg-blue-600 text-white shadow-sm'
+                ? 'bg-orange-600 text-white shadow-sm'
                 : 'text-neutral-400 hover:text-white hover:bg-neutral-700'
             }`}
             onClick={() => setOperationMode('compute')}
@@ -311,25 +311,25 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
         <div className="mt-2 text-xs text-neutral-500 text-center">
           {operationMode === 'compute'
             ? 'Configure parameters and compute new grid results'
-            : 'Upload pre-computed serialized resnorm data (.srd files)'
+            : 'Upload pre-computed serialized resnorm data (.json files)'
           }
         </div>
       </div>
 
       {/* Conditional Content Based on Operation Mode */}
       {operationMode === 'compute' ? (
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Configuration Section */}
           <CollapsibleSection title="Configuration" defaultOpen={true}>
-            <div className="space-y-6 mt-4">
+            <div className="space-y-8">
               {/* Frequency Range */}
               <div>
-                <label className="block text-sm font-medium text-neutral-300 mb-3">Frequency Range</label>
-                
+                <label className="block text-sm font-medium text-neutral-300 mb-4">Frequency Range</label>
+
                 {/* Min and Max Frequency Inputs */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs text-neutral-400 mb-1">Min Frequency (Hz)</label>
+                    <label className="block text-xs text-neutral-400 mb-2">Min Frequency (Hz)</label>
                     <input
                       type="text"
                       value={minFreq === 0 ? '' : minFreq.toString()}
@@ -347,12 +347,12 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                         }
                         // If invalid, don't update but allow user to keep typing
                       }}
-                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
                       placeholder="0.1 or 1e2"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-neutral-400 mb-1">Max Frequency (Hz)</label>
+                    <label className="block text-xs text-neutral-400 mb-2">Max Frequency (Hz)</label>
                     <input
                       type="text"
                       value={maxFreq === 0 ? '' : maxFreq.toString()}
@@ -370,21 +370,23 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                         }
                         // If invalid, don't update but allow user to keep typing
                       }}
-                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                      className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
                       placeholder="1e5 or 100000"
                     />
                   </div>
                 </div>
 
                 {/* Frequency Range Validation Warnings */}
-                {(minFreq >= maxFreq) && (
-                  <div className="mb-3 p-2 bg-red-900/20 border border-red-700/50 rounded text-red-300 text-xs">
-                    ⚠️ Warning: Minimum frequency must be less than maximum frequency
-                  </div>
-                )}
-                {(minFreq <= 0 || maxFreq <= 0) && (
-                  <div className="mb-3 p-2 bg-red-900/20 border border-red-700/50 rounded text-red-300 text-xs">
-                    ⚠️ Warning: Frequencies must be positive values
+                {(minFreq >= maxFreq || minFreq <= 0 || maxFreq <= 0) && (
+                  <div className="mt-4 p-3 bg-red-900/20 border border-red-700/50 rounded-lg">
+                    <div className="text-red-300 text-sm space-y-1">
+                      {(minFreq >= maxFreq) && (
+                        <div>⚠️ Minimum frequency must be less than maximum frequency</div>
+                      )}
+                      {(minFreq <= 0 || maxFreq <= 0) && (
+                        <div>⚠️ Frequencies must be positive values</div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -403,12 +405,11 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 />
               </div>
 
-
               {/* Grid Configuration */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* Points per Parameter */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
                     <label className="text-sm font-medium text-neutral-200">
                       Points per Parameter
                     </label>
@@ -426,8 +427,8 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 </div>
 
                 {/* Computation Result Limit */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
                     <label className="text-sm font-medium text-neutral-200">
                       Max Results to Store
                     </label>
@@ -438,7 +439,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   <select
                     value={maxComputationResults}
                     onChange={(e) => onMaxComputationResultsChange(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                    className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
                   >
                     <option value={500}>500 (Ultra Fast)</option>
                     <option value={1000}>1,000 (Fast)</option>
@@ -446,43 +447,38 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                     <option value={3000}>3,000 (Quality)</option>
                     <option value={5000}>5,000 (High Quality)</option>
                   </select>
-                  <div className="text-xs text-neutral-500">
+                  <div className="text-xs text-neutral-500 mt-2">
                     Higher limits find better results but use more memory
                   </div>
                 </div>
               </div>
 
-              {/* Visualization Controls */}
-              <div className="grid grid-cols-1 gap-6">
-                {/* Group Portion - moved from above */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-neutral-200">
-                      Group Portion (%)
-                    </label>
-                    <div className="text-sm text-neutral-400">
-                      {shownModels.toLocaleString()} models
-                    </div>
-                  </div>
-                  <EnhancedInput
-                    label=""
-                    value={parseFloat(groupPortionSampler.formatValue(currentGroupPercentage))}
-                    onChange={handleGroupPortionPercentageChange}
-                    min={0.01}
-                    max={100}
-                    step={groupPortionSampler.getStepSize(currentGroupPercentage)}
-                    showSlider={true}
-                  />
-                  <div className="flex justify-between text-xs text-neutral-500">
+              {/* Group Portion Control */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-neutral-200">
+                    Group Portion (%)
+                  </label>
+                  <div className="text-sm text-neutral-400">
+                    {shownModels.toLocaleString()} models
                   </div>
                 </div>
+                <EnhancedInput
+                  label=""
+                  value={parseFloat(groupPortionSampler.formatValue(currentGroupPercentage))}
+                  onChange={handleGroupPortionPercentageChange}
+                  min={0.01}
+                  max={100}
+                  step={groupPortionSampler.getStepSize(currentGroupPercentage)}
+                  showSlider={true}
+                />
               </div>
             </div>
           </CollapsibleSection>
 
           {/* Circuit Parameters Section */}
           <CollapsibleSection title="Circuit Parameters" defaultOpen={true}>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
               <EnhancedInput
                 label="R shunt"
                 value={isNaN(circuitParams?.Rsh || 0) ? 0 : (circuitParams?.Rsh || 0)}
@@ -538,16 +534,16 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
           {/* Visualization Settings */}
           <CollapsibleSection title="Visualization Settings" defaultOpen={true}>
-            <div className="space-y-4 mt-4">
+            <div className="space-y-6">
               {/* Visualization Type */}
               <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">
+                <label className="block text-sm font-medium text-neutral-200 mb-3">
                   Visualization Type
                 </label>
                 <select
                   value={staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' : 'spider3d'}
                   onChange={(e) => handleVisualizationTypeChange(e.target.value as 'spider3d' | 'nyquist')}
-                  className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                  className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
                 >
                   <option value="spider3d">Spider 3D</option>
                   <option value="nyquist">Nyquist Plot</option>
@@ -556,13 +552,13 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
               {/* Resnorm Method - Fixed to SSR */}
               <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-2">
+                <label className="block text-sm font-medium text-neutral-200 mb-3">
                   Resnorm Method
                 </label>
                 <div className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200">
                   SSR - Sum of Squared Residuals (Fixed)
                 </div>
-                <p className="text-xs text-neutral-400 mt-1">
+                <p className="text-xs text-neutral-400 mt-2">
                   Classic least-squares in complex plane - equal weight to real and imaginary parts
                 </p>
               </div>
@@ -572,7 +568,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
 
 
           {/* Action Buttons */}
-          <div className="flex gap-3 pt-4">
+          <div className="flex flex-col sm:flex-row gap-4 pt-6">
             {selectedProfileId && (
               <button
                 onClick={() => {
@@ -580,9 +576,9 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   onSaveProfile(name, 'Last action: Parameters updated from center panel', false);
                 }}
                 disabled={isComputing || !allValid}
-                className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors"
+                className="flex-1 px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors"
               >
-                Save
+                Update Profile
               </button>
             )}
             <button
@@ -591,35 +587,35 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 onSaveProfile(name, 'Last action: New profile saved from center panel', true);
               }}
               disabled={isComputing || !allValid}
-              className={`flex-1 px-4 py-3 ${selectedProfileId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors`}
+              className={`flex-1 px-6 py-3 ${selectedProfileId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-green-600 hover:bg-green-700'} disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors`}
             >
               {selectedProfileId ? 'Save As New' : 'Save Profile'}
             </button>
             <button
               onClick={onCompute}
               disabled={isComputing || !allValid}
-              className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-medium rounded-lg transition-colors relative overflow-hidden"
+              className="flex-1 px-8 py-3 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-700 disabled:text-neutral-400 text-white font-bold rounded-lg transition-colors relative overflow-hidden"
             >
               {isComputing && (
-                <div className="absolute inset-0 bg-blue-700">
-                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/30 to-transparent animate-pulse"></div>
+                <div className="absolute inset-0 bg-orange-700">
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-orange-500/30 to-transparent animate-pulse"></div>
                 </div>
               )}
               <span className="relative z-10">
-                {isComputing ? 'Computing...' : 'Compute'}
+                {isComputing ? 'Computing...' : 'Compute Grid'}
               </span>
             </button>
           </div>
 
           {!allValid && validationErrors.length > 0 && (
-            <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-3 text-yellow-200 text-sm space-y-2">
-              <div className="font-medium">⚠️ Validation Errors:</div>
-              <ul className="list-disc list-inside space-y-1">
+            <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-4 mt-6">
+              <div className="text-yellow-200 font-medium mb-3">⚠️ Validation Errors:</div>
+              <ul className="list-disc list-inside space-y-2 text-yellow-200">
                 {validationErrors.map((error, index) => (
-                  <li key={index} className="text-xs">{error}</li>
+                  <li key={index} className="text-sm">{error}</li>
                 ))}
               </ul>
-              <div className="text-xs text-yellow-300 mt-2">
+              <div className="text-sm text-yellow-300 mt-3 pt-3 border-t border-yellow-500/30">
                 Fix these errors to enable computation. You can enter any values, but they must be within valid ranges to proceed.
               </div>
             </div>
@@ -631,7 +627,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
           <div className="text-center mb-6">
             <h2 className="text-2xl font-semibold text-white mb-2">Upload Serialized Data</h2>
             <p className="text-neutral-400">
-              Skip computation entirely by uploading pre-computed .srd files with resnorm analysis results
+              Skip computation entirely by uploading pre-computed .json files with resnorm analysis results
             </p>
           </div>
 

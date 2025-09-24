@@ -63,8 +63,8 @@ export class SRDFileHandler {
       // Validate data before download
       this.validateSRDData(data);
 
-      // Ensure proper file extension
-      const finalFilename = filename.endsWith('.srd') ? filename : `${filename}.srd`;
+      // Ensure proper file extension - prefer .json since it's more standard
+      const finalFilename = filename.endsWith('.json') || filename.endsWith('.srd') ? filename : `${filename}.json`;
 
       // Create formatted JSON
       const jsonData = JSON.stringify(data, null, 2);
@@ -98,7 +98,7 @@ export class SRDFileHandler {
   }
 
   /**
-   * Upload and parse .srd file
+   * Upload and parse .srd or .json file
    */
   static async upload(file: File): Promise<SRDData> {
     try {
@@ -116,16 +116,24 @@ export class SRDFileHandler {
         throw new SRDValidationError('Invalid JSON format', 'INVALID_JSON');
       }
 
-      // Validate SRD format
-      const srdData = this.validateAndCast(parsedData);
+      // Check if this is a strict SRD format or flexible JSON
+      let srdData: SRDData;
+      try {
+        // Try strict SRD validation first
+        srdData = this.validateAndCast(parsedData);
+      } catch {
+        // If strict validation fails, try to convert flexible JSON to SRD format
+        console.log('📄 Not strict SRD format, attempting flexible JSON parsing...');
+        srdData = this.convertFlexibleJsonToSRD(parsedData, file.name);
+      }
 
-      console.log(`📤 SRD file uploaded: ${file.name}`);
+      console.log(`📤 File uploaded: ${file.name}`);
       console.log(`📊 Data: ${srdData.serializedResults.length.toLocaleString()} results from grid ${srdData.metadata.gridSize}^5`);
 
       return srdData;
 
     } catch (error) {
-      console.error('❌ SRD upload failed:', error);
+      console.error('❌ File upload failed:', error);
       throw error; // Re-throw for caller handling
     }
   }
@@ -271,9 +279,10 @@ export class SRDFileHandler {
   // Private helper methods
 
   private static async validateFile(file: File): Promise<void> {
-    // Check file extension
-    if (!file.name.toLowerCase().endsWith('.srd')) {
-      throw new SRDValidationError('Invalid file type. Expected .srd file', 'INVALID_FILE_TYPE');
+    // Check file extension - accept both .srd and .json since SRD is just JSON
+    const fileName = file.name.toLowerCase();
+    if (!fileName.endsWith('.srd') && !fileName.endsWith('.json')) {
+      throw new SRDValidationError('Invalid file type. Expected .srd or .json file', 'INVALID_FILE_TYPE');
     }
 
     // Check file size
@@ -322,6 +331,161 @@ export class SRDFileHandler {
     const traditionalSize = resultCount * 4096;
     const serializedSize = resultCount * 150;
     return ((1 - serializedSize / traditionalSize) * 100);
+  }
+
+  /**
+   * Convert flexible JSON to SRD format
+   */
+  private static convertFlexibleJsonToSRD(data: unknown, filename: string): SRDData {
+    if (!data || typeof data !== 'object') {
+      throw new SRDValidationError('Invalid JSON: must be an object', 'INVALID_JSON');
+    }
+
+    const obj = data as Record<string, unknown>;
+
+    // Handle different JSON formats
+    let serializedResults: SerializedResult[];
+    let metadata: Partial<SRDMetadata> = {};
+
+    // Check if it's already an array of results
+    if (Array.isArray(data)) {
+      serializedResults = this.normalizeResultArray(data);
+    }
+    // Check if it has a results array property
+    else if (Array.isArray(obj.results)) {
+      serializedResults = this.normalizeResultArray(obj.results);
+      // Try to extract metadata if present
+      if (obj.metadata && typeof obj.metadata === 'object') {
+        metadata = obj.metadata as Partial<SRDMetadata>;
+      }
+    }
+    // Check if it has serializedResults already
+    else if (Array.isArray(obj.serializedResults)) {
+      serializedResults = this.normalizeResultArray(obj.serializedResults);
+      if (obj.metadata && typeof obj.metadata === 'object') {
+        metadata = obj.metadata as Partial<SRDMetadata>;
+      }
+    }
+    // Check for other common patterns
+    else if (Array.isArray(obj.data)) {
+      serializedResults = this.normalizeResultArray(obj.data);
+    }
+    // Check for exported models from the app
+    else if (Array.isArray(obj.models)) {
+      serializedResults = this.normalizeResultArray(obj.models);
+    }
+    else {
+      throw new SRDValidationError('No valid results array found in JSON. Expected "results", "serializedResults", "data", or "models" array.', 'NO_RESULTS_ARRAY');
+    }
+
+    // Extract additional metadata from exported format
+    let extractedTitle = metadata.title || filename.replace(/\.(json|srd)$/i, '');
+    let extractedDescription = metadata.description || 'Imported from JSON file';
+
+    // Check if this is an exported model file with exportDate
+    if (obj.exportDate && obj.referenceParameters) {
+      const exportDate = new Date(obj.exportDate as string);
+      extractedTitle = `Exported Models - ${exportDate.toLocaleDateString()}`;
+      extractedDescription = `Exported from spider plot on ${exportDate.toLocaleString()}`;
+    }
+
+    // Create SRD-compatible metadata
+    const srdMetadata: SRDMetadata = {
+      version: this.CURRENT_VERSION,
+      format: this.EXPECTED_FORMAT,
+      created: obj.exportDate as string || new Date().toISOString(),
+      title: extractedTitle,
+      description: extractedDescription,
+      gridSize: metadata.gridSize || this.inferGridSize(serializedResults),
+      frequencyPreset: metadata.frequencyPreset || 'custom',
+      totalResults: serializedResults.length,
+      compressionRatio: this.estimateCompressionRatio(serializedResults.length),
+      memoryOptimized: true,
+      author: metadata.author,
+      tags: metadata.tags
+    };
+
+    return {
+      metadata: srdMetadata,
+      serializedResults
+    };
+  }
+
+  /**
+   * Normalize result array to SRD format
+   */
+  private static normalizeResultArray(results: unknown[]): SerializedResult[] {
+    return results.map((item, index) => {
+      if (!item || typeof item !== 'object') {
+        throw new SRDValidationError(`Invalid result at index ${index}: must be an object`, 'INVALID_RESULT');
+      }
+
+      const result = item as Record<string, unknown>;
+
+      // Extract required fields with fallbacks
+      let configId = result.configId || result.id || result.config_id;
+      let frequencyConfigId = result.frequencyConfigId || result.freq_id || result.frequency_id || 'freq_0';
+      const resnorm = result.resnorm || result.residual || result.error;
+
+      // Generate proper ConfigId format (gridSize_rshIdx_raIdx_caIdx_rbIdx_cbIdx)
+      // If configId doesn't match the expected format, generate a synthetic one
+      if (!configId || typeof configId !== 'string' || !configId.match(/^\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2}$/)) {
+        // For imported data, generate synthetic config IDs based on index
+        // This allows the data to be loaded even if the original format doesn't match
+        const gridSize = 9; // Default grid size for imports
+        const maxIdx = gridSize - 1;
+
+        // Distribute indices across the grid space using the result index
+        const totalCombinations = Math.pow(gridSize, 5);
+        const scaledIndex = Math.floor((index / results.length) * totalCombinations);
+
+        // Convert scaled index to 5D grid coordinates
+        let remaining = scaledIndex;
+        const cbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+        const rbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+        const caIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+        const raIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+        const rshIdx = remaining % gridSize;
+
+        configId = `${gridSize.toString().padStart(2, '0')}_${rshIdx.toString().padStart(2, '0')}_${raIdx.toString().padStart(2, '0')}_${caIdx.toString().padStart(2, '0')}_${rbIdx.toString().padStart(2, '0')}_${cbIdx.toString().padStart(2, '0')}`;
+
+        console.log(`🔧 Generated synthetic configId for index ${index}: ${configId} (original: ${result.configId || result.id || 'none'})`);
+      }
+      if (typeof frequencyConfigId !== 'string') {
+        frequencyConfigId = 'freq_0';
+      }
+      if (typeof resnorm !== 'number' || !isFinite(resnorm)) {
+        throw new SRDValidationError(`Invalid resnorm at index ${index}: must be a finite number`, 'INVALID_RESNORM');
+      }
+
+      return {
+        configId: configId as string,
+        frequencyConfigId: frequencyConfigId as string,
+        resnorm: resnorm as number,
+        computationTime: typeof result.computationTime === 'number' ? result.computationTime : undefined,
+        timestamp: typeof result.timestamp === 'string' ? result.timestamp : undefined
+      };
+    });
+  }
+
+  /**
+   * Infer grid size from results
+   */
+  private static inferGridSize(results: SerializedResult[]): number {
+    const totalResults = results.length;
+    // Common grid sizes: 3^5=243, 5^5=3125, 7^5=16807, 9^5=59049
+    const commonSizes = [3, 5, 7, 9, 11, 13, 15, 17, 19];
+
+    for (const size of commonSizes) {
+      if (Math.pow(size, 5) === totalResults) {
+        return size;
+      }
+    }
+
+    // If no exact match, estimate
+    const estimated = Math.round(Math.pow(totalResults, 1/5));
+    console.warn(`⚠️ Could not determine exact grid size. Estimated: ${estimated} (${totalResults} results)`);
+    return Math.max(3, estimated);
   }
 }
 

@@ -58,7 +58,7 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
             id="user-controlled-limits"
             checked={isUserControlledLimits}
             onChange={(e) => setIsUserControlledLimits(e.target.checked)}
-            className="w-4 h-4 text-blue-600 bg-neutral-700 border-neutral-600 rounded focus:ring-blue-500"
+            className="w-4 h-4 text-orange-600 bg-neutral-700 border-neutral-600 rounded focus:ring-orange-500"
           />
           <label htmlFor="user-controlled-limits" className="text-xs text-neutral-300">
             Custom Control
@@ -78,7 +78,7 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
         </div>
         <div className="flex justify-between">
           <span className="text-neutral-400">Current %:</span>
-          <span className="text-blue-300">
+          <span className="text-orange-300">
             {totalComputedPoints > 0 ? ((currentlyDisplayed / totalComputedPoints) * 100).toFixed(1) : '0'}%
           </span>
         </div>
@@ -96,7 +96,7 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs text-neutral-300">Display Percentage</label>
-              <span className="text-xs font-mono text-blue-300">{userVisualizationPercentage}%</span>
+              <span className="text-xs font-mono text-orange-300">{userVisualizationPercentage}%</span>
             </div>
             
             <input
@@ -117,7 +117,7 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
                   onClick={() => setUserVisualizationPercentage(pct)}
                   className={`px-2 py-1 text-xs rounded transition-colors ${
                     userVisualizationPercentage === pct
-                      ? 'bg-blue-600 text-white'
+                      ? 'bg-orange-600 text-white'
                       : 'bg-neutral-600 text-neutral-300 hover:bg-neutral-500'
                   }`}
                 >
@@ -152,15 +152,15 @@ export const VisualizationLimitsControl: React.FC<VisualizationLimitsControlProp
           </div>
 
           {/* Projection Preview */}
-          <div className="bg-neutral-700 rounded p-3 text-xs space-y-1 border-l-2 border-blue-500">
+          <div className="bg-neutral-700 rounded p-3 text-xs space-y-1 border-l-2 border-orange-500">
             <div className="text-neutral-300 font-medium mb-1">Projected with Settings:</div>
             <div className="flex justify-between">
               <span className="text-neutral-400">Will Display:</span>
-              <span className="text-blue-300 font-medium">{projectedDisplayed.toLocaleString()}</span>
+              <span className="text-orange-300 font-medium">{projectedDisplayed.toLocaleString()}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-neutral-400">Projected %:</span>
-              <span className="text-blue-300">
+              <span className="text-orange-300">
                 {totalComputedPoints > 0 ? ((projectedDisplayed / totalComputedPoints) * 100).toFixed(1) : '0'}%
               </span>
             </div>

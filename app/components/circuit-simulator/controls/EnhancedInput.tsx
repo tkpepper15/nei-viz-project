@@ -116,7 +116,7 @@ export const EnhancedInput: React.FC<EnhancedInputProps> = ({
     if (!isValid && inputValue !== '') {
       return 'bg-neutral-800 border-red-500 text-white focus:border-red-400 focus:ring-red-500/50';
     }
-    return 'bg-neutral-800 border-neutral-600 text-white focus:border-blue-400 focus:ring-blue-500/50';
+    return 'bg-neutral-800 border-neutral-600 text-white focus:border-orange-400 focus:ring-orange-500/50';
   };
   
   const getValidationMessage = () => {

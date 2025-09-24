@@ -175,7 +175,7 @@ export const SavedProfiles: React.FC<SavedProfilesProps> = ({
             placeholder="Search circuits..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-blue-500"
+            className="w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 placeholder-neutral-400 focus:outline-none focus:border-orange-500"
           />
         </div>
       )}

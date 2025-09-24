@@ -31,8 +31,9 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
   topConfigurations,
   currentParameters,
   selectedConfigIndex,
+  onConfigurationSelect,
   isVisible,
-  highlightedModelId
+  highlightedModelId // eslint-disable-line @typescript-eslint/no-unused-vars
 }) => {
   // State for table functionality
   const [sortColumn, setSortColumn] = useState<'frequency' | 'resnorm'>('frequency');
@@ -189,7 +190,7 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
       return isMin ? 'bg-green-900/30 text-green-200' : 'bg-red-900/30 text-red-200';
     } else {
       // For impedance values, just highlight extremes
-      return isMin ? 'bg-blue-900/30 text-blue-200' : 'bg-orange-900/30 text-orange-200';
+      return isMin ? 'bg-orange-900/30 text-orange-200' : 'bg-green-900/30 text-green-200';
     }
   }, []);
 
@@ -198,30 +199,36 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
   return (
     <div className="flex-1 overflow-y-auto min-h-0 bg-neutral-900">
       <div className="p-4 space-y-4">
-        {/* Circuit Selection Integration Notice */}
-        {selectedModel && (
-          <div className="bg-blue-900/20 rounded-lg p-3 border border-blue-700/30">
-            <div className="text-xs text-blue-200">
-              <span className="font-medium">Selected from right panel:</span> {selectedModel.name}
-              {selectedModel.resnorm && (
-                <span className="ml-2">• Resnorm: {selectedModel.resnorm.toExponential(3)}</span>
-              )}
-              {highlightedModelId === selectedModel.id && (
-                <span className="ml-2 px-2 py-0.5 bg-blue-600 text-blue-100 rounded text-xs">Highlighted in 3D</span>
-              )}
+
+        {/* Resnorm Model Selection Dropdown */}
+        {topConfigurations.length > 0 && (
+          <div className="flex items-center justify-between bg-neutral-800 rounded-lg p-3">
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-medium text-neutral-200">Compare Against:</label>
+              <select
+                value={selectedConfigIndex}
+                onChange={(e) => onConfigurationSelect(Number(e.target.value))}
+                className="px-3 py-1.5 text-sm bg-neutral-700 border border-neutral-600 rounded-md text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors min-w-[200px]"
+              >
+                {topConfigurations.map((config, index) => {
+                  const firstModel = config.items?.[0];
+                  const resnorm = firstModel?.resnorm || 0;
+                  return (
+                    <option key={index} value={index}>
+                      #{index + 1} - Resnorm: {resnorm.toFixed(4)} ({config.items?.length || 0} models)
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="text-xs text-neutral-400">
+              Selected model ID: {selectedModel?.id || 'None'}
             </div>
           </div>
         )}
 
-        {/* Impedance Comparison Table */}
         {selectedModel && (
           <div className="bg-neutral-800 rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-neutral-700">
-              <h3 className="text-sm font-medium text-neutral-200">Impedance Comparison Table</h3>
-              <p className="text-xs text-neutral-400 mt-1">
-                Reference vs {selectedModel.name} • {sortedData.length} frequency points
-              </p>
-            </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -266,14 +273,14 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
                     <tr
                       key={point.uniqueKey || `fallback-${selectedModel?.id || 'ref'}-${point.frequency}-${index}`}
                       className={`border-t border-neutral-700 hover:bg-neutral-700/50 ${
-                        point.isCustomFrequency ? 'bg-blue-900/20' : ''
+                        point.isCustomFrequency ? 'bg-orange-900/20' : ''
                       }`}
                     >
                       <td className="px-3 py-2 font-mono">
                         {point.frequency < 1 ? point.frequency.toFixed(3) :
                          point.frequency < 1000 ? point.frequency.toFixed(1) :
                          (point.frequency / 1000).toFixed(1) + 'k'}
-                        {point.isCustomFrequency && <span className="ml-1 text-blue-400">*</span>}
+                        {point.isCustomFrequency && <span className="ml-1 text-orange-400">*</span>}
                       </td>
                       <td className={`px-3 py-2 font-mono ${minMaxValues ? getValueColorClass(point.referenceReal, minMaxValues.realMin, minMaxValues.realMax) : ''}`}>
                         {point.referenceReal.toFixed(3)}
@@ -326,13 +333,13 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
                         setNewFrequency('');
                       }
                     }}
-                    className="flex-1 px-3 py-2 bg-neutral-700 border border-neutral-600 rounded-md text-neutral-200 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                    className="flex-1 px-3 py-2 bg-neutral-700 border border-neutral-600 rounded-md text-neutral-200 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
                     autoFocus
                   />
                   <button
                     onClick={handleAddFrequency}
                     disabled={!newFrequency || isNaN(parseFloat(newFrequency))}
-                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white rounded-md transition-colors text-sm"
+                    className="px-3 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-600 disabled:cursor-not-allowed text-white rounded-md transition-colors text-sm"
                   >
                     Add
                   </button>
@@ -350,7 +357,7 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
             </div>
 
             {customFrequencies.length > 0 && (
-              <div className="p-3 bg-neutral-700/50 border-t border-neutral-700 text-xs text-blue-300">
+              <div className="p-3 bg-neutral-700/50 border-t border-neutral-700 text-xs text-orange-300">
                 * Custom frequency points: {customFrequencies.map(f => f.toFixed(2)).join(', ')} Hz
               </div>
             )}

@@ -58,7 +58,14 @@ export class SerializedComputationManager {
     
     console.log(`🚀 SerializedComputationManager initialized: ${this.config.gridSize}x5 grid, ${this.config.frequencyPreset} frequency preset`);
   }
-  
+
+  /**
+   * Get current configuration
+   */
+  getConfig(): SerializedComputationConfig {
+    return { ...this.config };
+  }
+
   /**
    * Store computation results in serialized format
    * Converts BackendMeshPoint[] to ultra-compact SerializedResult[]

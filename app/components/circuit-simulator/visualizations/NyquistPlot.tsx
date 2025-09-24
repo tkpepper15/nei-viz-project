@@ -847,7 +847,7 @@ export const NyquistPlot: React.FC<NyquistPlotProps> = ({
               type="checkbox"
               checked={medianByResnorm}
               onChange={(e) => setMedianByResnorm(e.target.checked)}
-              className="rounded text-blue-600 focus:ring-blue-500 bg-neutral-700 border-neutral-600"
+              className="rounded text-orange-600 focus:ring-orange-500 bg-neutral-700 border-neutral-600"
             />
             <span>Median by Resnorm</span>
           </label>

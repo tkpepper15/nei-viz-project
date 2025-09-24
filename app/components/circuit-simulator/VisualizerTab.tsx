@@ -167,6 +167,12 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // State for current resnorm navigation and model highlighting
   const [currentResnorm, setCurrentResnorm] = useState<number | null>(null);
   const [highlightedModelId, setHighlightedModelId] = useState<string | null>(null);
+
+  // State for granular model navigation
+  const [navigationStepSize, setNavigationStepSize] = useState<number>(1);
+
+  // State for comparison selection
+  const [selectedComparisonModel, setSelectedComparisonModel] = useState<ModelSnapshot | null>(null);
   
   // State for tagged models - convert parent prop to local Map format
   const localTaggedModels = useMemo(() => {
@@ -184,6 +190,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Bottom panel state management
   const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(400);
+
   
 
   // Handle resnorm range change from ResnormDisplay
@@ -456,6 +463,52 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     return sortedModels.slice(0, calculatedModelCount);
   }, [sortedModels, logModelPercent]);
 
+  // Granular model navigation function
+  const navigateModel = useCallback((direction: 'first' | 'previous' | 'next' | 'last') => {
+    if (!allFilteredModels.length) return;
+
+    const currentIndex = highlightedModelId ?
+      allFilteredModels.findIndex(m => m.id === highlightedModelId) : -1;
+
+    let newIndex: number;
+
+    switch (direction) {
+      case 'first':
+        newIndex = 0;
+        break;
+      case 'last':
+        newIndex = allFilteredModels.length - 1;
+        break;
+      case 'previous':
+        if (currentIndex <= 0) {
+          newIndex = allFilteredModels.length - 1; // Wrap to last
+        } else {
+          newIndex = Math.max(0, currentIndex - navigationStepSize);
+        }
+        break;
+      case 'next':
+        if (currentIndex >= allFilteredModels.length - 1 || currentIndex < 0) {
+          newIndex = 0; // Wrap to first or start from beginning
+        } else {
+          newIndex = Math.min(allFilteredModels.length - 1, currentIndex + navigationStepSize);
+        }
+        break;
+      default:
+        return;
+    }
+
+    const targetModel = allFilteredModels[newIndex];
+    if (targetModel) {
+      setHighlightedModelId(targetModel.id);
+      setCurrentResnorm(targetModel.resnorm || null);
+
+      // If the current model is being used for comparison, update the comparison model too
+      if (selectedComparisonModel && selectedComparisonModel.id === highlightedModelId) {
+        setSelectedComparisonModel(targetModel);
+      }
+    }
+  }, [allFilteredModels, highlightedModelId, navigationStepSize, selectedComparisonModel]);
+
   // Get visible models within current navigation window
   const visibleModels: ModelSnapshot[] = useMemo(() => {
     if (!allFilteredModels.length) return [];
@@ -470,11 +523,12 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Memoized tagged model data for Nyquist plot to avoid recalculation
   const taggedModelNyquistData = useMemo(() => {
     if (localTaggedModels.size === 0) return [];
-    
+
     return Array.from(localTaggedModels.entries()).map(([modelId, tagName]) => {
-      const taggedModel = visibleModels.find(m => m.id === modelId);
+      // Use allFilteredModels instead of visibleModels for tagged models that might be outside current window
+      const taggedModel = allFilteredModels.find(m => m.id === modelId);
       if (!taggedModel?.parameters) return null;
-      
+
       const colorIndex = Array.from(localTaggedModels.keys()).indexOf(modelId) % tagColors.length;
       return {
         modelId,
@@ -483,16 +537,17 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         nyquistData: calculateNyquistImpedance(taggedModel.parameters)
       };
     }).filter(Boolean);
-  }, [localTaggedModels, visibleModels, tagColors, calculateNyquistImpedance]);
+  }, [localTaggedModels, allFilteredModels, tagColors, calculateNyquistImpedance]);
 
   // Memoized tagged model display data to avoid accessing visibleModels during render
   const taggedModelsDisplayData = useMemo(() => {
     if (localTaggedModels.size === 0) return [];
-    
+
     return Array.from(localTaggedModels.entries()).map(([modelId, tagName]) => {
-      const taggedModel = visibleModels.find(m => m.id === modelId);
+      // Use allFilteredModels instead of visibleModels to find tagged models that might be outside current window
+      const taggedModel = allFilteredModels.find(m => m.id === modelId);
       const colorIndex = Array.from(localTaggedModels.keys()).indexOf(modelId) % tagColors.length;
-      
+
       return {
         modelId,
         tagName,
@@ -500,7 +555,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         color: tagColors[colorIndex]
       };
     });
-  }, [localTaggedModels, visibleModels, tagColors]);
+  }, [localTaggedModels, allFilteredModels, tagColors]);
 
   // Enhanced worker-assisted rendering for extremely large datasets - unused after removing 2D plot
   // const [isWorkerRendering, setIsWorkerRendering] = useState(false);
@@ -604,24 +659,433 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
             {/* Right side toolbar controls */}
             <div className="flex items-center gap-3">
-              {/* Bottom panel toggle */}
-              <button
-                onClick={() => setBottomPanelCollapsed(!bottomPanelCollapsed)}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded-md text-neutral-200 transition-colors"
-                title={bottomPanelCollapsed ? 'Show Data Panel' : 'Hide Data Panel'}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H5a2 2 0 00-2-2z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5v6m4-6v6m4-6v6" />
-                </svg>
-                <span>{bottomPanelCollapsed ? 'Data Panel' : 'Hide Panel'}</span>
-              </button>
+              {/* Removed panel toggle - now handled by bottom-right caret only */}
             </div> {/* End right toolbar controls */}
 
           </div> {/* End toolbar */}
 
           {/* Main Content Area */}
           <div className="flex-1 flex min-h-0">
+            {/* Left Sidebar - Scrollable Control Panels */}
+            <div className="w-80 bg-neutral-800 border-r border-neutral-700 flex flex-col">
+              {/* Scrollable Content Container */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                {/* Ground Truth Control */}
+                <div className="bg-neutral-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-neutral-200">Ground Truth</span>
+                    <button
+                      onClick={() => onStaticRenderSettingsChange({
+                        ...staticRenderSettings,
+                        showGroundTruth: !showGroundTruth
+                      })}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                        showGroundTruth ? 'bg-green-600' : 'bg-neutral-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                          showGroundTruth ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <p className="text-xs text-neutral-400 mt-2">
+                    Show reference parameters from toolbox
+                  </p>
+                </div>
+
+                {/* 3D Controls - only show when 3D is enabled */}
+                {view3D && (
+                  <div className="bg-neutral-700 rounded-lg p-3">
+                    <h4 className="text-sm font-medium text-neutral-200 mb-2">3D Controls</h4>
+
+                    <div className="space-y-3">
+                      {/* 3D Scale Control */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs text-neutral-400">Spread</span>
+                          <span className="text-xs text-neutral-200 font-mono">{staticRenderSettings.resnormSpread.toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={10.0}
+                          step={0.1}
+                          value={isNaN(staticRenderSettings.resnormSpread) ? 1.0 : staticRenderSettings.resnormSpread}
+                          onChange={e => onStaticRenderSettingsChange({
+                            ...staticRenderSettings,
+                            resnormSpread: Number(e.target.value)
+                          })}
+                          className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-500"
+                        />
+                      </div>
+
+                      {/* Resnorm Center Control */}
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-neutral-400">Resnorm Center</span>
+                          <button
+                            onClick={() => onStaticRenderSettingsChange({
+                              ...staticRenderSettings,
+                              useResnormCenter: !staticRenderSettings.useResnormCenter
+                            })}
+                            className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
+                              staticRenderSettings.useResnormCenter ? 'bg-purple-600' : 'bg-neutral-600'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-2 w-2 transform rounded-full bg-white transition-transform ${
+                                staticRenderSettings.useResnormCenter ? 'translate-x-5' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Model Filtering */}
+                <div className="bg-neutral-700 rounded-lg p-3">
+                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Model Filtering</h4>
+
+                  {/* Group Portion */}
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs text-neutral-400">Group Portion</span>
+                        <span className="text-xs text-neutral-200">{(groupPortion * 100).toFixed(1)}% ({Math.floor(allFilteredModels.length * groupPortion)} models)</span>
+                      </div>
+
+                      {/* Convert groupPortion (0-1) to logarithmic slider (1-100) for UI */}
+                      <input
+                        type="range"
+                        min={1}
+                        max={100}
+                        step={1}
+                        value={(() => {
+                          const logPercent = groupPortion * 100;
+                          if (logPercent <= 0.01) return 1;
+                          const minLog = Math.log10(0.01);
+                          const maxLog = Math.log10(100);
+                          const currentLog = Math.log10(logPercent);
+                          return Math.round(((currentLog - minLog) / (maxLog - minLog)) * 99 + 1);
+                        })()}
+                        onChange={e => {
+                          const sliderValue = Number(e.target.value);
+                          const minLog = Math.log10(0.01);
+                          const maxLog = Math.log10(100);
+                          const logValue = minLog + (sliderValue - 1) / 99 * (maxLog - minLog);
+                          const logPercent = Math.pow(10, logValue);
+                          const groupPortionValue = logPercent / 100; // Convert back to 0-1 range
+                          onGroupPortionChange(groupPortionValue);
+                        }}
+                        className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500"
+                      />
+
+                      <div className="flex justify-between text-xs text-neutral-500 mt-1">
+                        <span>0.01%</span>
+                        <span className="text-orange-400 font-medium">Nav: 1-{Math.min(navigationWindowSize, allFilteredModels.length)} of {allFilteredModels.length.toLocaleString()}</span>
+                        <span>100%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resnorm Range */}
+                <div className="bg-neutral-700 rounded-lg p-3">
+                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Resnorm Range</h4>
+
+                  {/* Navigation Controls for large datasets */}
+                  {allFilteredModels.length > navigationWindowSize && (
+                    <div className="mb-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs text-neutral-400">Navigation</span>
+                        <span className="text-xs text-neutral-200 font-mono">
+                          All
+                        </span>
+                      </div>
+                      <select
+                        value="all"
+                        onChange={(e) => {
+                          if (e.target.value === 'all') {
+                            setNavigationOffset(0);
+                          }
+                        }}
+                        className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="all">All</option>
+                      </select>
+
+                      {/* Resnorm distribution histogram using ResnormDisplay */}
+                      <div className="mt-2">
+                        <ResnormDisplay
+                          models={allFilteredModels}
+                          visibleModels={visibleModels}
+                          navigationOffset={navigationOffset}
+                          onNavigationOffsetChange={setNavigationOffset}
+                          navigationWindowSize={navigationWindowSize}
+                          onResnormRangeChange={handleResnormRangeChange}
+                          currentResnorm={currentResnorm}
+                          onResnormSelect={handleResnormSelect}
+                          taggedModels={localTaggedModels}
+                          tagColors={tagColors}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Nyquist Configuration Selector - only for Nyquist plot */}
+                {visualizationType === 'nyquist' && topConfigurations.length > 0 && (
+                  <div className="bg-neutral-700 rounded-lg p-3">
+                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Circuit Selection</h4>
+
+                    <select
+                      value={isNaN(selectedNyquistConfig) ? 0 : selectedNyquistConfig}
+                      onChange={(e) => setSelectedNyquistConfig(Number(e.target.value))}
+                      className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      {topConfigurations.map((config, index) => (
+                        <option key={index} value={index}>
+                          #{index + 1} - Resnorm: {(config.resnorm || 0).toFixed(4)}
+                        </option>
+                      ))}
+                    </select>
+
+                    {currentNyquistConfig && (
+                      <div className="mt-2 p-2 bg-neutral-800 rounded text-xs">
+                        <div className="grid grid-cols-2 gap-1 text-neutral-300">
+                          <div>Rs: {currentNyquistConfig.point.parameters.Rsh.toFixed(1)}Ω</div>
+                          <div>Ra: {currentNyquistConfig.point.parameters.Ra.toFixed(1)}Ω</div>
+                          <div>Ca: {(currentNyquistConfig.point.parameters.Ca * 1e6).toFixed(2)}µF</div>
+                          <div>Rb: {currentNyquistConfig.point.parameters.Rb.toFixed(1)}Ω</div>
+                          <div>Cb: {(currentNyquistConfig.point.parameters.Cb * 1e6).toFixed(2)}µF</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Model Selection & Navigation */}
+                <div className="bg-neutral-700 rounded-lg p-3 space-y-3">
+                  <h4 className="text-sm font-medium text-neutral-200">Model Selection</h4>
+
+                  {/* Current Model Display */}
+                  {highlightedModelId && (
+                    <div className="bg-neutral-800 rounded px-3 py-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-neutral-400">Selected Model</span>
+                        <button
+                          onClick={() => setHighlightedModelId(null)}
+                          className="text-neutral-400 hover:text-neutral-200 text-xs"
+                          title="Clear selection"
+                        >
+                          ×
+                        </button>
+                      </div>
+                      <div className="text-xs text-cyan-300">
+                        ID: {highlightedModelId.slice(0, 8)}...
+                      </div>
+                      {(() => {
+                        const selectedModel = allFilteredModels.find(m => m.id === highlightedModelId);
+                        return selectedModel && (
+                          <div className="text-xs text-neutral-300 mt-1">
+                            Resnorm: {selectedModel.resnorm?.toFixed(4) || 'N/A'}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Granular Navigation Controls */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-neutral-400">Step Navigation</span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min="1"
+                          max="50"
+                          value={navigationStepSize}
+                          onChange={(e) => setNavigationStepSize(Number(e.target.value))}
+                          className="w-16 h-1 bg-neutral-600 rounded-lg appearance-none slider"
+                          title={`Step size: ${navigationStepSize} models`}
+                        />
+                        <span className="text-xs text-neutral-300 min-w-[20px]">{navigationStepSize}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => navigateModel('first')}
+                        className="px-2 py-1 text-xs bg-neutral-600 hover:bg-neutral-500 rounded transition-colors"
+                        title="Go to first model"
+                        disabled={!allFilteredModels.length}
+                      >
+                        ⏮
+                      </button>
+                      <button
+                        onClick={() => navigateModel('previous')}
+                        className="px-2 py-1 text-xs bg-neutral-600 hover:bg-neutral-500 rounded transition-colors"
+                        title={`Previous ${navigationStepSize} model(s)`}
+                        disabled={!allFilteredModels.length}
+                      >
+                        ⏪
+                      </button>
+                      <button
+                        onClick={() => navigateModel('next')}
+                        className="px-2 py-1 text-xs bg-neutral-600 hover:bg-neutral-500 rounded transition-colors"
+                        title={`Next ${navigationStepSize} model(s)`}
+                        disabled={!allFilteredModels.length}
+                      >
+                        ⏩
+                      </button>
+                      <button
+                        onClick={() => navigateModel('last')}
+                        className="px-2 py-1 text-xs bg-neutral-600 hover:bg-neutral-500 rounded transition-colors"
+                        title="Go to last model"
+                        disabled={!allFilteredModels.length}
+                      >
+                        ⏭
+                      </button>
+                    </div>
+
+                    {/* Model Position Indicator */}
+                    {highlightedModelId && (
+                      <div className="text-xs text-neutral-400 text-center">
+                        {(() => {
+                          const currentIndex = allFilteredModels.findIndex(m => m.id === highlightedModelId);
+                          const currentModel = allFilteredModels.find(m => m.id === highlightedModelId);
+                          const resnormValue = currentModel?.resnorm?.toFixed(4) || 'N/A';
+                          if (currentIndex >= 0) {
+                            return (
+                              <div>
+                                <div>Rank {currentIndex + 1} of {allFilteredModels.length}</div>
+                                <div className="text-cyan-400">Resnorm: {resnormValue}</div>
+                              </div>
+                            );
+                          }
+                          return 'Not found';
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Comparison Selection */}
+                {(localTaggedModels.size > 0 || highlightedModelId) && (
+                  <div className="bg-neutral-700 rounded-lg p-3">
+                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Compare with Reference</h4>
+
+                    <select
+                      className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      value={selectedComparisonModel ? (localTaggedModels.has(selectedComparisonModel.id) ? `tagged:${selectedComparisonModel.id}` : 'current') : 'ground-truth'}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === '' || value === 'ground-truth') {
+                          // Select ground truth for comparison
+                          setSelectedComparisonModel(null);
+                          setHighlightedModelId(null);
+                          setCurrentResnorm(null);
+                        } else if (value.startsWith('tagged:')) {
+                          // Select tagged model for comparison
+                          const modelId = value.replace('tagged:', '');
+                          const taggedModel = allFilteredModels.find(m => m.id === modelId);
+                          if (taggedModel) {
+                            setSelectedComparisonModel(taggedModel);
+                            setHighlightedModelId(modelId);
+                            setCurrentResnorm(taggedModel.resnorm || null);
+                          } else {
+                            console.warn('Tagged model not found in allFilteredModels:', modelId);
+                          }
+                        } else if (value === 'current' && highlightedModelId) {
+                          // Use current selection for comparison
+                          const currentModel = allFilteredModels.find(m => m.id === highlightedModelId);
+                          if (currentModel) {
+                            setSelectedComparisonModel(currentModel);
+                            setCurrentResnorm(currentModel.resnorm || null);
+                          } else {
+                            console.warn('Current model not found in allFilteredModels:', highlightedModelId);
+                          }
+                        }
+                      }}
+                    >
+                      <option value="ground-truth">⚪ Ground Truth (Reference)</option>
+                      {highlightedModelId && (
+                        <option value="current">● Current Selection</option>
+                      )}
+                      {Array.from(localTaggedModels.entries()).map(([modelId, tagName]) => (
+                        <option key={modelId} value={`tagged:${modelId}`}>
+                          ▲ {tagName} {(() => {
+                            const model = allFilteredModels.find(m => m.id === modelId);
+                            return model ? `(${model.resnorm?.toFixed(4) || 'N/A'})` : '';
+                          })()}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="text-xs text-neutral-400 mt-2">
+                      Select a model to compare in the bottom data panel
+                    </div>
+                  </div>
+                )}
+
+                {/* Tagged Models Display */}
+                {localTaggedModels.size > 0 && (
+                  <div className="bg-neutral-700 rounded-lg p-3">
+                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Tagged Models ({localTaggedModels.size})</h4>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {taggedModelsDisplayData.map(({ modelId, tagName, taggedModel, color }) => (
+                        <div key={modelId} className={`flex items-center justify-between text-xs rounded px-2 py-1 transition-colors cursor-pointer ${
+                          highlightedModelId === modelId ? 'bg-cyan-600/30 border border-cyan-400' : 'hover:bg-neutral-600/50'
+                        }`}
+                        onClick={() => handleTaggedModelSelect(modelId)}
+                        title="Click to highlight in 3D view"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: color }}
+                            />
+                            <span className="text-neutral-200">{tagName}</span>
+                            {taggedModel && (
+                              <span className="text-neutral-400">
+                                (resnorm: {taggedModel.resnorm?.toFixed(4) || 'N/A'})
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleModelTag(taggedModel!, '');
+                            }}
+                            className="text-neutral-400 hover:text-neutral-200 px-1 rounded hover:bg-neutral-500"
+                            title="Remove tag"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Fixed Resnorm Method Display */}
+                <div className="bg-neutral-700 rounded-lg p-3">
+                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Analysis Method</h4>
+                  <div className="text-sm text-neutral-300">
+                    SSR - Sum of Squared Residuals
+                  </div>
+                  <p className="text-xs text-neutral-400 mt-1">
+                    Fixed to SSR method for consistent impedance analysis
+                  </p>
+                </div>
+
+              </div> {/* End scrollable container */}
+            </div> {/* End left sidebar */}
+
             {/* Visualization and Bottom Panel Container */}
             <div className="flex-1 flex flex-col min-h-0">
               {/* Primary Visualization Area */}
@@ -755,15 +1219,79 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   )}
                 </div>
               )}
+              {/* Bottom-right expand caret when panel is collapsed */}
+              {bottomPanelCollapsed && (
+                <button
+                  onClick={() => setBottomPanelCollapsed(false)}
+                  className="absolute bottom-4 right-4 bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 rounded-md px-3 py-2 text-neutral-400 hover:text-neutral-200 transition-all duration-200 shadow-lg z-50 flex items-center gap-2"
+                  title="Show data panel"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                  </svg>
+                  <span className="text-xs">Data</span>
+                </button>
+              )}
+
               </div> {/* End Primary Visualization Area */}
 
               {/* Bottom Panel - PyCharm Style with Enhanced Scrolling */}
               <CollapsibleBottomPanel
                 gridResults={gridResults || []}
-                topConfigurations={bottomPanelConfigs}
+                topConfigurations={(() => {
+                  // Create ResnormGroup array with ground truth and selected comparison model
+                  const configs: ResnormGroup[] = [];
+
+                  // Always include ground truth as first configuration
+                  if (groundTruthParams) {
+                    const groundTruthModel: ModelSnapshot = {
+                      id: 'ground-truth',
+                      name: 'Ground Truth Reference',
+                      timestamp: Date.now(),
+                      parameters: groundTruthParams,
+                      data: [],
+                      resnorm: 0,
+                      color: '#FFFFFF',
+                      isVisible: true,
+                      opacity: 1
+                    };
+
+                    configs.push({
+                      range: [0, 0] as [number, number],
+                      color: '#FFFFFF',
+                      label: 'Ground Truth',
+                      description: 'Reference circuit configuration',
+                      items: [groundTruthModel]
+                    });
+                  }
+
+                  // Add selected comparison model if available
+                  if (selectedComparisonModel) {
+                    configs.push({
+                      range: [selectedComparisonModel.resnorm || 0, selectedComparisonModel.resnorm || 0] as [number, number],
+                      color: '#3B82F6',
+                      label: `Selected Model`,
+                      description: `Resnorm: ${selectedComparisonModel.resnorm?.toFixed(4) || 'N/A'}`,
+                      items: [selectedComparisonModel]
+                    });
+                  }
+
+                  return configs;
+                })()}
                 currentParameters={groundTruthParams}
-                selectedConfigIndex={0}
-                onConfigurationSelect={() => {}}
+                selectedConfigIndex={selectedComparisonModel ? 1 : 0}
+                onConfigurationSelect={(index: number) => {
+                  // Handle configuration selection for table comparison
+                  console.log('Selected configuration index:', index);
+                  // Sync with comparison selection if needed
+                  if (index === 0) {
+                    // Ground truth selected
+                    setSelectedComparisonModel(null);
+                  } else if (selectedComparisonModel && index === 1) {
+                    // Selected comparison model is already active
+                    // No need to change anything
+                  }
+                }}
                 highlightedModelId={highlightedModelId}
                 gridSize={gridSize}
                 isCollapsed={bottomPanelCollapsed}
@@ -774,252 +1302,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 maxHeight={500}
               />
             </div> {/* End Visualization and Bottom Panel Container */}
-
-            {/* Right Sidebar - Scrollable Control Panels */}
-            <div className="w-80 bg-neutral-800 border-l border-neutral-700 flex flex-col">
-              {/* Scrollable Content Container */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-4">
-                {/* Ground Truth Control */}
-                <div className="bg-neutral-700 rounded-lg p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-neutral-200">Ground Truth</span>
-                    <button
-                      onClick={() => onStaticRenderSettingsChange({
-                        ...staticRenderSettings,
-                        showGroundTruth: !showGroundTruth
-                      })}
-                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                        showGroundTruth ? 'bg-green-600' : 'bg-neutral-600'
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                          showGroundTruth ? 'translate-x-5' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  </div>
-                  <p className="text-xs text-neutral-400 mt-2">
-                    Show reference parameters from toolbox
-                  </p>
-                </div>
-                
-                {/* Note: Resnorm distribution histogram moved to top-right overlay */}
-                
-                {/* Nyquist Configuration Selector - only for Nyquist plot */}
-                {visualizationType === 'nyquist' && topConfigurations.length > 0 && (
-                  <div className="bg-neutral-700 rounded-lg p-3">
-                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Circuit Selection</h4>
-                    
-                    <select
-                      value={isNaN(selectedNyquistConfig) ? 0 : selectedNyquistConfig}
-                      onChange={(e) => setSelectedNyquistConfig(Number(e.target.value))}
-                      className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    >
-                      {topConfigurations.map((config, index) => (
-                        <option key={index} value={index}>
-                          #{index + 1} - Resnorm: {(config.resnorm || 0).toFixed(4)}
-                        </option>
-                      ))}
-                    </select>
-                    
-                    {currentNyquistConfig && (
-                      <div className="mt-2 p-2 bg-neutral-800 rounded text-xs">
-                        <div className="grid grid-cols-2 gap-1 text-neutral-300">
-                          <div>Rs: {currentNyquistConfig.point.parameters.Rsh.toFixed(1)}Ω</div>
-                          <div>Ra: {currentNyquistConfig.point.parameters.Ra.toFixed(1)}Ω</div>
-                          <div>Ca: {(currentNyquistConfig.point.parameters.Ca * 1e6).toFixed(2)}µF</div>
-                          <div>Rb: {currentNyquistConfig.point.parameters.Rb.toFixed(1)}Ω</div>
-                          <div>Cb: {(currentNyquistConfig.point.parameters.Cb * 1e6).toFixed(2)}µF</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Tagged Models Display - for all plot types but especially relevant for Nyquist */}
-                {localTaggedModels.size > 0 && (
-                  <div className="bg-neutral-700 rounded-lg p-3">
-                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Tagged Models ({localTaggedModels.size})</h4>
-                    <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {taggedModelsDisplayData.map(({ modelId, tagName, taggedModel, color }) => (
-                        <div key={modelId} className={`flex items-center justify-between text-xs rounded px-2 py-1 transition-colors cursor-pointer ${
-                          highlightedModelId === modelId ? 'bg-cyan-600/30 border border-cyan-400' : 'hover:bg-neutral-600/50'
-                        }`}
-                        onClick={() => handleTaggedModelSelect(modelId)}
-                        title="Click to highlight in 3D view"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div 
-                              className="w-3 h-3 rounded-full" 
-                              style={{ backgroundColor: color }}
-                            />
-                            <span className="text-neutral-200">{tagName}</span>
-                            {taggedModel && (
-                              <span className="text-neutral-400">
-                                (resnorm: {taggedModel.resnorm?.toFixed(4) || 'N/A'})
-                              </span>
-                            )}
-                          </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleModelTag(taggedModel!, '');
-                            }}
-                            className="text-neutral-400 hover:text-neutral-200 px-1 rounded hover:bg-neutral-500"
-                            title="Remove tag"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 3D Controls - only show when 3D is enabled */}
-                {view3D && (
-                  <div className="bg-neutral-700 rounded-lg p-3">
-                    <h4 className="text-sm font-medium text-neutral-200 mb-2">3D Controls</h4>
-                    
-                    <div className="space-y-3">
-                      {/* 3D Scale Control */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs text-neutral-400">Spread</span>
-                          <span className="text-xs text-neutral-200 font-mono">{staticRenderSettings.resnormSpread.toFixed(1)}x</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0.1}
-                          max={5.0}
-                          step={0.1}
-                          value={isNaN(staticRenderSettings.resnormSpread) ? 1.0 : staticRenderSettings.resnormSpread}
-                          onChange={e => onStaticRenderSettingsChange({
-                            ...staticRenderSettings,
-                            resnormSpread: Number(e.target.value)
-                          })}
-                          className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-purple-500"
-                        />
-                      </div>
-
-                      {/* 3D Rotation Center Control */}
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs text-neutral-400">Resnorm Center</span>
-                        <button
-                          onClick={() => onStaticRenderSettingsChange({
-                            ...staticRenderSettings,
-                            useResnormCenter: !staticRenderSettings.useResnormCenter
-                          })}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            staticRenderSettings.useResnormCenter ? 'bg-purple-600' : 'bg-neutral-600'
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
-                              staticRenderSettings.useResnormCenter ? 'translate-x-5' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Model Filtering */}
-                <div className="bg-neutral-700 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-neutral-200 mb-3">Model Filtering</h4>
-                  
-                  {/* Group Portion */}
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-xs text-neutral-400">Group Portion</label>
-                      <div className="text-right text-xs text-neutral-400">
-                        <span className="font-mono">{logModelPercent.toFixed(logModelPercent < 1 ? 2 : 1)}%</span>
-                        <span className="text-neutral-500 ml-2">({visibleModels.length.toLocaleString()} models)</span>
-                      </div>
-                    </div>
-                    
-                    <input
-                      type="range"
-                      min="1"
-                      max="100"
-                      value={isNaN(modelSelectionSlider) ? 50 : modelSelectionSlider}
-                      onChange={(e) => {
-                        const newSliderValue = Number(e.target.value);
-                        setModelSelectionSlider(newSliderValue);
-                        
-                        // Convert slider value to groupPortion and sync with parent
-                        const minLog = Math.log10(0.01);
-                        const maxLog = Math.log10(100);
-                        const logValue = minLog + (newSliderValue - 1) / 99 * (maxLog - minLog);
-                        const logPercent = Math.pow(10, logValue);
-                        const groupPortionValue = logPercent / 100; // Convert back to 0-1 range
-                        
-                        onGroupPortionChange(groupPortionValue);
-                      }}
-                      className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-blue-500 hover:[&::-webkit-slider-thumb]:bg-blue-400 transition-colors"
-                    />
-                    
-                    {/* Navigation progress integrated into slider info */}
-                    <div className="flex justify-between text-xs text-neutral-500 mt-1">
-                      <span>0.01%</span>
-                      {allFilteredModels.length > navigationWindowSize ? (
-                        <span className="text-blue-400 font-mono">
-                          Nav: {navigationOffset + 1}-{Math.min(navigationOffset + navigationWindowSize, allFilteredModels.length)} of {allFilteredModels.length.toLocaleString()}
-                        </span>
-                      ) : (
-                        <span>100%</span>
-                      )}
-                    </div>
-
-                    {/* Minimal navigation progress bar */}
-                    {allFilteredModels.length > navigationWindowSize && (
-                      <div className="relative mt-1 h-0.5 bg-neutral-700 rounded-full overflow-hidden">
-                        <div
-                          className="absolute h-full bg-blue-400 transition-all duration-300 ease-out"
-                          style={{
-                            left: `${(navigationOffset / allFilteredModels.length) * 100}%`,
-                            width: `${Math.min((navigationWindowSize / allFilteredModels.length) * 100, 100 - (navigationOffset / allFilteredModels.length) * 100)}%`
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Resnorm Range */}
-                  <div>
-                    <label className="block text-xs text-neutral-400 mb-2">Resnorm Range</label>
-                    <div className="bg-neutral-800/50 rounded border border-neutral-600">
-                      <ResnormDisplay
-                        models={allFilteredModels}
-                        visibleModels={visibleModels}
-                        navigationOffset={navigationOffset}
-                        onNavigationOffsetChange={setNavigationOffset}
-                        navigationWindowSize={navigationWindowSize}
-                        onResnormRangeChange={handleResnormRangeChange}
-                        currentResnorm={currentResnorm}
-                        onResnormSelect={handleResnormSelect}
-                        taggedModels={localTaggedModels}
-                        tagColors={tagColors}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Resnorm Method Display (SSR Only) */}
-                <div className="bg-neutral-700 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Resnorm Method</h4>
-                  <div className="px-2 py-1.5 text-sm bg-neutral-800 border border-neutral-600 rounded text-neutral-200">
-                    SSR - Sum of Squared Residuals
-                  </div>
-                  <p className="text-xs text-neutral-400 mt-2">
-                    Fixed to SSR method for consistent impedance analysis
-                  </p>
-                </div>
-
-              </div> {/* End scrollable container */}
-            </div> {/* End right sidebar */}
 
           </div> {/* End main layout container */}
         </>

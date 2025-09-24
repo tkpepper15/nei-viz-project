@@ -11,10 +11,44 @@
 import React, { useCallback, useState } from 'react';
 import { BottomPanelTabProps } from '../CollapsibleBottomPanel';
 import { ArrowDownTrayIcon, DocumentIcon, TableCellsIcon } from '@heroicons/react/24/outline';
+import { ConfigId } from '../../utils/configSerializer';
 
 interface ExportTabProps extends BottomPanelTabProps {
   exportFormat?: 'csv' | 'json';
 }
+
+/**
+ * Helper function to extract or generate proper ConfigId from ModelSnapshot
+ */
+const getConfigIdFromModelSnapshot = (modelSnapshot: any, index: number, gridSize: number = 9): string => {
+  // Check if ModelSnapshot.id contains a ConfigId (format: model_09_08_08_08_09_08_0)
+  if (modelSnapshot.id && typeof modelSnapshot.id === 'string') {
+    const match = modelSnapshot.id.match(/^model_(\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})_\d+$/);
+    if (match) {
+      // Extract the ConfigId part from serialized computation format
+      console.log(`🔧 Extracted ConfigId from ModelSnapshot: ${match[1]} (original: ${modelSnapshot.id})`);
+      return match[1];
+    }
+  }
+
+  // For traditional computation or missing ConfigId, generate synthetic ConfigId
+  // Convert index to 5D grid coordinates distributed across parameter space
+  const totalCombinations = Math.pow(gridSize, 5);
+  const scaledIndex = Math.floor((index / 1000) * totalCombinations); // Assume max 1000 results for scaling
+
+  // Convert to 5D grid coordinates
+  let remaining = scaledIndex;
+  const cbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+  const rbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+  const caIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+  const raIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
+  const rshIdx = remaining % gridSize;
+
+  // Format as proper ConfigId string
+  const syntheticConfigId = `${gridSize.toString().padStart(2, '0')}_${rshIdx.toString().padStart(2, '0')}_${raIdx.toString().padStart(2, '0')}_${caIdx.toString().padStart(2, '0')}_${rbIdx.toString().padStart(2, '0')}_${cbIdx.toString().padStart(2, '0')}`;
+  console.log(`🔧 Generated synthetic ConfigId for index ${index}: ${syntheticConfigId} (original: ${modelSnapshot.id})`);
+  return syntheticConfigId;
+};
 
 export const ExportTab: React.FC<ExportTabProps> = ({
   gridResults,
@@ -50,9 +84,10 @@ export const ExportTab: React.FC<ExportTabProps> = ({
 
       gridResults.forEach((result, index) => {
         if (result.parameters && result.data) {
+          const configId = getConfigIdFromModelSnapshot(result, index);
           result.data.forEach(point => {
             const row = [
-              `model-${index + 1}`,
+              configId,
               result.resnorm?.toFixed(6) || '0',
               result.parameters.Rsh.toFixed(6),
               result.parameters.Ra.toFixed(6),
@@ -100,12 +135,16 @@ export const ExportTab: React.FC<ExportTabProps> = ({
       const exportData = {
         exportDate: new Date().toISOString(),
         referenceParameters: currentParameters,
-        models: gridResults.map((result, index) => ({
-          id: `model-${index + 1}`,
-          resnorm: result.resnorm,
-          parameters: result.parameters,
-          impedanceData: result.data
-        }))
+        models: gridResults.map((result, index) => {
+          const configId = getConfigIdFromModelSnapshot(result, index);
+          return {
+            configId: configId,  // Use proper ConfigId format
+            id: configId,        // Keep for backwards compatibility
+            resnorm: result.resnorm,
+            parameters: result.parameters,
+            impedanceData: result.data
+          };
+        })
       };
 
       const jsonContent = JSON.stringify(exportData, null, 2);

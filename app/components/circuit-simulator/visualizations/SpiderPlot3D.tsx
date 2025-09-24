@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { InformationCircleIcon } from '@heroicons/react/24/outline';
 import { ModelSnapshot } from '../types';
 import { PARAMETER_RANGES, DEFAULT_GRID_SIZE, faradToMicroFarad, CircuitParameters } from '../types/parameters';
 
@@ -107,7 +108,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   referenceModel,
   width = 800,
   height = 600,
-  showControls = true,
+  showControls = true, // eslint-disable-line @typescript-eslint/no-unused-vars
   showAdvancedControls: _showAdvancedControls = false, // eslint-disable-line @typescript-eslint/no-unused-vars
   resnormSpread = 1.0,
   gridSize = DEFAULT_GRID_SIZE,
@@ -228,6 +229,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   
   // Tagging state
   const [isTagging, setIsTagging] = useState<boolean>(false);
+
+  // Info tooltip state
+  const [showInfoTooltip, setShowInfoTooltip] = useState<boolean>(false);
   
   // Separate visual and computational resnorm states
   const [visualResnorm, setVisualResnorm] = useState<number | null>(null); // For smooth UI interpolation only
@@ -441,12 +445,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     y -= camera.target.y;
     z += camera.distance - camera.target.z;
 
-    // Projection with depth testing
-    if (z <= 0.1) return { x: 0, y: 0, visible: false, depth: 0 };
+    // Improved depth testing - prevent models from disappearing
+    if (z <= 0.01) return { x: 0, y: 0, visible: false, depth: 0 };
 
-    // Conservative perspective calculation
-    const baseScale = Math.min(actualWidth, actualHeight) * 0.12; // Use actual dimensions
-    const perspectiveFactor = Math.max(0.7, 1.0 - (camera.distance - 8) * 0.02);
+    // Dynamic perspective calculation adapted to camera distance
+    const baseScale = Math.min(actualWidth, actualHeight) * 0.12;
+    // Perspective factor that works across our 2-50 distance range
+    const perspectiveFactor = Math.max(0.3, Math.min(2.0, 12 / camera.distance));
     const scale = baseScale * perspectiveFactor;
     
     const projX = actualWidth / 2 + x * scale; // Use actual dimensions
@@ -1130,7 +1135,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.textBaseline = 'middle';
     
     params.forEach((param, i) => {
-      const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2 + Math.PI;
+      const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
       const labelRadius = radius + 25;
       const labelX = centerX + Math.cos(angle) * labelRadius;
       const labelY = centerY + Math.sin(angle) * labelRadius;
@@ -1623,51 +1628,57 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       dragMode,
       lastMousePos: { x: e.clientX, y: e.clientY },
       isShiftPressed: e.shiftKey,
-      isCtrlPressed: e.ctrlKey
+      isCtrlPressed: e.ctrlKey,
+      velocity: { x: 0, y: 0 },
+      lastUpdateTime: Date.now()
     });
   };
 
-  // Precise crosshair detection with strict alignment validation
+  // Granular model detection with adaptive precision and zoom-aware radius
   const findSmoothResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
     if (!filteredModels.length) return null;
-    
+
     const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
     const minResnorm = Math.min(...resnorms);
     const maxResnorm = Math.max(...resnorms);
     const zAxisHeight = 5.0 * resnormSpread;
-    
+
     let bestResnormMatch: number | null = null;
     let minDistanceToAxis = Infinity;
-    
-    // Balanced precision for smooth performance
-    const numTestPoints = 75; // Optimized for performance while maintaining smoothness
-    const testAngles = 1; // Single central axis for direct resnorm mapping
-    
+
+    // Adaptive precision based on model density and zoom level
+    const modelDensity = filteredModels.length / (maxResnorm - minResnorm || 1);
+    const zoomFactor = Math.max(0.5, Math.min(3.0, 12 / camera.distance)); // Scale with zoom
+    const basePrecision = Math.min(500, Math.max(100, Math.floor(modelDensity * 50)));
+    const numTestPoints = Math.floor(basePrecision * zoomFactor); // More precision when zoomed in
+
+    // Zoom-adaptive detection radius
+    const baseRadius = 25;
+    const detectionRadius = Math.floor(baseRadius / zoomFactor);
+    const strictRadius = Math.floor(detectionRadius * 0.8);
+
     for (let i = 0; i < numTestPoints; i++) {
       const normalizedZ = i / (numTestPoints - 1);
       const z = normalizedZ * zAxisHeight;
       const resnormValue = minResnorm + normalizedZ * (maxResnorm - minResnorm);
-      
-      // Test points along central Z-axis for direct resnorm mapping
-      for (let angle = 0; angle < testAngles; angle++) {
-        const testX = 0; // Central axis
-        const testY = 0; // Central axis
-        
-        const testPoint = project3D({ x: testX, y: testY, z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
-        if (testPoint.visible) {
-          const distance = Math.sqrt(Math.pow(testPoint.x - screenX, 2) + Math.pow(testPoint.y - screenY, 2));
-          // Stricter detection radius for precise alignment
-          if (distance < 35 && distance < minDistanceToAxis) {
-            minDistanceToAxis = distance;
-            bestResnormMatch = resnormValue;
-          }
+
+      // Test along central axis for precise resnorm mapping
+      const testX = 0;
+      const testY = 0;
+
+      const testPoint = project3D({ x: testX, y: testY, z, color: '#000000', opacity: 1, model: null as any }); // eslint-disable-line @typescript-eslint/no-explicit-any
+      if (testPoint.visible) {
+        const distance = Math.sqrt(Math.pow(testPoint.x - screenX, 2) + Math.pow(testPoint.y - screenY, 2));
+        if (distance < detectionRadius && distance < minDistanceToAxis) {
+          minDistanceToAxis = distance;
+          bestResnormMatch = resnormValue;
         }
       }
     }
-    
-    // Only return match if it's close enough (strict alignment validation)
-    return minDistanceToAxis < 30 ? bestResnormMatch : null;
-  }, [filteredModels, resnormSpread, project3D]);
+
+    // Return match if within strict validation radius
+    return minDistanceToAxis < strictRadius ? bestResnormMatch : null;
+  }, [filteredModels, resnormSpread, project3D, camera.distance]);
 
   // Legacy function for discrete resnorm selection (kept for backward compatibility)
   const findResnormAtPoint = useCallback((screenX: number, screenY: number): number | null => {
@@ -1835,12 +1846,13 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         };
       });
     } else if (interaction.dragMode === 'zoom') {
-      // Enhanced zoom by dragging with progressive sensitivity
-      const zoomSensitivity = 0.012 * (1 + velocity * 0.001); // Velocity-aware zoom
+      // Professional zoom by dragging with proper bounds
+      const zoomSensitivity = 0.008 * (1 + velocity * 0.001); // Slightly reduced for better control
       const zoomDelta = 1 + (deltaY * zoomSensitivity);
 
       setCamera(prev => {
-        const targetDistance = Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomDelta));
+        // Use our improved zoom bounds (2-50)
+        const targetDistance = Math.max(2, Math.min(50, prev.distance * zoomDelta));
         return {
           ...prev,
           distance: prev.distance + (targetDistance - prev.distance) * 0.85 // Smooth interpolation
@@ -1907,9 +1919,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         };
       });
     } else {
-      // Normal scroll for smooth distance zoom with easing
+      // Normal scroll for smooth distance zoom with proper bounds
       setCamera(prev => {
-        const newDistance = Math.max(prev.minDistance, Math.min(prev.maxDistance, prev.distance * zoomFactor));
+        const newDistance = Math.max(2, Math.min(50, prev.distance * zoomFactor));
         return {
           ...prev,
           distance: prev.distance + (newDistance - prev.distance) * 0.9 // Smooth interpolation
@@ -1927,13 +1939,23 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const rotateSpeed = 3; // Reduced for smoother rotation
     
     switch (e.key.toLowerCase()) {
-      case 'w': // Move forward
+      case 'w': // Move forward (zoom in)
       case 'arrowup':
-        setCamera(prev => ({ ...prev, distance: Math.max(prev.minDistance, prev.distance - moveSpeed) }));
+        setCamera(prev => {
+          const currentDistance = prev.distance;
+          const zoomStep = currentDistance * 0.08; // 8% for smooth keyboard input
+          const newDistance = Math.max(2, currentDistance - zoomStep);
+          return { ...prev, distance: newDistance };
+        });
         break;
-      case 's': // Move back  
+      case 's': // Move back (zoom out)
       case 'arrowdown':
-        setCamera(prev => ({ ...prev, distance: Math.min(prev.maxDistance, prev.distance + moveSpeed) }));
+        setCamera(prev => {
+          const currentDistance = prev.distance;
+          const zoomStep = currentDistance * 0.08; // 8% for smooth keyboard input
+          const newDistance = Math.min(50, currentDistance + zoomStep);
+          return { ...prev, distance: newDistance };
+        });
         break;
       case 'a': // Rotate left
       case 'arrowleft':
@@ -1955,6 +1977,24 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         break;
       case 'f': // Focus/fit view
         setCamera(prev => ({ ...prev, target: { x: 0, y: 0, z: 2.5 }, distance: 12, scale: 1.0 }));
+        break;
+      case '+': // Zoom in
+      case '=': // Plus key without shift
+        setCamera(prev => {
+          const currentDistance = prev.distance;
+          const zoomStep = currentDistance * 0.15; // 15% step
+          const newDistance = Math.max(2, currentDistance - zoomStep);
+          return { ...prev, distance: newDistance };
+        });
+        break;
+      case '-': // Zoom out
+      case '_': // Minus key with shift
+        setCamera(prev => {
+          const currentDistance = prev.distance;
+          const zoomStep = currentDistance * 0.15; // 15% step
+          const newDistance = Math.min(50, currentDistance + zoomStep);
+          return { ...prev, distance: newDistance };
+        });
         break;
     }
   }, []);
@@ -2045,7 +2085,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     <div ref={containerRef} className="relative bg-black overflow-hidden w-full h-full">
       {!isComponentReady ? (
         <div className="absolute inset-0 bg-black flex items-center justify-center">
-          <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       ) : null}
       {isComponentReady && (
@@ -2059,7 +2099,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
               : interaction.dragMode === 'zoom' ? 'cursor-ns-resize'
               : 'cursor-grabbing'
             : 'cursor-grab'
-        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50`}
+        } focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50`}
         style={{ maxWidth: '100%', maxHeight: '100%' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -2071,29 +2111,85 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       />
       )}
       
-      {/* Reset Button - Clean positioning */}
-      <button
-        onClick={() => {
-          setRotation({ x: -30, y: 45, z: 0 });
-          setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
-        }}
-        className="absolute top-4 left-4 px-3 py-1.5 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white text-xs transition-all z-10 border border-gray-600"
-        title="Reset View (R)"
-      >
-        Reset
-      </button>
-      
-      {showControls && (
-        <div className="absolute bottom-4 right-4">
-          <div className="bg-black bg-opacity-80 p-3 rounded text-white text-xs">
-            <div className="space-y-1">
-              <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
-              <div>Shift+Click: Select Resnorm Level</div>
-              <div className="text-xs text-gray-400">R: Reset</div>
+      {/* Control Buttons */}
+      <div className="absolute top-4 left-4 flex items-center gap-2 z-10">
+        <button
+          onClick={() => {
+            setRotation({ x: -30, y: 45, z: 0 });
+            setCamera(prev => ({ ...prev, distance: 12, target: { x: 0, y: 0, z: 2.5 }, scale: 1.0 }));
+          }}
+          className="p-1.5 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white transition-all border border-gray-600"
+          title="Reset View"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => {
+            setCamera(prev => {
+              // Professional 3D zoom: proper bounds with smooth scaling
+              const currentDistance = prev.distance;
+              const zoomStep = currentDistance * 0.15; // 15% of current distance
+              const newDistance = Math.max(2, currentDistance - zoomStep);
+              return {
+                ...prev,
+                distance: newDistance
+              };
+            });
+          }}
+          className="p-1.5 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white transition-all border border-gray-600"
+          title="Zoom In (Camera closer)"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+          </svg>
+        </button>
+
+        <button
+          onClick={() => {
+            setCamera(prev => {
+              // Professional 3D zoom: proper bounds with smooth scaling
+              const currentDistance = prev.distance;
+              const zoomStep = currentDistance * 0.15; // 15% of current distance
+              const newDistance = Math.min(50, currentDistance + zoomStep);
+              return {
+                ...prev,
+                distance: newDistance
+              };
+            });
+          }}
+          className="p-1.5 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white transition-all border border-gray-600"
+          title="Zoom Out (Camera further)"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+          </svg>
+        </button>
+
+        <div className="relative">
+          <button
+            onClick={() => setShowInfoTooltip(!showInfoTooltip)}
+            onMouseEnter={() => setShowInfoTooltip(true)}
+            onMouseLeave={() => setShowInfoTooltip(false)}
+            className="p-1 bg-gray-900 bg-opacity-90 hover:bg-opacity-100 rounded text-white transition-all border border-gray-600"
+          >
+            <InformationCircleIcon className="w-4 h-4" />
+          </button>
+
+          {showInfoTooltip && (
+            <div className="absolute top-full left-0 mt-2 bg-black bg-opacity-90 p-3 rounded text-white text-xs whitespace-nowrap z-50">
+              <div className="space-y-1">
+                <div>Drag: Rotate • Shift+Drag: Pan • Scroll: Zoom</div>
+                <div>Shift+Click: Select Resnorm Level</div>
+                <div className="text-gray-400">R: Reset • +/-: Zoom</div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
+      
 
       
       {models.length === 0 && (
@@ -2151,7 +2247,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             <input
               type="text"
               placeholder="Enter tag name..."
-              className="w-40 px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              className="w-40 px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-white focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
                   const tagName = e.currentTarget.value.trim();
@@ -2175,7 +2271,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             />
             <div className="flex gap-2 mt-2">
               <button
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 transition-colors rounded text-white"
+                className="px-2 py-1 text-xs bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 transition-colors rounded text-white"
                 disabled={isTagging}
                 onClick={async () => {
                   if (!showTagDialog || !onModelTag) return;

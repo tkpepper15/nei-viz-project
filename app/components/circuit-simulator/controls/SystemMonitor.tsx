@@ -72,7 +72,7 @@ const GridFilterControls: React.FC<{
           type="checkbox"
           checked={filterSettings.enableSmartFiltering}
           onChange={(e) => handleSettingChange('enableSmartFiltering', e.target.checked)}
-          className="w-3 h-3 accent-blue-500"
+          className="w-3 h-3 accent-orange-500"
         />
       </div>
 
@@ -94,15 +94,15 @@ const GridFilterControls: React.FC<{
               onChange={(e) => handleSettingChange('visibilityPercentage', parseInt(e.target.value))}
               className="w-full h-2 bg-neutral-700 rounded appearance-none cursor-pointer slider"
               style={{
-                background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${filterSettings.visibilityPercentage}%, #374151 ${filterSettings.visibilityPercentage}%, #374151 100%)`
+                background: `linear-gradient(to right, #f97316 0%, #f97316 ${filterSettings.visibilityPercentage}%, #374151 ${filterSettings.visibilityPercentage}%, #374151 100%)`
               }}
             />
             <div className="flex justify-between text-[10px] text-neutral-500">
               <span>5%</span>
-              <span className="text-blue-300 font-medium">{filterSettings.visibilityPercentage}%</span>
+              <span className="text-orange-300 font-medium">{filterSettings.visibilityPercentage}%</span>
               <span>100%</span>
             </div>
-            <div className="text-center text-[10px] text-blue-300">
+            <div className="text-center text-[10px] text-orange-300">
               {recommendations.recommendation}
             </div>
           </div>
@@ -128,7 +128,7 @@ const GridFilterControls: React.FC<{
               type="checkbox"
               checked={filterSettings.adaptiveFiltering}
               onChange={(e) => handleSettingChange('adaptiveFiltering', e.target.checked)}
-              className="w-3 h-3 accent-blue-500"
+              className="w-3 h-3 accent-orange-500"
             />
           </div>
         </div>

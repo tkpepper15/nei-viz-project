@@ -37,7 +37,7 @@ export const ResidualPlot: React.FC<ResidualPlotProps> = ({
 
     // Use the efficient SRD export format (ultra-compressed)
     const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
-    const filename = `residual-analysis-${timestamp}.srd`;
+    const filename = `residual-analysis-${timestamp}.json`;
 
     manager.exportToSRD(filename, {
       title: `Residual Analysis Export`,

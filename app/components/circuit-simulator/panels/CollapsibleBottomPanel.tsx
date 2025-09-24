@@ -8,7 +8,6 @@
 
 import React, { useState, useCallback } from 'react';
 import {
-  ChevronUpIcon,
   ChevronDownIcon,
   TableCellsIcon,
   CpuChipIcon,
@@ -137,20 +136,34 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
 
   return (
     <div
-      className={`bg-neutral-900 border-t border-neutral-700 flex flex-col flex-shrink-0 ${className}`}
+      className={`bg-neutral-900 border-t border-neutral-700 flex flex-col flex-shrink-0 ${className} ${isCollapsed ? 'hidden' : ''}`}
       style={{
         height: isCollapsed ? '0px' : `${height}px`,
-        transition: 'height 0.2s ease-in-out'
+        transition: isCollapsed ? 'none' : 'height 0.2s ease-in-out'
       }}
     >
-      {/* Resize Handle */}
+      {/* Resize Handle with Collapse Caret */}
       {!isCollapsed && (
         <div
-          className={`h-1 bg-neutral-700 hover:bg-neutral-600 cursor-ns-resize transition-colors ${
-            isResizing ? 'bg-blue-500' : ''
+          className={`h-1 bg-neutral-700 hover:bg-neutral-600 cursor-ns-resize transition-colors relative ${
+            isResizing ? 'bg-orange-500' : ''
           }`}
           onMouseDown={handleMouseDown}
-        />
+        >
+          {/* Collapse Caret Button integrated into resize handle */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleCollapse(true);
+            }}
+            className="absolute right-4 top-0 bg-neutral-800 border border-neutral-600 rounded-t-md px-3 py-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 transition-colors shadow-lg"
+            title="Hide data panel"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+        </div>
       )}
 
       {/* Header with tabs and controls */}
@@ -166,7 +179,7 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-3 py-2 text-xs font-medium rounded transition-colors flex items-center justify-center min-w-[40px] ${
                   isActive
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-orange-600 text-white'
                     : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700/50'
                 }`}
                 title={tab.label}
@@ -191,20 +204,16 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
             </span>
           )}
 
-          {/* Keyboard shortcut hint removed per user request */}
-
-          {/* Collapse/Expand button */}
-          <button
-            onClick={() => onToggleCollapse(!isCollapsed)}
-            className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 rounded transition-colors"
-            title={isCollapsed ? 'Expand panel' : 'Collapse panel'}
-          >
-            {isCollapsed ? (
-              <ChevronUpIcon className="w-4 h-4" />
-            ) : (
+          {/* Collapse button when expanded */}
+          {!isCollapsed && (
+            <button
+              onClick={() => onToggleCollapse(true)}
+              className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 rounded transition-colors"
+              title="Hide data panel"
+            >
               <ChevronDownIcon className="w-4 h-4" />
-            )}
-          </button>
+            </button>
+          )}
         </div>
       </div>
 
