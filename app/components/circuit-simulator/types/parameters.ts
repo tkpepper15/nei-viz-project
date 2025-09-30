@@ -60,9 +60,9 @@ export const PARAMETER_RANGES = {
 
 /**
  * Default grid size for parameter space exploration
- * This creates 5^5 = 3,125 total parameter combinations
+ * This creates 9^5 = 59,049 total parameter combinations
  */
-export const DEFAULT_GRID_SIZE = 5;
+export const DEFAULT_GRID_SIZE = 9;
 
 /**
  * Grid size limits for performance management

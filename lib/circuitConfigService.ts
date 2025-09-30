@@ -8,7 +8,7 @@ import { Json } from './database.types';
 // UI Settings interfaces for comprehensive state persistence
 export interface UISettings {
   // Tab and panel states
-  activeTab: 'visualizer' | 'math' | 'data' | 'activity' | 'serialized';
+  activeTab: 'visualizer' | 'math' | 'data' | 'activity' | 'serialized' | 'sweeper';
   splitPaneHeight: number; // Bottom panel height percentage
   
   // Visualization settings

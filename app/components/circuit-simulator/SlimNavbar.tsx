@@ -38,19 +38,22 @@ export const SlimNavbar: React.FC<SlimNavbarProps> = ({
   return (
     <div className="h-12 px-4 flex items-center justify-between bg-neutral-900 flex-shrink-0">
       {/* Left side: Status and grid info */}
-      <div className="flex items-center gap-3 text-xs">
-        {statusMessage && (
-          <div className="flex items-center gap-1.5 text-neutral-400">
-            <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse"></div>
-            <span className="truncate max-w-48">{statusMessage}</span>
-          </div>
-        )}
+      <div className="flex items-center gap-4 text-xs">
+        {/* Status and grid info */}
+        <div className="flex items-center gap-3">
+          {statusMessage && (
+            <div className="flex items-center gap-1.5 text-neutral-400">
+              <div className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-pulse"></div>
+              <span className="truncate max-w-48">{statusMessage}</span>
+            </div>
+          )}
 
-        {computedCount > 0 && (
-          <div className="text-neutral-500 font-mono">
-            {computedCount.toLocaleString()}/{totalPossible.toLocaleString()} computed
-          </div>
-        )}
+          {computedCount > 0 && (
+            <div className="text-neutral-500 font-mono">
+              {computedCount.toLocaleString()}/{totalPossible.toLocaleString()} computed
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Right side: Settings and user */}

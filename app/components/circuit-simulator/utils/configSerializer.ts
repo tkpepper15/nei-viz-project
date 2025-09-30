@@ -41,17 +41,28 @@ export class ConfigId {
     if (parts.length !== 6) {
       throw new Error(`Invalid config string format: ${configStr}`);
     }
-    
+
     const [gridSizeStr, rshIdxStr, raIdxStr, caIdxStr, rbIdxStr, cbIdxStr] = parts;
-    
-    return new ConfigId(
-      parseInt(gridSizeStr, 10),
-      parseInt(rshIdxStr, 10),
-      parseInt(raIdxStr, 10),
-      parseInt(caIdxStr, 10),
-      parseInt(rbIdxStr, 10),
-      parseInt(cbIdxStr, 10)
-    );
+
+    const gridSize = parseInt(gridSizeStr, 10);
+    let rshIdx = parseInt(rshIdxStr, 10);
+    let raIdx = parseInt(raIdxStr, 10);
+    let caIdx = parseInt(caIdxStr, 10);
+    let rbIdx = parseInt(rbIdxStr, 10);
+    let cbIdx = parseInt(cbIdxStr, 10);
+
+    // Auto-detect and convert 0-based indices to 1-based for backward compatibility
+    // If any index is 0, assume the entire config uses 0-based indexing
+    const isZeroBased = rshIdx === 0 || raIdx === 0 || caIdx === 0 || rbIdx === 0 || cbIdx === 0;
+    if (isZeroBased) {
+      rshIdx += 1;
+      raIdx += 1;
+      caIdx += 1;
+      rbIdx += 1;
+      cbIdx += 1;
+    }
+
+    return new ConfigId(gridSize, rshIdx, raIdx, caIdx, rbIdx, cbIdx);
   }
   
   toLinearIndex(): number {

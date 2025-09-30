@@ -647,7 +647,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 <option value="spider3d">Spider 3D</option>
                 <option value="nyquist">Nyquist Plot</option>
                 <option value="tsne">t-SNE 3D Space</option>
-                <option value="pentagon-gt">Pentagon GT</option>
+                <option value="pentagon-gt">Sweeper</option>
               </select>
 
               {/* Debug Info - Grid Stats and Frequency Range */}

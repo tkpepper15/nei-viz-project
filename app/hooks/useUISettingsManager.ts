@@ -48,7 +48,7 @@ export const useUISettingsManager = ({
   const { autoSaveUISettings, forceSaveUISettings, getSaveStatus, isEnabled } = useAutoSaveUISettings({
     configId,
     enabled: autoSaveEnabled,
-    debounceMs: 1000
+    debounceMs: 5000
   });
 
   // Update UI settings and trigger auto-save

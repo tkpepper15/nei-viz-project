@@ -6,41 +6,78 @@ import { SavedProfile } from '../app/components/circuit-simulator/types/savedPro
 import { CircuitParameters } from '../app/components/circuit-simulator/types/parameters';
 import { Json } from './database.types';
 
-// This interface matches the NEW user_profiles table schema (user metadata only)
+// This interface matches the ACTUAL user_profiles table schema (with user_id column)
 export interface UserProfileRow {
   id: string;
   user_id: string;
   username: string | null;
   full_name: string | null;
   avatar_url: string | null;
-  default_grid_size: number | null;
-  default_min_freq: number | null;
-  default_max_freq: number | null;
-  default_num_points: number | null;
-  created_at: string | null;
-  updated_at: string | null;
+  default_grid_size: number;
+  default_min_freq: number;
+  default_max_freq: number;
+  default_num_points: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export class ProfilesService {
   static async getUserDefaultGridSize(userId: string): Promise<number> {
     try {
-      const { data, error } = await supabase
+      // Use maybeSingle() instead of single() to handle missing profiles gracefully
+      // Also use type casting to work around outdated generated types
+      const { data, error } = await (supabase as any)
         .from('user_profiles')
         .select('default_grid_size')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
-        console.log('📏 No user profile found or error, using default grid size: 9');
-        return 9; // Default fallback
+      if (error) {
+        console.error('[PROFILE] Error fetching default grid size:', error);
+        return 9; // Fallback default
+      }
+
+      if (!data) {
+        console.log('[PROFILE] No user profile found, creating one with default grid size: 9');
+        // Create profile with defaults
+        await this.createUserProfile(userId, 9);
+        return 9;
       }
 
       const gridSize = (data as any).default_grid_size || 9;
-      console.log(`📏 Retrieved user default grid size: ${gridSize}`);
+      console.log(`[PROFILE] Retrieved user default grid size: ${gridSize}`);
       return gridSize;
     } catch (error) {
-      console.error('❌ Error fetching user default grid size:', error);
+      console.error('[PROFILE ERROR] Unexpected error:', error);
       return 9; // Fallback default
+    }
+  }
+
+  static async createUserProfile(userId: string, defaultGridSize: number = 9): Promise<void> {
+    try {
+      // Use type casting to work around outdated generated types
+      const { error } = await (supabase as any)
+        .from('user_profiles')
+        .insert({
+          user_id: userId,
+          default_grid_size: defaultGridSize,
+          default_min_freq: 0.1,
+          default_max_freq: 100000,
+          default_num_points: 100
+        });
+
+      if (error) {
+        // Ignore unique constraint violations (profile already exists)
+        if (error.code === '23505') {
+          console.log('[PROFILE] User profile already exists');
+          return;
+        }
+        console.error('[PROFILE] Error creating user profile:', error);
+      } else {
+        console.log('[PROFILE] Created new user profile with default settings');
+      }
+    } catch (error) {
+      console.error('[PROFILE ERROR] Failed to create user profile:', error);
     }
   }
 

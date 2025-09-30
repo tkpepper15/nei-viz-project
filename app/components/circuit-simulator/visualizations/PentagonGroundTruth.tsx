@@ -9,7 +9,7 @@
 'use client';
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { CircuitParameters } from '../types/parameters';
+import { CircuitParameters, DEFAULT_GRID_SIZE } from '../types/parameters';
 import { ModelSnapshot } from '../types';
 import {
   PlayIcon,
@@ -85,10 +85,10 @@ export const PentagonGroundTruth: React.FC<PentagonGroundTruthProps> = ({
     groundTruthParameters: null,
     groundTruthSpectrum: null,
     config: {
-      gridSize: 5, // Deprecated - kept for compatibility
-      gridPointsPerParam: 5, // 5 grid points per parameter = 5^5 = 3,125 combinations
+      gridSize: DEFAULT_GRID_SIZE, // Deprecated - kept for compatibility
+      gridPointsPerParam: DEFAULT_GRID_SIZE, // Grid points per parameter using consistent default
       realTimeUpdates: true,
-      maxIterations: 3125, // 5^5
+      maxIterations: Math.pow(DEFAULT_GRID_SIZE, 5), // DEFAULT_GRID_SIZE^5
       exportResults: true
     }
   });
@@ -319,7 +319,7 @@ export const PentagonGroundTruth: React.FC<PentagonGroundTruthProps> = ({
     });
 
     // Calculate sensitivity rankings (lower avgMarginalImpact = higher sensitivity = lower rank number)
-    const sortedParams = paramKeys.sort((a, b) => parameterStats[a].avgMarginalImpact - parameterStats[b].avgMarginalImpact);
+    const sortedParams = [...paramKeys].sort((a, b) => parameterStats[a].avgMarginalImpact - parameterStats[b].avgMarginalImpact);
     sortedParams.forEach((param, index) => {
       parameterStats[param].sensitivityRank = index + 1;
     });

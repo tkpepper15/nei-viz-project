@@ -38,14 +38,20 @@ export const useCircuitConfigurations = (userId?: string, sessionConfigId?: stri
       const configs = await CircuitConfigService.getUserCircuitConfigurations(userId);
       
       setState(prev => {
-        // Determine active config - prioritize session config, then previous state
-        let activeConfigId = null;
-        if (sessionConfigId && configs.find(c => c.id === sessionConfigId)) {
+        // Only set active config on FIRST load, not on every reload
+        // This prevents constant "restoring" that triggers infinite loops
+        let activeConfigId = prev.activeConfigId;
+
+        // Only restore from session if we don't have an active config yet
+        if (!activeConfigId && sessionConfigId && configs.find(c => c.id === sessionConfigId)) {
           activeConfigId = sessionConfigId;
-          console.log(`🔄 Restoring active config from session: ${sessionConfigId}`);
-        } else if (prev.activeConfigId && configs.find(c => c.id === prev.activeConfigId)) {
-          activeConfigId = prev.activeConfigId;
-          console.log(`🔄 Maintaining previous active config: ${prev.activeConfigId}`);
+          console.log(`[INIT] Restoring active config from session: ${sessionConfigId}`);
+        }
+
+        // Validate that active config still exists in loaded configs
+        if (activeConfigId && !configs.find(c => c.id === activeConfigId)) {
+          console.log(`[WARN] Active config ${activeConfigId} no longer exists, clearing`);
+          activeConfigId = null;
         }
 
         return {

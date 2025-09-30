@@ -28,8 +28,7 @@ import { CentralizedLimitsManager, setGlobalLimitsManager } from './circuit-simu
 // Tab components
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
-import CorrelationHeatmap from './circuit-simulator/visualizations/CorrelationHeatmap';
-import DirectionalAnalysisTab from './circuit-simulator/panels/tabs/DirectionalAnalysisTab';
+import { PentagonGroundTruth } from './circuit-simulator/visualizations/PentagonGroundTruth';
 
 import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
 import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
@@ -271,17 +270,26 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const [serializedManager, setSerializedManager] = useState<SerializedComputationManager | null>(null);
 
   // SINGLE-CIRCUIT MEMORY MANAGEMENT: Only keep current circuit in memory
-  useEffect(() => {
-    // Clear previous manager and force cleanup of all cached data
-    if (serializedManager) {
-      serializedManager.clearCaches();
-      console.log('🧹 Cleared previous SerializedComputationManager and all caches');
-    }
+  // Track previous grid size to avoid unnecessary clears
+  const prevGridSizeRef = React.useRef(gridSize);
 
-    // Clear UI state to prevent memory accumulation across computations
-    setGridResults([]);
-    setResnormGroups([]);
-    setComputationSummary(null);
+  useEffect(() => {
+    // Only clear if grid size actually changed
+    const gridSizeChanged = prevGridSizeRef.current !== gridSize;
+    prevGridSizeRef.current = gridSize;
+
+    if (gridSizeChanged) {
+      // Clear previous manager and force cleanup of all cached data
+      if (serializedManager) {
+        serializedManager.clearCaches();
+        console.log('Cleared previous SerializedComputationManager and all caches');
+      }
+
+      // Clear UI state to prevent memory accumulation across computations
+      setGridResults([]);
+      setResnormGroups([]);
+      setComputationSummary(null);
+    }
 
     // Update centralized limits manager for new grid size
     const newCentralizedLimits = CentralizedLimitsManager.fromGridSize(gridSize, centralizedLimits.masterLimitPercentage);
@@ -422,11 +430,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   useEffect(() => {
     if (user?.id && !authLoading) {
       ProfilesService.getUserDefaultGridSize(user.id).then((loadedDefaultGridSize) => {
+        // Only update the default, don't change the current grid size if a circuit is loaded
         setDefaultGridSize(loadedDefaultGridSize);
-        updateDefaultGridSize(loadedDefaultGridSize);
+        console.log(`[PROFILE] Loaded user default grid size: ${loadedDefaultGridSize}`);
+        // DO NOT call updateDefaultGridSize() here - it would override the active circuit's grid size
       });
     }
-  }, [user?.id, authLoading, updateDefaultGridSize]);
+  }, [user?.id, authLoading]);
   
   // Auto-restore computation state when switching to visualizer tab
   useEffect(() => {
@@ -612,7 +622,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       // Only auto-save if we have an active config and the user is signed in
       if (activeConfigId && sessionManagement.sessionState.userId) {
         try {
-          console.log('💾 Auto-saving configuration changes...', {
+          console.log('[AUTO-SAVE] Saving configuration changes...', {
             activeConfigId,
             parameters: Object.keys(parameters),
             gridSize,
@@ -628,28 +638,37 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           });
 
           if (success) {
-            console.log('✅ Configuration auto-saved successfully');
+            console.log('[AUTO-SAVE] Configuration saved successfully');
 
             // Log activity with timestamp
             const currentConfig = circuitConfigurations?.find(c => c.id === activeConfigId);
-            const activityMessage = `Auto-saved "${currentConfig?.name || 'Current Profile'}" - Parameters: ${Object.entries(parameters).map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(3) : v}`).join(', ')}, Grid: ${gridSize}^5, Freq: ${minFreq}-${maxFreq}Hz (${numPoints}pts)`;
+            // Format capacitance values in microfarads for readability
+            const paramDisplay = Object.entries(parameters)
+              .map(([k, v]) => {
+                if ((k === 'Ca' || k === 'Cb') && typeof v === 'number') {
+                  return `${k}=${(v * 1e6).toFixed(2)}µF`;
+                }
+                return `${k}=${typeof v === 'number' ? v.toFixed(1) : v}`;
+              })
+              .join(', ');
+            const activityMessage = `Auto-saved "${currentConfig?.name || 'Current Profile'}" - Parameters: ${paramDisplay}, Grid: ${gridSize}^5, Freq: ${minFreq}-${maxFreq}Hz (${numPoints}pts)`;
 
             // Update status with detailed info but don't spam
             const timestamp = new Date().toLocaleTimeString();
             updateStatusMessage(`[${timestamp}] Auto-saved configuration changes`);
 
-            console.log('📝 Activity logged:', activityMessage);
+            console.log('[ACTIVITY]', activityMessage);
           } else {
-            console.warn('⚠️ Configuration auto-save failed');
-            updateStatusMessage('⚠️ Auto-save failed - changes may be lost');
+            console.warn('[AUTO-SAVE] Configuration save failed');
+            updateStatusMessage('Auto-save failed - changes may be lost');
           }
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error('❌ Auto-save error:', errorMsg, error);
-          updateStatusMessage(`❌ Auto-save failed: ${errorMsg}`);
+          console.error('[AUTO-SAVE ERROR]', errorMsg, error);
+          updateStatusMessage(`Auto-save failed: ${errorMsg}`);
         }
       }
-    }, 2000); // 2-second delay to avoid excessive saves during parameter adjustment
+    }, 5000); // 5-second delay to prevent aggressive saves during parameter adjustment
 
     return () => clearTimeout(autoSaveTimer);
   }, [parameters, gridSize, minFreq, maxFreq, numPoints, activeConfigId, sessionManagement.sessionState.userId, updateConfiguration, circuitConfigurations]);
@@ -1171,7 +1190,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       if (config) {
         // Load configuration settings into current state
         setGridSize(config.gridSize);
-        updateDefaultGridSize(config.gridSize);
+        // NOTE: Do NOT call updateDefaultGridSize here
         setMinFreq(config.minFreq);
         setMaxFreq(config.maxFreq);
         setNumPoints(config.numPoints);
@@ -1451,40 +1470,76 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [user, authLoading]);
 
-  // Synchronize configurationName with activeConfiguration.name
+  // Synchronize configurationName and ALL parameters with activeConfiguration
+  // This ensures center panel always reflects the selected circuit from sidebar
   useEffect(() => {
-    if (activeConfiguration && activeConfiguration.name !== configurationName) {
-      console.log('Syncing configuration name:', activeConfiguration.name);
+    if (activeConfiguration) {
+      console.log('[SYNC] Loading parameters from activeConfiguration:', {
+        id: activeConfiguration.id,
+        name: activeConfiguration.name,
+        parameters: activeConfiguration.circuitParameters
+      });
+
+      // Sync configuration name
       setConfigurationName(activeConfiguration.name);
+
+      // Sync all circuit parameters to center panel
+      setParameters(activeConfiguration.circuitParameters);
+      setGridSize(activeConfiguration.gridSize);
+      // NOTE: Do NOT call updateDefaultGridSize here - it causes infinite loops
+      // The default grid size should only be set from user profile, not from circuits
+      setMinFreq(activeConfiguration.minFreq);
+      setMaxFreq(activeConfiguration.maxFreq);
+      setNumPoints(activeConfiguration.numPoints);
+
+      // Update frequencies
+      updateFrequencies(activeConfiguration.minFreq, activeConfiguration.maxFreq, activeConfiguration.numPoints);
     }
-  }, [activeConfiguration, configurationName]);
+    // Only run when activeConfiguration.id changes to avoid infinite loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConfiguration?.id]);
 
   // Synchronize session's active circuit config with local state
+  // Use a ref to track if we're in the middle of a user-initiated change
+  const isSyncingRef = React.useRef(false);
+
   useEffect(() => {
     const syncActiveConfig = async () => {
+      // Prevent re-entry during sync operations
+      if (isSyncingRef.current) {
+        return;
+      }
+
       const sessionConfigId = sessionManagement.sessionState.currentCircuitConfigId;
-      
+
       // Case 1: Session has config but local state doesn't - sync to local
       if (sessionConfigId && !activeConfigId) {
         console.log('Syncing session config to local state:', sessionConfigId);
+        isSyncingRef.current = true;
         setActiveConfiguration(sessionConfigId);
+        setTimeout(() => { isSyncingRef.current = false; }, 100);
         return;
       }
-      
+
       // Case 2: Local has config but session doesn't - sync to session
       if (activeConfigId && !sessionConfigId) {
         console.log('Syncing local config to session:', activeConfigId);
+        isSyncingRef.current = true;
         await sessionManagement.actions.setActiveCircuitConfig(activeConfigId);
+        setTimeout(() => { isSyncingRef.current = false; }, 100);
         return;
       }
-      
-      // Case 3: Both exist but differ - session wins (it's the source of truth)
+
+      // Case 3: Both exist but differ - LOCAL wins (user selection takes precedence)
+      // Session sync should only happen on initial load, not override user selections
       if (sessionConfigId && activeConfigId && sessionConfigId !== activeConfigId) {
-        console.log('Resolving config mismatch - session wins:', sessionConfigId);
-        setActiveConfiguration(sessionConfigId);
+        console.log('Config mismatch detected - keeping local selection:', activeConfigId);
+        isSyncingRef.current = true;
+        await sessionManagement.actions.setActiveCircuitConfig(activeConfigId);
+        setTimeout(() => { isSyncingRef.current = false; }, 100);
         return;
       }
-      
+
       // Case 4: Both match or both are null - no action needed
     };
 
@@ -2374,9 +2429,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         console.error('❌ Auto-save error:', error);
         updateStatusMessage('Grid computed successfully but auto-save failed');
       }
-      
-      // Clear the configuration name after saving
-      setConfigurationName('');
+
+      // Don't clear configuration name - keep it synced with saved profile
 
     } catch (error) {
       console.error("Error in parallel computation:", error);
@@ -2618,7 +2672,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       
       if (newConfig) {
         console.log('✅ Circuit configuration created:', newConfig.id);
-        // Set as active and sync with session
+        // Set as active in both local state and session
+        setActiveConfiguration(newConfig.id);
         await sessionManagement.actions.setActiveCircuitConfig(newConfig.id);
         // Enhanced activity logging for new profile creation
         const timestamp = new Date().toLocaleTimeString();
@@ -3069,17 +3124,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             </button>
             <button
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                false // visualizationTab === 'heatmap' // Commented out - unused tab
+                visualizationTab === 'sweeper'
                   ? 'bg-neutral-800 text-white'
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => {}} // setVisualizationTab('heatmap') - commented out
+              onClick={() => setVisualizationTab('sweeper')}
             >
               <div className="flex items-center gap-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
-                <span>Correlations</span>
+                <span>Sweeper</span>
               </div>
             </button>
             <button
@@ -3095,21 +3150,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 <span>Activity Log</span>
-              </div>
-            </button>
-            <button
-              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                false // visualizationTab === 'directional' // Commented out - unused tab
-                  ? 'bg-neutral-800 text-white'
-                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => {}} // setVisualizationTab('directional') - commented out
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
-                <span>Directional Analysis</span>
               </div>
             </button>
             {/* Orchestrator tab removed - functionality integrated into Playground */}
@@ -3140,7 +3180,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
               if (config) {
                 // Load configuration settings into current state
                 setGridSize(config.gridSize);
-                updateDefaultGridSize(config.gridSize);
+                // NOTE: Do NOT call updateDefaultGridSize here
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -3188,10 +3228,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 
                 // Clear existing grid results
                 resetComputationState();
-                
+
                 // Load configuration settings into center panel for editing
                 setGridSize(config.gridSize);
-                updateDefaultGridSize(config.gridSize);
+                // NOTE: Do NOT call updateDefaultGridSize here
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -3219,10 +3259,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 
                 // Clear existing grid results first
                 resetComputationState();
-                
+
                 // Load configuration settings
                 setGridSize(config.gridSize);
-                updateDefaultGridSize(config.gridSize);
+                // NOTE: Do NOT call updateDefaultGridSize here
                 setMinFreq(config.minFreq);
                 setMaxFreq(config.maxFreq);
                 setNumPoints(config.numPoints);
@@ -3302,15 +3342,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             </button>
             <button
               className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                false // visualizationTab === 'heatmap' // Commented out - unused tab
+                visualizationTab === 'sweeper'
                   ? 'bg-neutral-800 text-white'
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => {}} // setVisualizationTab('heatmap') - commented out
-              title="Correlations"
+              onClick={() => setVisualizationTab('sweeper')}
+              title="Sweeper"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
               </svg>
             </button>
             <button
@@ -3326,10 +3366,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </button>
-            <button 
+            <button
               className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'activity' 
-                  ? 'bg-neutral-800 text-white' 
+                visualizationTab === 'activity'
+                  ? 'bg-neutral-800 text-white'
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
               onClick={() => setVisualizationTab('activity')}
@@ -3519,15 +3559,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   referenceModel={referenceModel}
                 />
               </div>
-            ) : false ? ( // visualizationTab === 'heatmap' - commented out
-              <div className="h-full overflow-y-auto p-6">
-                <CorrelationHeatmap
-                  models={gridResults || []}
-                  width={700}
-                  height={600}
-                  className="w-full"
-                />
-              </div>
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
@@ -3569,6 +3600,21 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       </div>
                     ))
                   )}
+                </div>
+              </div>
+            ) : visualizationTab === 'sweeper' ? (
+              <div className="h-full flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-neutral-700 flex-shrink-0">
+                  <h1 className="text-xl font-bold text-neutral-100">Parameter Sweeper</h1>
+                  <p className="text-sm text-neutral-400 mt-1">
+                    Geometric analysis of circuit parameter relationships through frequency-domain pentagon visualization
+                  </p>
+                </div>
+                <div className="flex-1 p-4 overflow-hidden">
+                  <PentagonGroundTruth
+                    models={gridResults || []}
+                    currentParameters={parameters}
+                  />
                 </div>
               </div>
             ) : visualizationTab === 'visualizer' ? (
@@ -3619,23 +3665,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       configurationName={configurationName}
                       onConfigurationNameChange={handleConfigurationNameChange}
                       onConfigurationNameBlur={(name) => saveConfigurationNameIfNeeded(name)}
-                      selectedProfileId={savedProfilesState.selectedProfile}
+                      selectedProfileId={activeConfigId}
                       onSRDUploaded={handleSRDUploaded}
                       onUploadError={handleSRDUploadError}
                     />
                   </div>
                 </div>
               )
-            ) : false ? ( // visualizationTab === 'directional' - commented out
-              <div className="h-full">
-                <DirectionalAnalysisTab
-                  groundTruthParams={parameters}
-                  isComputing={isComputingGrid}
-                  onAnalysisUpdate={(results) => {
-                    console.log('Directional analysis results:', results);
-                  }}
-                />
-              </div>
             ) : (
               <div className="h-full p-8 text-center text-neutral-400">
                 <p>Invalid tab selection</p>

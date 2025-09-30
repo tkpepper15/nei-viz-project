@@ -1,7 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ModelSnapshot, GridParameterArrays, ResnormGroup } from '../types';
 import { WorkerProgress } from '../utils/workerManager';
 import { ComputationSummary } from '../notifications/ComputationNotification';
+
+const ACTIVITY_LOG_KEY = 'nei-activity-log';
+const MAX_LOG_MESSAGES = 100;
 
 export const useComputationState = (initialGridSize: number = 9) => {
   // Grid computation state - now using ModelSnapshot for modern serialized workflow
@@ -15,28 +18,28 @@ export const useComputationState = (initialGridSize: number = 9) => {
   // Progress tracking
   const [computationProgress, setComputationProgress] = useState<WorkerProgress | null>(null);
   const [computationSummary, setComputationSummary] = useState<ComputationSummary | null>(null);
-  
+
   // Track skipped points from symmetric optimization
   const [skippedPoints, setSkippedPoints] = useState<number>(0);
   const [totalGridPoints, setTotalGridPoints] = useState<number>(0);
   const [actualComputedPoints, setActualComputedPoints] = useState<number>(0);
-  
+
   // Track memory management limitations
   const [memoryLimitedPoints, setMemoryLimitedPoints] = useState<number>(0);
   const [estimatedMemoryUsage, setEstimatedMemoryUsage] = useState<number>(0);
-  
+
   // User-controlled visualization limits
   const [userVisualizationPercentage, setUserVisualizationPercentage] = useState<number>(100); // Default 100%
   const [maxVisualizationPoints, setMaxVisualizationPoints] = useState<number>(1000000); // 1M max
   const [isUserControlledLimits, setIsUserControlledLimits] = useState<boolean>(false);
-  
+
   // User-controlled computation result limits
   const [maxComputationResults, setMaxComputationResults] = useState<number>(500000); // Top N results to keep during computation
 
   // Resnorm groups for analysis
   const [resnormGroups, setResnormGroups] = useState<ResnormGroup[]>([]);
   const [hiddenGroups, setHiddenGroups] = useState<number[]>([]);
-  
+
   // Preserve last computed results for tab switching
   const [lastComputedResults, setLastComputedResults] = useState<{
     resnormGroups: ResnormGroup[];
@@ -44,14 +47,42 @@ export const useComputationState = (initialGridSize: number = 9) => {
     computationSummary: ComputationSummary | null;
   } | null>(null);
 
-  // Activity log state
-  const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>([]);
+  // Activity log state - with localStorage persistence
+  const [logMessages, setLogMessages] = useState<{time: string, message: string}[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(ACTIVITY_LOG_KEY);
+        return stored ? JSON.parse(stored) : [];
+      } catch (error) {
+        console.error('Failed to load activity log:', error);
+        return [];
+      }
+    }
+    return [];
+  });
   const [statusMessage, setStatusMessage] = useState<string>('');
+
+  // Persist log messages to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined' && logMessages.length > 0) {
+      try {
+        // Keep only last MAX_LOG_MESSAGES entries
+        const trimmedLogs = logMessages.slice(-MAX_LOG_MESSAGES);
+        localStorage.setItem(ACTIVITY_LOG_KEY, JSON.stringify(trimmedLogs));
+      } catch (error) {
+        console.error('Failed to save activity log:', error);
+      }
+    }
+  }, [logMessages]);
 
   // Helper functions
   const addLogMessage = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
-    setLogMessages(prev => [...prev, { time: timestamp, message }]);
+    setLogMessages(prev => {
+      const newLogs = [...prev, { time: timestamp, message }];
+      // Trim to max size
+      return newLogs.slice(-MAX_LOG_MESSAGES);
+    });
   }, []);
 
   const updateStatusMessage = useCallback((message: string) => {
@@ -62,6 +93,13 @@ export const useComputationState = (initialGridSize: number = 9) => {
   const clearLogs = useCallback(() => {
     setLogMessages([]);
     setStatusMessage('');
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(ACTIVITY_LOG_KEY);
+      } catch (error) {
+        console.error('Failed to clear activity log from localStorage:', error);
+      }
+    }
   }, []);
 
   // Update the default grid size (for when user preferences are loaded)
