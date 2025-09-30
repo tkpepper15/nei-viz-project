@@ -2,7 +2,6 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { ModelSnapshot } from '../types';
-import LinearHistogramScrubber from '../controls/LinearHistogramScrubber';
 
 interface ResnormDisplayProps {
   models: ModelSnapshot[]; // All available models for spectrum analysis
@@ -29,7 +28,7 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
   models,
   visibleModels,
   navigationOffset = 0,
-  onNavigationOffsetChange,
+  onNavigationOffsetChange, // eslint-disable-line @typescript-eslint/no-unused-vars
   navigationWindowSize = 1000,
   onResnormRangeChange,
   currentResnorm = null,
@@ -181,12 +180,16 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
   const drawSpectrum = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !spectrumData || !selectedRange) return;
-    
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    const { width, height } = canvas;
-    const margin = { top: 30, right: 20, bottom: 60, left: 20 };
+
+    // Use CSS dimensions for logical drawing coordinates
+    const rect = canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = 120; // Fixed logical height
+
+    const margin = { top: 15, right: 20, bottom: 35, left: 20 };
     const chartWidth = width - margin.left - margin.right;
     const chartHeight = height - margin.top - margin.bottom;
     
@@ -423,14 +426,14 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
   // Handle mouse interactions for crop-style handles
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!spectrumData || !canvasRef.current || !selectedRange) return;
-    
+
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const margin = { top: 30, right: 20, bottom: 60, left: 20 };
-    
-    // Use the actual rendered canvas dimensions for mouse coordinate calculations
-    const chartWidth = rect.width - ((margin.left + margin.right) * rect.width / canvasRef.current.width);
-    const marginLeft = margin.left * rect.width / canvasRef.current.width;
+    const margin = { top: 15, right: 20, bottom: 35, left: 20 };
+
+    // Use logical dimensions for mouse coordinate calculations
+    const chartWidth = rect.width - margin.left - margin.right;
+    const marginLeft = margin.left;
     
     if (x < marginLeft || x > marginLeft + chartWidth) return;
     
@@ -479,14 +482,14 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
   
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!spectrumData || !canvasRef.current || !selectedRange) return;
-    
+
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const margin = { top: 30, right: 20, bottom: 60, left: 20 };
-    
-    // Use the actual rendered canvas dimensions for mouse coordinate calculations
-    const chartWidth = rect.width - ((margin.left + margin.right) * rect.width / canvasRef.current.width);
-    const marginLeft = margin.left * rect.width / canvasRef.current.width;
+    const margin = { top: 15, right: 20, bottom: 35, left: 20 };
+
+    // Use logical dimensions for mouse coordinate calculations
+    const chartWidth = rect.width - margin.left - margin.right;
+    const marginLeft = margin.left;
     
     const relativeX = Math.max(0, Math.min(chartWidth, x - marginLeft));
     const resnormValue = spectrumData.minResnorm + (relativeX / chartWidth) * spectrumData.resnormRange;
@@ -501,7 +504,7 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
       
       const distToStartHandle = Math.abs(relativeX - startX);
       const distToEndHandle = Math.abs(relativeX - endX);
-      const handleTolerance = 15 * rect.width / canvasRef.current.width; // Scale tolerance with canvas
+      const handleTolerance = 15; // Fixed tolerance in logical pixels
       
       if (distToStartHandle < handleTolerance || distToEndHandle < handleTolerance) {
         setCursorStyle('ew-resize'); // Horizontal resize cursor for handles
@@ -550,6 +553,55 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
     }
   };
   
+  // Canvas resize and setup
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+
+    if (!canvas || !container) return;
+
+    const resizeCanvas = () => {
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+
+      // Set display size (CSS pixels)
+      const displayWidth = rect.width;
+      const displayHeight = 120; // Fixed height for bottom panel
+
+      // Set actual size in memory (device pixels for crisp rendering)
+      canvas.width = displayWidth * dpr;
+      canvas.height = displayHeight * dpr;
+
+      // Scale back down using CSS for proper display
+      canvas.style.width = displayWidth + 'px';
+      canvas.style.height = displayHeight + 'px';
+
+      // Scale the drawing context so everything draws at the correct size
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+        // Enable crisp text rendering (property not universally supported)
+        // ctx.textRenderingOptimization = 'optimizeSpeed';
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+      }
+
+      // Trigger redraw
+      drawSpectrum();
+    };
+
+    // Initial resize
+    resizeCanvas();
+
+    // Resize observer for responsive behavior
+    const resizeObserver = new ResizeObserver(resizeCanvas);
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [drawSpectrum]);
+
   // Redraw when data changes
   useEffect(() => {
     drawSpectrum();
@@ -616,12 +668,11 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
           <div ref={containerRef} className="relative">
             <canvas
               ref={canvasRef}
-              width={360}
-              height={200}
               className={`w-full bg-gray-800 rounded border border-neutral-600 ${
                 cursorStyle === 'ew-resize' ? 'cursor-ew-resize' :
                 cursorStyle === 'crosshair' ? 'cursor-crosshair' : 'cursor-default'
               }`}
+              style={{ height: '120px', display: 'block' }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
@@ -629,78 +680,48 @@ const ResnormDisplay: React.FC<ResnormDisplayProps> = ({
             />
           </div>
           
-          {/* Linear Histogram Scrubber with Arrow Navigation */}
-          {spectrumData && (
-            <div className="mt-3 px-1">
-              <div className="flex items-center space-x-2">
-                {/* Previous Model Button */}
-                <button
-                  onClick={() => {
-                    if (onResnormSelect && (visibleModels || models).length > 0) {
-                      const modelsToUse = visibleModels || models;
-                      const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
-                      const currentIndex = currentResnorm ?
-                        sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
-                      const prevIndex = currentIndex > 0 ? currentIndex - 1 : sortedModels.length - 1;
-                      onResnormSelect(sortedModels[prevIndex].resnorm || spectrumData.minResnorm);
-                    }
-                  }}
-                  disabled={!onResnormSelect || (visibleModels || models).length === 0}
-                  className="p-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded transition-colors flex-shrink-0"
-                  title="Previous model (lower resnorm) - Navigation window"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-                
-                {/* Main Scrubber */}
-                <div className="flex-1">
-                  <LinearHistogramScrubber
-                    min={visibleModels && visibleModels.length > 0
-                      ? Math.min(...visibleModels.map(m => m.resnorm || 0))
-                      : spectrumData.minResnorm}
-                    max={visibleModels && visibleModels.length > 0
-                      ? Math.max(...visibleModels.map(m => m.resnorm || 0))
-                      : spectrumData.maxResnorm}
-                    value={currentResnorm}
-                    onChange={onResnormSelect || (() => {})}
-                    width={(containerRef.current?.offsetWidth || 360) - 100} // Account for buttons
-                    disabled={!onResnormSelect}
-                  />
-                </div>
-                
-                {/* Next Model Button */}
-                <button
-                  onClick={() => {
-                    if (onResnormSelect && (visibleModels || models).length > 0) {
-                      const modelsToUse = visibleModels || models;
-                      const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
-                      const currentIndex = currentResnorm ?
-                        sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
-                      const nextIndex = currentIndex < sortedModels.length - 1 ? currentIndex + 1 : 0;
-                      onResnormSelect(sortedModels[nextIndex].resnorm || spectrumData.maxResnorm);
+          {/* Simple Navigation Arrows */}
+          <div className="mt-2 flex items-center justify-center space-x-4">
+            <button
+              onClick={() => {
+                if (onResnormSelect && (visibleModels || models).length > 0) {
+                  const modelsToUse = visibleModels || models;
+                  const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+                  const currentIndex = currentResnorm ?
+                    sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
+                  const prevIndex = currentIndex > 0 ? currentIndex - 1 : sortedModels.length - 1;
+                  onResnormSelect(sortedModels[prevIndex].resnorm || spectrumData?.minResnorm || 0);
+                }
+              }}
+              disabled={!onResnormSelect || (visibleModels || models).length === 0}
+              className="p-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-lg transition-colors"
+              title="Previous model (lower resnorm)"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
 
-                      // If we've reached the end of the visible window, move the navigation window
-                      if (nextIndex === 0 && onNavigationOffsetChange && visibleModels && models.length > navigationWindowSize) {
-                        const newOffset = Math.min(navigationOffset + navigationWindowSize, models.length - navigationWindowSize);
-                        if (newOffset !== navigationOffset) {
-                          onNavigationOffsetChange(newOffset);
-                        }
-                      }
-                    }
-                  }}
-                  disabled={!onResnormSelect || (visibleModels || models).length === 0}
-                  className="p-1.5 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded transition-colors flex-shrink-0"
-                  title="Next model (higher resnorm) - Navigation window"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
+            <button
+              onClick={() => {
+                if (onResnormSelect && (visibleModels || models).length > 0) {
+                  const modelsToUse = visibleModels || models;
+                  const sortedModels = [...modelsToUse].sort((a, b) => (a.resnorm || 0) - (b.resnorm || 0));
+                  const currentIndex = currentResnorm ?
+                    sortedModels.findIndex(m => Math.abs((m.resnorm || 0) - currentResnorm) < 0.00001) : -1;
+                  const nextIndex = currentIndex < sortedModels.length - 1 ? currentIndex + 1 : 0;
+                  onResnormSelect(sortedModels[nextIndex].resnorm || spectrumData?.maxResnorm || 0);
+                }
+              }}
+              disabled={!onResnormSelect || (visibleModels || models).length === 0}
+              className="p-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-800 disabled:text-neutral-500 text-white rounded-lg transition-colors"
+              title="Next model (higher resnorm)"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
           
           <div className="mt-2 flex justify-between text-xs text-neutral-400">
             <span>Models: {models.length.toLocaleString()}</span>

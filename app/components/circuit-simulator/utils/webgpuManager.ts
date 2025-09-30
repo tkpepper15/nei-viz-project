@@ -66,7 +66,7 @@ export class WebGPUManager {
         architecture: this.adapter.info?.architecture || 'unknown'
       };
 
-      console.log('✅ WebGPU initialized successfully:', {
+      console.log('SUCCESS: WebGPU initialized successfully:', {
         device: this.capabilities.deviceType,
         vendor: this.capabilities.vendor,
         features: this.capabilities.features.length,
@@ -76,7 +76,7 @@ export class WebGPUManager {
       return this.capabilities;
 
     } catch (error) {
-      console.warn('❌ WebGPU initialization failed:', error);
+      console.warn('ERROR: WebGPU initialization failed:', error);
       return this.createUnsupportedCapabilities(error instanceof Error ? error.message : 'Unknown error');
     }
   }
@@ -151,7 +151,7 @@ export class WebGPUManager {
   }
 
   private createUnsupportedCapabilities(reason: string): WebGPUCapabilities {
-    console.warn(`WebGPU not supported: ${reason}`);
+    console.warn(`WARNING: WebGPU not supported: ${reason}`);
     return {
       supported: false,
       adapter: null,
@@ -224,8 +224,8 @@ export class WebGPUManager {
       Math.max(1000, settings.maxBatchSize || 10000) // Min 1k, respect user setting
     );
 
-    console.log(`🚀 WebGPU streaming compute: ${totalParams.toLocaleString()} params in chunks of ${chunkSize.toLocaleString()} (${Math.ceil(totalParams / chunkSize)} chunks)`);
-    console.log(`  Memory per chunk: ${(chunkSize * bytesPerParam / 1024 / 1024).toFixed(1)}MB`);
+    console.log(`LAUNCH: WebGPU streaming compute: ${totalParams.toLocaleString()} params in chunks of ${chunkSize.toLocaleString()} (${Math.ceil(totalParams / chunkSize)} chunks)`);
+    console.log(`  MEMORY: per chunk: ${(chunkSize * bytesPerParam / 1024 / 1024).toFixed(1)}MB`);
 
     try {
       // Create compute pipeline (reuse across chunks)
@@ -265,7 +265,7 @@ export class WebGPUManager {
 
         const chunkNum = Math.floor(chunkStart / chunkSize) + 1;
         const totalChunks = Math.ceil(totalParams / chunkSize);
-        console.log(`  📦 Chunk ${chunkNum}/${totalChunks}: processing ${actualChunkSize.toLocaleString()} params (${chunkStart}-${chunkEnd-1})`);
+        console.log(`  CHUNK: ${chunkNum}/${totalChunks}: processing ${actualChunkSize.toLocaleString()} params (${chunkStart}-${chunkEnd-1})`);
 
         const chunkStartTime = performance.now();
 
@@ -336,7 +336,7 @@ export class WebGPUManager {
             topKResults.splice(maxResults * 2);
           }
         } catch (error) {
-          console.error('🔴 WebGPU Buffer Error:', error);
+          console.error('ERROR: WebGPU Buffer Error:', error);
           // Continue processing other chunks even if this one fails
         } finally {
           // Always cleanup buffers regardless of success/failure
@@ -371,7 +371,7 @@ export class WebGPUManager {
 
         const bestResnorm = chunkResults.length > 0 ? chunkResults[0].resnorm : 'N/A';
         const actualChunkTime = performance.now() - chunkStartTime;
-        console.log(`    ✅ Chunk ${chunkNum} completed: ${actualChunkTime.toFixed(2)}ms, best resnorm: ${typeof bestResnorm === 'number' ? bestResnorm.toFixed(6) : bestResnorm}`);
+        console.log(`    SUCCESS: Chunk ${chunkNum} completed: ${actualChunkTime.toFixed(2)}ms, best resnorm: ${typeof bestResnorm === 'number' ? bestResnorm.toFixed(6) : bestResnorm}`);
       }
 
       progressCallback?.(100);
@@ -394,7 +394,7 @@ export class WebGPUManager {
         cpuMemoryUsed: finalResults.length * 1000 // Rough estimate
       };
 
-      console.log('✅ WebGPU streaming computation completed:', {
+      console.log('SUCCESS: WebGPU streaming computation completed:', {
         totalParams: totalParams.toLocaleString(),
         chunks: Math.ceil(totalParams / chunkSize),
         chunkSize: chunkSize.toLocaleString(),
@@ -415,7 +415,7 @@ export class WebGPUManager {
       };
 
     } catch (error) {
-      console.error('❌ WebGPU computation failed:', error);
+      console.error('ERROR: WebGPU computation failed:', error);
       throw error;
     }
   }
@@ -517,7 +517,7 @@ export class WebGPUManager {
             
             // Validate resnorm - GPU computation might return invalid values
             if (!isFinite(resnorm) || resnorm < 0) {
-              console.warn(`🟡 WebGPU: Invalid resnorm ${resnorm} for parameter ${paramIdx}, skipping`);
+              console.warn(`WARNING: WebGPU: Invalid resnorm ${resnorm} for parameter ${paramIdx}, skipping`);
               resnorm = Infinity; // Mark as invalid
             }
           }
@@ -534,7 +534,7 @@ export class WebGPUManager {
       }
     }
 
-    console.log(`🟢 WebGPU parseResults: ${results.length}/${paramCount} valid results parsed`);
+    console.log(`SUCCESS: WebGPU parseResults: ${results.length}/${paramCount} valid results parsed`);
     return results;
   }
 
@@ -565,6 +565,6 @@ export class WebGPUManager {
     this.adapter = null;
     this.isInitialized = false;
     this.capabilities = null;
-    console.log('🧹 WebGPU resources disposed');
+    console.log('CLEANUP: WebGPU resources disposed');
   }
 }

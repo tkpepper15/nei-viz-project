@@ -433,7 +433,7 @@ export class SRDFileHandler {
         // For imported data, generate synthetic config IDs based on index
         // This allows the data to be loaded even if the original format doesn't match
         const gridSize = 9; // Default grid size for imports
-        const maxIdx = gridSize - 1;
+        const maxIdx = gridSize - 1; // eslint-disable-line @typescript-eslint/no-unused-vars
 
         // Distribute indices across the grid space using the result index
         const totalCombinations = Math.pow(gridSize, 5);

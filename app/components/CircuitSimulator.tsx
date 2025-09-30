@@ -12,6 +12,8 @@ import { useWorkerManager, WorkerProgress } from './circuit-simulator/utils/work
 import { useHybridComputeManager } from './circuit-simulator/utils/hybridComputeManager';
 import { useOptimizedComputeManager, OptimizedComputeManagerConfig } from './circuit-simulator/utils/optimizedComputeManager';
 import { SerializedComputationManager, createSerializedComputationManager } from './circuit-simulator/utils/serializedComputationManager';
+import { createEnhancedSerializedManager } from './circuit-simulator/utils/enhancedSerializedManager';
+import { useEnhancedUserSettings } from '../hooks/useEnhancedUserSettings';
 import { createParameterConfigManager } from './circuit-simulator/utils/parameterConfigManager';
 import { ExtendedPerformanceSettings, DEFAULT_GPU_SETTINGS, DEFAULT_CPU_SETTINGS } from './circuit-simulator/types/gpuSettings';
 import SimplifiedSettingsModal from './settings/SimplifiedSettingsModal';
@@ -23,11 +25,11 @@ import { useUISettingsManager } from '../hooks/useUISettingsManager';
 import { ProfilesService } from '../../lib/profilesService';
 import { CentralizedLimitsManager, setGlobalLimitsManager } from './circuit-simulator/utils/centralizedLimits';
 
-// Add imports for the new tab components at the top of the file
+// Tab components
 import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
-// import { SerializedSpiderPlotDemo } from './circuit-simulator/examples/SerializedSpiderPlotDemo';
-// Removed OrchestratorTab - functionality integrated into VisualizerTab
+import CorrelationHeatmap from './circuit-simulator/visualizations/CorrelationHeatmap';
+import DirectionalAnalysisTab from './circuit-simulator/panels/tabs/DirectionalAnalysisTab';
 
 import { PerformanceSettings, DEFAULT_PERFORMANCE_SETTINGS } from './circuit-simulator/controls/PerformanceControls';
 import { ComputationNotification, ComputationSummary } from './circuit-simulator/notifications/ComputationNotification';
@@ -47,8 +49,14 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Authentication
   const { user, loading: authLoading, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
-  
-  // State for user's default grid size
+
+  // Enhanced User Settings with grid size persistence
+  const enhancedSettings = useEnhancedUserSettings(user?.id);
+
+  // Enhanced Serialized Data Manager for intelligent data loading
+  const [enhancedSerializedManager] = useState(() => createEnhancedSerializedManager());
+
+  // State for user's default grid size (now sourced from enhanced settings)
   const [defaultGridSize, setDefaultGridSize] = useState<number>(9);
 
   // Centralized limits manager - single variable to control all computation limits
@@ -170,7 +178,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Streamlined parameter configuration manager - initialized with defaults to avoid circular deps
   const [paramConfigManager] = useState(() => createParameterConfigManager({
-    gridSize: 9,
+    gridSize: 9, // Will be updated from settings in useEffect
     minFreq: 0.1,
     maxFreq: 100000,
     numPoints: 100,
@@ -178,8 +186,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     memoryOptimizationEnabled: true
   }));
 
-  // Parameter change subscription will be added after all state declarations
-  
+  // Sync grid size with enhanced user settings
   // Use the new computation state hook
   const {
     gridResults, setGridResults,
@@ -215,13 +222,43 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     updateDefaultGridSize
   } = useComputationState(defaultGridSize);
 
+  // Sync grid size with enhanced user settings (only when settings change, not when gridSize changes)
+  useEffect(() => {
+    if (enhancedSettings.isReady && enhancedSettings.settings) {
+      const persistedGridSize = enhancedSettings.getGridSize();
+      if (persistedGridSize !== gridSize) {
+        console.log(`🔄 Syncing grid size from user settings: ${gridSize} → ${persistedGridSize}`);
+        setGridSize(persistedGridSize);
+        updateDefaultGridSize(persistedGridSize);
+        paramConfigManager.updateGridSize(persistedGridSize);
+      }
+    }
+  }, [enhancedSettings.isReady, enhancedSettings.settings]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Enhanced grid size update function that persists to settings
+  const updateGridSizeWithPersistence = useCallback((newGridSize: number) => {
+    console.log(`🔧 Updating grid size with persistence: ${gridSize} → ${newGridSize}`);
+
+    // Update local state
+    setGridSize(newGridSize);
+    updateDefaultGridSize(newGridSize);
+    paramConfigManager.updateGridSize(newGridSize);
+
+    // Persist to user settings (with debouncing handled by enhanced settings)
+    if (enhancedSettings.isReady) {
+      enhancedSettings.updateGridSize(newGridSize).catch(err => {
+        console.error('❌ Failed to persist grid size:', err);
+      });
+    }
+  }, [gridSize, setGridSize, updateDefaultGridSize, paramConfigManager, enhancedSettings]);
+
   // Handle master limit changes from settings modal (simplified version without status message)
   const handleMasterLimitChange = useCallback((percentage: number) => {
     console.log(`🎛️ Master limit changed to ${percentage}% (${Math.floor((percentage / 100) * Math.pow(gridSize, 5)).toLocaleString()} models)`);
 
     // DEBUG: If percentage is around 58%, log where this is coming from
     if (Math.abs(percentage - 58) < 1) {
-      console.error(`🔥 FOUND THE CULPRIT! Master limit being set to ${percentage}% - this explains the incomplete grid!`);
+      console.error(`FOUND THE CULPRIT! Master limit being set to ${percentage}% - this explains the incomplete grid!`);
       console.trace('Stack trace for 58% limit setting:');
     }
 
@@ -272,8 +309,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     const estimatedOptimizedMemory = Math.pow(gridSize, 5) * 61 / (1024 * 1024);
     const reductionFactor = estimatedTraditionalMemory / estimatedOptimizedMemory;
 
-    console.log(`🚀 SINGLE-CIRCUIT MODE: New manager for ${gridSize}^5 grid`);
-    console.log(`📊 Memory optimization: ${estimatedTraditionalMemory.toFixed(1)}MB → ${estimatedOptimizedMemory.toFixed(1)}MB (${reductionFactor.toFixed(1)}x reduction)`);
+    console.log(`SINGLE-CIRCUIT MODE: New manager for ${gridSize}^5 grid`);
+    console.log(`Memory optimization: ${estimatedTraditionalMemory.toFixed(1)}MB → ${estimatedOptimizedMemory.toFixed(1)}MB (${reductionFactor.toFixed(1)}x reduction)`);
   }, [gridSize, centralizedLimits.masterLimitPercentage, setGridResults, setResnormGroups, setComputationSummary]);
 
   // Convert CircuitConfigurations to SavedProfiles format for backward compatibility
@@ -623,8 +660,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       // Set the serialized manager as the active one
       setSerializedManager(manager);
 
-      // Update grid size and frequency settings to match the SRD
-      setGridSize(metadata.gridSize);
+      // Update grid size and frequency settings to match the SRD (with persistence)
+      updateGridSizeWithPersistence(metadata.gridSize);
       // Extract frequency settings from manager config
       const configData = manager.getConfig();
       if (configData.frequencyPreset) {
@@ -645,7 +682,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         }
       }
 
-      // Generate ModelSnapshots for visualization using intelligent limits
+      // Generate ModelSnapshots for visualization using intelligent limits - NO RECOMPUTATION NEEDED
+      console.log('🚀 Generating model snapshots from existing serialized data (no recomputation)');
       const smartLimit = calculateEffectiveVisualizationLimit(metadata.totalResults);
       const effectiveLimit = Math.min(smartLimit, metadata.totalResults);
       const modelSnapshots = manager.generateModelSnapshots(effectiveLimit);
@@ -653,9 +691,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
       // Generate resnorm groups for visualization (required for spider plot display)
       if (modelSnapshots.length > 0) {
-        const resnormValues = modelSnapshots.map(m => m.resnorm);
-        const minResnorm = Math.min(...resnormValues);
-        const maxResnorm = Math.max(...resnormValues);
+        const resnormValues = modelSnapshots.map(m => m.resnorm).filter((val): val is number => val !== undefined);
+        const minResnorm = resnormValues.length > 0 ? Math.min(...resnormValues) : 0;
+        const maxResnorm = resnormValues.length > 0 ? Math.max(...resnormValues) : 1;
         const groups = createResnormGroups(modelSnapshots, minResnorm, maxResnorm);
         setResnormGroups(groups);
 
@@ -699,8 +737,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
       // Update status
       const memoryReduction = manager.getStorageStats().reductionFactor;
-      updateStatusMessage(`🚀 SRD uploaded: "${metadata.title}" - ${modelSnapshots.length.toLocaleString()}/${metadata.totalResults.toLocaleString()} models loaded (${memoryReduction.toFixed(1)}x memory optimized)`);
-      setSrdUploadMessage(`Successfully loaded ${metadata.totalResults.toLocaleString()} results from "${metadata.title}"`);
+      updateStatusMessage(`SRD uploaded: "${metadata.title}" - ${modelSnapshots.length.toLocaleString()}/${metadata.totalResults.toLocaleString()} models loaded (NO RECOMPUTATION - ${memoryReduction.toFixed(1)}x memory optimized)`);
+      setSrdUploadMessage(`Successfully loaded ${metadata.totalResults.toLocaleString()} results from "${metadata.title}" without recomputation`);
 
       // Clear any previous errors
       setGridError('');
@@ -722,6 +760,50 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       console.error('SRD upload processing error:', error);
     }
   }, [visibleResultsLimit, setGridResults, setTotalGridPoints, setActualComputedPoints, setGridError, updateStatusMessage, setGridSize, setMinFreq, setMaxFreq, setParameters, setResnormGroups, createResnormGroups, calculateEffectiveVisualizationLimit, setActiveTab]); // handleSaveProfile used in setTimeout closure intentionally not in deps
+
+  // Enhanced file upload handler for JSON, SRD, and other serialized formats
+  const _handleEnhancedFileUpload = useCallback(async (file: File) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    try {
+      console.log(`📁 Processing file upload: ${file.name}`);
+
+      const importResult = await enhancedSerializedManager.importSerializedData(file);
+
+      if (importResult.success) {
+        // Update grid size to match imported data (with persistence)
+        updateGridSizeWithPersistence(importResult.gridSize);
+
+        // Generate models from imported data - NO RECOMPUTATION
+        const modelSnapshots = enhancedSerializedManager.generateModelSnapshots();
+        setGridResults(modelSnapshots);
+
+        // Generate resnorm groups for visualization
+        if (modelSnapshots.length > 0) {
+          const resnormValues = modelSnapshots.map(m => m.resnorm).filter((val): val is number => val !== undefined);
+          const minResnorm = resnormValues.length > 0 ? Math.min(...resnormValues) : 0;
+          const maxResnorm = resnormValues.length > 0 ? Math.max(...resnormValues) : 1;
+          const groups = createResnormGroups(modelSnapshots, minResnorm, maxResnorm);
+          setResnormGroups(groups);
+        }
+
+        // Switch to VisualizerTab
+        setActiveTab('visualizer');
+
+        // Update status with success message
+        const compressionInfo = importResult.compressionInfo
+          ? ` (${importResult.compressionInfo.ratio.toFixed(1)}x compression)`
+          : '';
+
+        updateStatusMessage(`✅ Imported ${importResult.dataCount.toLocaleString()} models from ${file.name} (NO RECOMPUTATION)${compressionInfo}`);
+
+        console.log(`✅ Enhanced import successful: ${importResult.dataCount.toLocaleString()} models from ${file.name}`);
+      } else {
+        throw new Error(importResult.error || 'Import failed');
+      }
+    } catch (error) {
+      console.error('❌ Enhanced file upload failed:', error);
+      handleSRDUploadError(error instanceof Error ? error.message : 'File upload failed');
+    }
+  }, [enhancedSerializedManager, updateGridSizeWithPersistence, createResnormGroups, setActiveTab, updateStatusMessage]);
 
   const handleSRDUploadError = useCallback((error: string) => {
     setGridError(`SRD Upload Error: ${error}`);
@@ -755,8 +837,39 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     return uniqueName;
   }, [circuitConfigurations]);
   
+  // Save configuration name when it makes logical sense
+  const saveConfigurationNameIfNeeded = useCallback(async (nameToSave?: string) => {
+    const finalName = nameToSave || configurationName;
+
+    if (activeConfigId && activeConfiguration && finalName.trim() && finalName.trim() !== activeConfiguration.name) {
+      try {
+        const success = await updateConfiguration(activeConfigId, {
+          name: finalName.trim(),
+          description: activeConfiguration.description,
+          circuitParameters: parameters,
+          gridSize,
+          minFreq,
+          maxFreq,
+          numPoints
+        });
+
+        if (success) {
+          console.log('✅ Configuration name saved successfully');
+          return true;
+        } else {
+          console.error('❌ Failed to save configuration name');
+          return false;
+        }
+      } catch (error) {
+        console.error('❌ Error saving configuration name:', error);
+        return false;
+      }
+    }
+    return true;
+  }, [activeConfigId, activeConfiguration, configurationName, parameters, gridSize, minFreq, maxFreq, numPoints, updateConfiguration]);
+
   // Moved handleNewCircuit after handleSaveProfile definition
-  
+
   // Compute grid function
   const handleCompute = useCallback(async () => {
     if (isComputingGrid) {
@@ -764,7 +877,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       return;
     }
 
-    console.log('🚀 Starting handleCompute with parameters:', {
+    console.log('Starting handleCompute with parameters:', {
       parameters,
       gridSize,
       minFreq,
@@ -774,6 +887,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     });
 
     try {
+      // Save configuration name before starting computation
+      await saveConfigurationNameIfNeeded();
+
       // Ensure there's always a profile before starting computation
       if (!savedProfilesState.selectedProfile) {
         console.log('📝 No profile selected - creating one before computation...');
@@ -816,7 +932,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         expectedFullGrid : // Force full grid if not 100%
         centralizedLimits.masterLimitResults;
 
-      console.log(`🔥 COMPUTATION DEBUG: masterLimitPercentage=${centralizedLimits.masterLimitPercentage}%, masterLimitResults=${centralizedLimits.masterLimitResults.toLocaleString()}, expected=${expectedFullGrid.toLocaleString()}, using=${masterLimitToUse.toLocaleString()}`);
+      console.log(`COMPUTATION DEBUG: masterLimitPercentage=${centralizedLimits.masterLimitPercentage}%, masterLimitResults=${centralizedLimits.masterLimitResults.toLocaleString()}, expected=${expectedFullGrid.toLocaleString()}, using=${masterLimitToUse.toLocaleString()}`);
 
       if (centralizedLimits.masterLimitPercentage !== 100) {
         console.error(`🚨 FORCING 100% COMPUTATION: Detected ${centralizedLimits.masterLimitPercentage}% limit, forcing full ${expectedFullGrid.toLocaleString()} results`);
@@ -866,8 +982,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           const serializedCount = serializedManager.storeResults(processedResults, 'standard');
           const stats = serializedManager.getStorageStats();
 
-          console.log(`🚀 MEMORY OPTIMIZED: ${serializedCount} results stored`);
-          console.log(`📊 Memory: ${stats.traditionalSizeMB.toFixed(1)}MB → ${stats.serializedSizeMB.toFixed(1)}MB (${stats.reductionFactor.toFixed(1)}x reduction)`);
+          console.log(`MEMORY OPTIMIZED: ${serializedCount} results stored`);
+          console.log(`Memory: ${stats.traditionalSizeMB.toFixed(1)}MB → ${stats.serializedSizeMB.toFixed(1)}MB (${stats.reductionFactor.toFixed(1)}x reduction)`);
 
           // Generate results using intelligent visualization limits
           const smartLimit = calculateEffectiveVisualizationLimit(serializedCount);
@@ -1000,7 +1116,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     setGridResults, setTotalGridPoints, setActualComputedPoints,
     savedProfilesState.selectedProfile, profileActions,
     updateStatusMessage, configurationName, extendedSettings,
-    hybridComputeManager, centralizedLimits.masterLimitResults
+    hybridComputeManager, centralizedLimits.masterLimitResults, saveConfigurationNameIfNeeded
   ]);
   
 
@@ -1913,7 +2029,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
             startPhase('grid-generation', 'Generating parameter space grid combinations');
           }
           if (progress.generated && progress.generated > 0) {
-            console.log(`📊 GENERATION DEBUG: generated=${progress.generated}, total=${progress.total}, processed=${progress.processed || 'unknown'}, skipped=${progress.skipped || 'unknown'}`);
+            console.log(`GENERATION DEBUG: generated=${progress.generated}, total=${progress.total}, processed=${progress.processed || 'unknown'}, skipped=${progress.skipped || 'unknown'}`);
             setActualComputedPoints(progress.generated);
             const skipped = progress.skipped || (progress.total - progress.generated);
             setSkippedPoints(skipped);
@@ -2582,31 +2698,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     }
   }, [resetComputationState, updateStatusMessage, setGridSize, setParameters, setMinFreq, setMaxFreq, setNumPoints, setConfigurationName, generateUniqueCircuitName, defaultGridSize, handleSaveProfile]);
 
-  // Handle configuration name changes with auto-save
-  const handleConfigurationNameChange = useCallback(async (newName: string) => {
+  // Handle configuration name changes without aggressive auto-save
+  const handleConfigurationNameChange = useCallback((newName: string) => {
     setConfigurationName(newName);
-    
-    // If there's an active configuration and the name is not empty, auto-update the configuration
-    if (activeConfigId && activeConfiguration && newName.trim() && newName.trim() !== activeConfiguration.name) {
-      try {
-        const success = await updateConfiguration(activeConfigId, {
-          name: newName.trim(),
-          description: activeConfiguration.description,
-          circuitParameters: parameters,
-          gridSize,
-          minFreq,
-          maxFreq,
-          numPoints
-        });
-        
-        if (success) {
-          console.log('✅ Configuration name updated automatically');
-        }
-      } catch (error) {
-        console.error('❌ Failed to auto-update configuration name:', error);
-      }
-    }
-  }, [activeConfigId, activeConfiguration, parameters, gridSize, minFreq, maxFreq, numPoints, updateConfiguration]);
+    // Auto-save removed to prevent conflicts with debounced input
+    // Name will be saved at strategic points (onBlur, computation start, manual save)
+  }, []);
+
 
 
 
@@ -2728,7 +2826,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         });
 
         setTaggedModels(newTaggedModels);
-        updateStatusMessage(`📊 Loaded ${dbTaggedModels.length} tagged models for current circuit configuration`);
+        updateStatusMessage(`Loaded ${dbTaggedModels.length} tagged models for current circuit configuration`);
       } else {
         console.log('🏷️ No tagged models found for current circuit configuration');
         setTaggedModels(new Map());
@@ -2969,10 +3067,25 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <span>Model</span>
               </div>
             </button>
-            <button 
+            <button
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'activity' 
-                  ? 'bg-neutral-800 text-white' 
+                false // visualizationTab === 'heatmap' // Commented out - unused tab
+                  ? 'bg-neutral-800 text-white'
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => {}} // setVisualizationTab('heatmap') - commented out
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                </svg>
+                <span>Correlations</span>
+              </div>
+            </button>
+            <button
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                visualizationTab === 'activity'
+                  ? 'bg-neutral-800 text-white'
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
               }`}
               onClick={() => setVisualizationTab('activity')}
@@ -2982,6 +3095,21 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 <span>Activity Log</span>
+              </div>
+            </button>
+            <button
+              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
+                false // visualizationTab === 'directional' // Commented out - unused tab
+                  ? 'bg-neutral-800 text-white'
+                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => {}} // setVisualizationTab('directional') - commented out
+            >
+              <div className="flex items-center gap-3">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                </svg>
+                <span>Directional Analysis</span>
               </div>
             </button>
             {/* Orchestrator tab removed - functionality integrated into Playground */}
@@ -3172,10 +3300,23 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
               </svg>
             </button>
-            <button 
+            <button
               className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'data' 
-                  ? 'bg-neutral-800 text-white' 
+                false // visualizationTab === 'heatmap' // Commented out - unused tab
+                  ? 'bg-neutral-800 text-white'
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
+              }`}
+              onClick={() => {}} // setVisualizationTab('heatmap') - commented out
+              title="Correlations"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+              </svg>
+            </button>
+            <button
+              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
+                visualizationTab === 'data'
+                  ? 'bg-neutral-800 text-white'
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
               onClick={() => setVisualizationTab('data')}
@@ -3209,7 +3350,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         <SlimNavbar
           statusMessage={statusMessage}
           gridResults={gridResults}
-          gridSize={parameters.gridSize}
+          gridSize={gridSize}
           onSettingsOpen={() => setSettingsModalOpen(true)}
           user={user}
           onSignOut={signOut}
@@ -3378,6 +3519,15 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   referenceModel={referenceModel}
                 />
               </div>
+            ) : false ? ( // visualizationTab === 'heatmap' - commented out
+              <div className="h-full overflow-y-auto p-6">
+                <CorrelationHeatmap
+                  models={gridResults || []}
+                  width={700}
+                  height={600}
+                  className="w-full"
+                />
+              </div>
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
                 <h3 className="text-lg font-medium text-neutral-200 mb-4 px-2 flex-shrink-0">Activity Log</h3>
@@ -3468,18 +3618,24 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                       isComputing={isComputingGrid}
                       configurationName={configurationName}
                       onConfigurationNameChange={handleConfigurationNameChange}
+                      onConfigurationNameBlur={(name) => saveConfigurationNameIfNeeded(name)}
                       selectedProfileId={savedProfilesState.selectedProfile}
-                      maxComputationResults={centralizedLimits.masterLimitResults}
-                      onMaxComputationResultsChange={(value) => {
-                        const percentage = (value / Math.pow(gridSize, 5)) * 100;
-                        handleMasterLimitChange(percentage);
-                      }}
                       onSRDUploaded={handleSRDUploaded}
                       onUploadError={handleSRDUploadError}
                     />
                   </div>
                 </div>
               )
+            ) : false ? ( // visualizationTab === 'directional' - commented out
+              <div className="h-full">
+                <DirectionalAnalysisTab
+                  groundTruthParams={parameters}
+                  isComputing={isComputingGrid}
+                  onAnalysisUpdate={(results) => {
+                    console.log('Directional analysis results:', results);
+                  }}
+                />
+              </div>
             ) : (
               <div className="h-full p-8 text-center text-neutral-400">
                 <p>Invalid tab selection</p>
@@ -3501,7 +3657,7 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
       <SimplifiedSettingsModal
         isOpen={settingsModalOpen}
         onClose={() => setSettingsModalOpen(false)}
-        onSettingsChange={setExtendedSettings}
+        onSettingsChange={(settings) => setExtendedSettings(prev => ({ ...prev, ...settings }))}
         gridSize={gridSize}
         totalPossibleResults={totalGridPoints}
         isComputing={isComputingGrid}

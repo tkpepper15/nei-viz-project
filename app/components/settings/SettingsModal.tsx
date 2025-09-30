@@ -654,7 +654,7 @@ export function SettingsModal({
                           Skip parameter combinations where τA &gt; τB (where τ = RC)
                         </p>
                         <div className="mt-2 p-2 bg-neutral-800 rounded text-xs">
-                          <div className="text-yellow-400 font-medium mb-1">⚠️ EIS/Biology Note:</div>
+                          <div className="text-yellow-400 font-medium mb-1">⚠ EIS/Biology Note:</div>
                           <div className="text-neutral-300 leading-relaxed">
                             Reduces computation by ~37% but may eliminate valid biological parameter combinations.
                             For RPE cell research, branches A/B often represent different membrane domains (apical/basolateral)
@@ -763,7 +763,7 @@ export function SettingsModal({
         {/* Footer */}
         <div className="border-t border-neutral-700 p-4 bg-neutral-800">
           <div className="text-xs text-neutral-400 text-center">
-            ⚡ Settings auto-save{user ? ' to your account' : ' locally'} • Requires modern browser for WebGPU
+            Settings auto-save{user ? ' to your account' : ' locally'} - Requires modern browser for WebGPU
           </div>
         </div>
       </div>

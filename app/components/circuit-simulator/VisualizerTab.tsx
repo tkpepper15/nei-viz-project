@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 // SpiderPlot 2D import removed - using only 3D visualization
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
+import { TSNEPlot3D } from './visualizations/TSNEPlot3D';
+import { PentagonGroundTruth } from './visualizations/PentagonGroundTruth';
 import { ModelSnapshot, ResnormGroup } from './types';
 import { GridParameterArrays } from './types';
 import { CircuitParameters } from './types/parameters';
@@ -8,13 +10,12 @@ import { StaticRenderSettings } from './controls/StaticRenderControls';
 import { ResnormConfig, calculateResnormWithConfig, calculate_impedance_spectrum } from './utils/resnorm';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { calculateTimeConstants } from './math/utils';
-import ResnormDisplay from './insights/ResnormDisplay';
 import { CollapsibleBottomPanel } from './panels/CollapsibleBottomPanel';
 
 interface VisualizationSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
-  visualizationType: 'spider3d' | 'nyquist';
+  visualizationType: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt';
   resnormMatchingPortion?: number; // For fine-tuning resnorm grouping
 }
 
@@ -109,9 +110,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Use ground truth parameters from toolbox (userReferenceParams) or direct groundTruthParams
   const effectiveGroundTruthParams = userReferenceParams || groundTruthParams;
   // Use visualization settings from static render settings - defaulting to 3D only
-  const visualizationType = staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' : 'spider3d';
+  const visualizationType = staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' :
+                           staticRenderSettings.visualizationType === 'tsne' ? 'tsne' :
+                           staticRenderSettings.visualizationType === 'pentagon-gt' ? 'pentagon-gt' : 'spider3d';
   const view3D = visualizationType === 'spider3d';
-  const setVisualizationType = (type: 'spider3d' | 'nyquist') => {
+  const setVisualizationType = (type: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
@@ -605,7 +608,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const hasComputedResults = modelsWithUpdatedResnorm && modelsWithUpdatedResnorm.length > 0;
   
   // Debug logging for visualization state
-  console.log('📊 VisualizerTab state:', {
+  console.log('VisualizerTab state:', {
     hasComputedResults,
     modelsLength: modelsWithUpdatedResnorm?.length || 0,
     gridResultsLength: gridResults?.length || 0,
@@ -638,11 +641,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
               {/* Visualization Type Selection */}
               <select
                 value={visualizationType}
-                onChange={(e) => setVisualizationType(e.target.value as 'spider3d' | 'nyquist')}
+                onChange={(e) => setVisualizationType(e.target.value as 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt')}
                 className="px-3 py-1.5 text-sm bg-neutral-900 border border-neutral-600 rounded-md text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               >
                 <option value="spider3d">Spider 3D</option>
                 <option value="nyquist">Nyquist Plot</option>
+                <option value="tsne">t-SNE 3D Space</option>
+                <option value="pentagon-gt">Pentagon GT</option>
               </select>
 
               {/* Debug Info - Grid Stats and Frequency Range */}
@@ -793,49 +798,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   </div>
                 </div>
 
-                {/* Resnorm Range */}
-                <div className="bg-neutral-700 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Resnorm Range</h4>
-
-                  {/* Navigation Controls for large datasets */}
-                  {allFilteredModels.length > navigationWindowSize && (
-                    <div className="mb-3">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs text-neutral-400">Navigation</span>
-                        <span className="text-xs text-neutral-200 font-mono">
-                          All
-                        </span>
-                      </div>
-                      <select
-                        value="all"
-                        onChange={(e) => {
-                          if (e.target.value === 'all') {
-                            setNavigationOffset(0);
-                          }
-                        }}
-                        className="w-full bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      >
-                        <option value="all">All</option>
-                      </select>
-
-                      {/* Resnorm distribution histogram using ResnormDisplay */}
-                      <div className="mt-2">
-                        <ResnormDisplay
-                          models={allFilteredModels}
-                          visibleModels={visibleModels}
-                          navigationOffset={navigationOffset}
-                          onNavigationOffsetChange={setNavigationOffset}
-                          navigationWindowSize={navigationWindowSize}
-                          onResnormRangeChange={handleResnormRangeChange}
-                          currentResnorm={currentResnorm}
-                          onResnormSelect={handleResnormSelect}
-                          taggedModels={localTaggedModels}
-                          tagColors={tagColors}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
 
                 {/* Nyquist Configuration Selector - only for Nyquist plot */}
                 {visualizationType === 'nyquist' && topConfigurations.length > 0 && (
@@ -1130,6 +1092,42 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     />
                   )}
                 </div>
+              ) : visualizationType === 'tsne' ? (
+                /* Parameter Space 3D Visualization */
+                <div className="w-full h-full relative overflow-hidden">
+                  {isInitializing && visibleModelsWithOpacity.length > 0 ? (
+                    <div className="absolute inset-0 bg-black flex items-center justify-center">
+                      <div className="text-white text-lg flex items-center gap-3">
+                        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span>Computing parameter space...</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <TSNEPlot3D
+                      models={visibleModelsWithOpacity}
+                      referenceModel={showGroundTruth && effectiveGroundTruthParams ? {
+                        id: 'ground-truth',
+                        name: 'Ground Truth Reference',
+                        timestamp: Date.now(),
+                        parameters: effectiveGroundTruthParams,
+                        data: calculate_impedance_spectrum(effectiveGroundTruthParams), // Provide impedance spectrum
+                        resnorm: 0,
+                        color: '#FFFFFF',
+                        isVisible: true,
+                        opacity: 1
+                      } : null}
+                      responsive={true}
+                    />
+                  )}
+                </div>
+              ) : visualizationType === 'pentagon-gt' ? (
+                /* Pentagon Ground Truth Visualization */
+                <div className="w-full h-full relative overflow-hidden">
+                  <PentagonGroundTruth
+                    models={visibleModelsWithOpacity}
+                    currentParameters={groundTruthParams}
+                  />
+                </div>
               ) : (
                 /* Nyquist Plot Visualization - Single Circuit */
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -1300,6 +1298,17 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 onHeightChange={setBottomPanelHeight}
                 minHeight={120}
                 maxHeight={500}
+                // Resnorm-related props for new ResnormRangeTab
+                currentResnorm={currentResnorm}
+                onCurrentResnormChange={handleCurrentResnormChange}
+                selectedResnormRange={selectedResnormRange}
+                onResnormRangeChange={handleResnormRangeChange}
+                onResnormSelect={handleResnormSelect}
+                navigationOffset={navigationOffset}
+                onNavigationOffsetChange={setNavigationOffset}
+                navigationWindowSize={navigationWindowSize}
+                taggedModels={localTaggedModels}
+                tagColors={tagColors}
               />
             </div> {/* End Visualization and Bottom Panel Container */}
 

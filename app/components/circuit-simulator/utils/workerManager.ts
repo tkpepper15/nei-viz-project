@@ -318,7 +318,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     const key = `${minFreq}|${maxFreq}|${numPoints}`;
     const cached = freqCache.current.get(key);
     if (cached) {
-      console.log(`📋 Using cached frequency sweep: ${key}`);
+      console.log(`CACHE: Using cached frequency sweep: ${key}`);
       return Array.from(cached); // Convert back to regular array for compatibility
     }
     
@@ -335,7 +335,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
     // Cache the typed array
     freqCache.current.set(key, frequencies);
-    console.log(`🔧 Generated and cached frequency sweep: ${key}`);
+    console.log(`GENERATE: Generated and cached frequency sweep: ${key}`);
     
     return Array.from(frequencies); // Return regular array for compatibility
   }, []);
@@ -482,8 +482,8 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       const chunkSize = calcOptimalChunkSize(totalPoints);
       const totalChunks = Math.ceil(totalPoints / chunkSize);
       
-      console.log(`📊 Optimized chunking: ${chunkSize} points/chunk, ${totalChunks} total chunks, ${workerCount} workers`);
-      console.log(`📈 Expected chunks per worker: ${Math.ceil(totalChunks / workerCount)}`)
+      console.log(`OPTIMIZE: Chunking: ${chunkSize} points/chunk, ${totalChunks} total chunks, ${workerCount} workers`);
+      console.log(`ESTIMATE: Expected chunks per worker: ${Math.ceil(totalChunks / workerCount)}`)
 
       onProgress({
         type: 'COMPUTATION_START',
@@ -550,7 +550,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
               break;
               
             case 'GRID_POINTS_GENERATED':
-              console.log(`✅ Grid generation complete: ${data.gridPoints?.length || 0} points`);
+              console.log(`SUCCESS: Grid generation complete: ${data.gridPoints?.length || 0} points`);
               resolve(data.gridPoints);
               break;
               
@@ -580,9 +580,9 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       }
 
       // Validate that grid points were actually generated
-      console.log(`🔍 Grid points generated: ${gridPoints.length} parameters`);
+      console.log(`GENERATE: Grid points generated: ${gridPoints.length} parameters`);
       if (gridPoints.length === 0) {
-        console.error('❌ CRITICAL: No grid points were generated!');
+        console.error('CRITICAL: No grid points were generated!');
         throw new Error('Grid generation failed - no parameter combinations created');
       }
 
@@ -590,7 +590,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       
       // Split grid points into chunks
       const chunks = chunkArray(gridPoints, chunkSize);
-      console.log(`🔍 Created ${chunks.length} chunks from ${gridPoints.length} grid points`);
+      console.log(`PROCESS: Created ${chunks.length} chunks from ${gridPoints.length} grid points`);
       
       onProgress({
         type: 'MATHEMATICAL_OPERATION',
@@ -692,7 +692,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
 
               const handleMessage = (e: MessageEvent) => {
                 const { type, data } = e.data;
-                console.log(`📨 Worker ${taskId} message: ${type}`);
+                console.log(`MESSAGE: Worker ${taskId} message: ${type}`);
 
                 if (cancelTokenRef.current.cancelled) {
                   cleanup();
@@ -811,11 +811,11 @@ export function useWorkerManager(): UseWorkerManagerReturn {
                       streamedResults.push(...chunkResults);
                       totalProcessedCount += (data.totalProcessed || 0);
                       
-                      console.log(`✅ Worker ${taskId} completed: ${chunkResults.length} results, total: ${streamedResults.length}`);
+                      console.log(`SUCCESS: Worker ${taskId} completed: ${chunkResults.length} results, total: ${streamedResults.length}`);
                       resolve(data); // Return original worker result for compatibility
                       
                     } catch (conversionError) {
-                      console.error(`❌ Error converting results from worker ${taskId}:`, conversionError);
+                      console.error(`ERROR: Error converting results from worker ${taskId}:`, conversionError);
                       // Don't fail the entire computation for one bad chunk
                       resolve({ topResults: [], otherResults: [], totalProcessed: 0 });
                     }
@@ -863,7 +863,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           worker.addEventListener('message', handleMessage);
           
           worker.onerror = (error) => {
-            console.error(`❌ Worker ${taskId} onerror:`, error.message);
+            console.error(`ERROR: Worker ${taskId} onerror:`, error.message);
             worker.removeEventListener('message', handleMessage);
             returnWorkerToPool(taskId);
             activePromisesRef.current.delete(cleanup);
@@ -873,7 +873,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           };
 
               // Send only minimal data - frequencies and referenceSpectrum already initialized
-              console.log(`🚀 Sending chunk ${chunkIndex} to worker ${taskId}: ${chunk.length} parameters`);
+              console.log(`SEND: Sending chunk ${chunkIndex} to worker ${taskId}: ${chunk.length} parameters`);
               worker.postMessage({
                 type: 'COMPUTE_GRID_CHUNK_OPTIMIZED',
                 data: {
@@ -913,12 +913,12 @@ export function useWorkerManager(): UseWorkerManagerReturn {
           }
         }
         
-        console.log(`📊 Streaming computation complete: ${streamedResults?.length || 0} total results`);
+        console.log(`COMPLETE: Streaming computation complete: ${streamedResults?.length || 0} total results`);
         
         // Validate final results
         if (!streamedResults || streamedResults.length === 0) {
-          console.warn('⚠️ No results collected from workers. This may indicate a computation issue.');
-          console.warn(`Debug info: chunks processed: ${chunks.length}, total points: ${totalPoints}`);
+          console.warn('WARNING: No results collected from workers. This may indicate a computation issue.');
+          console.warn(`DEBUG: chunks processed: ${chunks.length}, total points: ${totalPoints}`);
           return []; // Return empty array instead of undefined
         }
 
@@ -928,9 +928,9 @@ export function useWorkerManager(): UseWorkerManagerReturn {
       // Execute the streaming processing
       const streamedResults = await processChunksWithStreaming();
       
-      console.log(`🔍 Final computation results: ${streamedResults?.length || 0} models`);
-      console.log(`🔍 Debug - streamedResults is array: ${Array.isArray(streamedResults)}`);
-      console.log(`🔍 Debug - streamedResults defined: ${streamedResults !== undefined}`);
+      console.log(`FINAL: Computation results: ${streamedResults?.length || 0} models`);
+      console.log(`DEBUG: streamedResults is array: ${Array.isArray(streamedResults)}`);
+      console.log(`DEBUG: streamedResults defined: ${streamedResults !== undefined}`);
       
       if (cancelTokenRef.current.cancelled) {
         throw new Error('Computation cancelled');
@@ -1198,7 +1198,7 @@ export function useWorkerManager(): UseWorkerManagerReturn {
     // Force terminate all workers and clean up immediately
     forceTerminateAllWorkers();
     
-    console.log('✅ Cancellation complete - all workers terminated');
+    console.log('SUCCESS: Cancellation complete - all workers terminated');
   }, [forceTerminateAllWorkers]);
 
   // Cleanup on unmount

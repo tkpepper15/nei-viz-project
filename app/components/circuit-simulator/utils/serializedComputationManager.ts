@@ -56,7 +56,7 @@ export class SerializedComputationManager {
     this.configSerializer = new ConfigSerializer(this.config.gridSize);
     this.frequencySerializer = new FrequencySerializer();
     
-    console.log(`🚀 SerializedComputationManager initialized: ${this.config.gridSize}x5 grid, ${this.config.frequencyPreset} frequency preset`);
+    console.log(`INIT: SerializedComputationManager initialized: ${this.config.gridSize}x5 grid, ${this.config.frequencyPreset} frequency preset`);
   }
 
   /**
@@ -80,7 +80,11 @@ export class SerializedComputationManager {
     
     const serializedResults: SerializedResult[] = [];
     const frequencyConfigId = freqConfig.toId();
-    
+
+    // DEDUPLICATION: Track unique parameter combinations to prevent duplicate storage
+    const storedConfigs = new Set<string>();
+    let duplicatesSkipped = 0;
+
     for (const result of backendResults) {
       try {
         // Convert CircuitParameters to serialized format
@@ -94,10 +98,20 @@ export class SerializedComputationManager {
         
         // Find matching config ID (procedural reverse lookup)
         const configId = this.findConfigIdForParameters(serializedParams);
-        
+
         if (configId) {
+          const configIdString = configId.toString();
+
+          // DEDUPLICATION: Skip if we've already stored this parameter combination
+          if (storedConfigs.has(configIdString)) {
+            duplicatesSkipped++;
+            console.log(`DUPLICATE: Skipping duplicate parameter combination: ${configIdString}`);
+            continue;
+          }
+
+          storedConfigs.add(configIdString);
           serializedResults.push({
-            configId: configId.toString(),
+            configId: configIdString,
             frequencyConfigId,
             resnorm: result.resnorm,
             computationTime: undefined,
@@ -117,8 +131,9 @@ export class SerializedComputationManager {
     const compressionRatio = this.calculateCompressionRatio(backendResults.length, serializedResults.length);
     const duration = Date.now() - startTime;
     
-    console.log(`✅ Stored ${serializedResults.length}/${backendResults.length} results in ${duration}ms`);
-    console.log(`📊 Compression: ${compressionRatio.traditional.toFixed(1)}MB → ${compressionRatio.serialized.toFixed(1)}MB (${compressionRatio.reductionFactor.toFixed(0)}x smaller)`);
+    console.log(`SUCCESS: Stored ${serializedResults.length}/${backendResults.length} results in ${duration}ms`);
+    console.log(`DUPLICATE: Skipped ${duplicatesSkipped} duplicate parameter combinations`);
+    console.log(`DATA: Compression: ${compressionRatio.traditional.toFixed(1)}MB -> ${compressionRatio.serialized.toFixed(1)}MB (${compressionRatio.reductionFactor.toFixed(0)}x smaller)`);
     
     return serializedResults.length;
   }
@@ -186,8 +201,8 @@ export class SerializedComputationManager {
     }
     
     const duration = Date.now() - startTime;
-    console.log(`🔧 Generated ${backendPoints.length} BackendMeshPoints in ${duration}ms`);
-    console.log(`📋 Cache performance: ${cacheHits} hits, ${regenerated} regenerated`);
+    console.log(`PROCESS: Generated ${backendPoints.length} BackendMeshPoints in ${duration}ms`);
+    console.log(`CACHE: Performance: ${cacheHits} hits, ${regenerated} regenerated`);
     
     return backendPoints;
   }
@@ -270,8 +285,9 @@ export class SerializedComputationManager {
         };
         
         // Create ModelSnapshot with procedural data
+        // Use configId directly without index to prevent artificial duplicates
         const modelSnapshot: ModelSnapshot = {
-          id: `model_${result.configId}_${i}`,
+          id: `model_${result.configId}`,
           name: `Config ${result.configId}`,
           timestamp: Date.now(),
           parameters: circuitParams,
@@ -296,8 +312,8 @@ export class SerializedComputationManager {
     }
     
     const duration = Date.now() - startTime;
-    console.log(`🎨 Generated ${modelSnapshots.length} ModelSnapshots in ${duration}ms`);
-    console.log(`📋 Cache performance: ${cacheHits} hits, ${regenerated} regenerated`);
+    console.log(`RENDER: Generated ${modelSnapshots.length} ModelSnapshots in ${duration}ms`);
+    console.log(`CACHE: Performance: ${cacheHits} hits, ${regenerated} regenerated`);
     
     return modelSnapshots;
   }
@@ -336,7 +352,7 @@ export class SerializedComputationManager {
     });
     
     const duration = Date.now() - startTime;
-    console.log(`🔍 Filtered ${this.results.length} → ${filtered.length} results in ${duration}ms`);
+    console.log(`FILTER: Filtered ${this.results.length} -> ${filtered.length} results in ${duration}ms`);
     
     return filtered;
   }
@@ -352,7 +368,7 @@ export class SerializedComputationManager {
     );
     
     const duration = Date.now() - startTime;
-    console.log(`📊 Resnorm filter ${this.results.length} → ${filtered.length} results in ${duration}ms`);
+    console.log(`FILTER: Resnorm filter ${this.results.length} -> ${filtered.length} results in ${duration}ms`);
     
     return filtered;
   }
@@ -369,11 +385,11 @@ export class SerializedComputationManager {
     const best = sorted.slice(0, n);
     
     const duration = Date.now() - startTime;
-    console.log(`🏆 Retrieved top ${n} of ${this.results.length} results (${(n/this.results.length*100).toFixed(1)}%) in ${duration}ms`);
+    console.log(`TOP: Retrieved top ${n} of ${this.results.length} results (${(n/this.results.length*100).toFixed(1)}%) in ${duration}ms`);
     
     // Warn if requesting more than recommended limit
     if (n > 1000) {
-      console.warn(`⚠️  Requesting ${n} results exceeds recommended limit of 1000 for optimal performance`);
+      console.warn(`WARNING: Requesting ${n} results exceeds recommended limit of 1000 for optimal performance`);
     }
     
     return best;
@@ -408,7 +424,7 @@ export class SerializedComputationManager {
     const pageResults = this.sortedResults.slice(startIndex, endIndex);
     
     const duration = Date.now() - startTime;
-    console.log(`📄 Page ${pageNumber}/${totalPages}: ${pageResults.length} results in ${duration}ms`);
+    console.log(`PAGE: Page ${pageNumber}/${totalPages}: ${pageResults.length} results in ${duration}ms`);
     
     // Calculate resnorm statistics for current page
     const currentPageResnorms = pageResults.map(r => r.resnorm);
@@ -469,7 +485,7 @@ export class SerializedComputationManager {
     this.modelSnapshotCache.clear();
     this.sortedResults = [];
     this.resultsSorted = false;
-    console.log('🧹 All caches cleared including pagination cache');
+    console.log('CLEANUP: All caches cleared including pagination cache');
   }
 
   /**
@@ -495,11 +511,11 @@ export class SerializedComputationManager {
       const duration = Date.now() - startTime;
       const stats = this.getStorageStats();
 
-      console.log(`📤 SRD Export completed in ${duration}ms`);
-      console.log(`📊 Exported ${this.results.length.toLocaleString()} results (${stats.reductionFactor.toFixed(1)}x compression)`);
+      console.log(`EXPORT: SRD Export completed in ${duration}ms`);
+      console.log(`DATA: Exported ${this.results.length.toLocaleString()} results (${stats.reductionFactor.toFixed(1)}x compression`);
 
     } catch (error) {
-      console.error('❌ SRD export failed:', error);
+      console.error('ERROR: SRD export failed:', error);
       throw new Error(`Failed to export SRD: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -529,14 +545,14 @@ export class SerializedComputationManager {
 
       const duration = Date.now() - startTime;
 
-      console.log(`📥 SRD Import completed in ${duration}ms`);
-      console.log(`📊 Imported ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
-      console.log(`🔍 Grid: ${srdData.metadata.gridSize}^5, Frequency: ${srdData.metadata.frequencyPreset}`);
+      console.log(`IMPORT: SRD Import completed in ${duration}ms`);
+      console.log(`DATA: Imported ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
+      console.log(`CONFIG: Grid: ${srdData.metadata.gridSize}^5, Frequency: ${srdData.metadata.frequencyPreset}`);
 
       return manager;
 
     } catch (error) {
-      console.error('❌ SRD import failed:', error);
+      console.error('ERROR: SRD import failed:', error);
       throw new Error(`Failed to import SRD: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -553,14 +569,14 @@ export class SerializedComputationManager {
 
       // Validate compatibility
       if (srdData.metadata.gridSize !== this.config.gridSize) {
-        console.warn(`⚠️ Grid size mismatch: current=${this.config.gridSize}, import=${srdData.metadata.gridSize}`);
+        console.warn(`WARNING: Grid size mismatch: current=${this.config.gridSize}, import=${srdData.metadata.gridSize}`);
         // Update configuration to match imported data
         this.config.gridSize = srdData.metadata.gridSize;
         this.configSerializer = new ConfigSerializer(this.config.gridSize);
       }
 
       if (srdData.metadata.frequencyPreset !== this.config.frequencyPreset) {
-        console.warn(`⚠️ Frequency preset mismatch: current=${this.config.frequencyPreset}, import=${srdData.metadata.frequencyPreset}`);
+        console.warn(`WARNING: Frequency preset mismatch: current=${this.config.frequencyPreset}, import=${srdData.metadata.frequencyPreset}`);
         this.config.frequencyPreset = srdData.metadata.frequencyPreset;
       }
 
@@ -575,11 +591,11 @@ export class SerializedComputationManager {
 
       const duration = Date.now() - startTime;
 
-      console.log(`🔄 SRD Data replaced in ${duration}ms`);
-      console.log(`📊 Loaded ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
+      console.log(`REPLACE: SRD Data replaced in ${duration}ms`);
+      console.log(`DATA: Loaded ${srdData.serializedResults.length.toLocaleString()} results from ${srdData.metadata.title}`);
 
     } catch (error) {
-      console.error('❌ SRD data import failed:', error);
+      console.error('ERROR: SRD data import failed:', error);
       throw new Error(`Failed to import SRD data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

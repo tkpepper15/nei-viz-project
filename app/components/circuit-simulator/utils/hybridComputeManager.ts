@@ -77,12 +77,12 @@ export function useHybridComputeManager(
 
     // Check if WebGPU is supported
     if (!capabilities?.supported) {
-      console.log('📝 GPU disabled: WebGPU not supported');
+      console.log('DISABLED: GPU disabled: WebGPU not supported');
       return false;
     }
 
     // Always use GPU when available and enabled - no minimum threshold
-    console.log(`📝 GPU enabled: Processing ${totalParameters} parameters on ${capabilities.deviceType} GPU`);
+    console.log(`ENABLED: GPU enabled: Processing ${totalParameters} parameters on ${capabilities.deviceType} GPU`);
     return true;
   }, []);
 
@@ -175,7 +175,7 @@ export function useHybridComputeManager(
       const useGPU = shouldUseGPU(extendedSettings, totalParameters, capabilities);
 
       if (useGPU && webgpuManagerRef.current) {
-        console.log('🚀 Starting GPU-accelerated computation');
+        console.log('LAUNCH: Starting GPU-accelerated computation');
         
         onProgress({
           type: 'COMPUTATION_START',
@@ -262,7 +262,7 @@ export function useHybridComputeManager(
           batches.push(gridPoints.slice(i, i + batchSize));
         }
 
-        console.log(`📊 GPU processing: ${batches.length} batches of up to ${batchSize} parameters each`);
+        console.log(`PROCESS: GPU processing: ${batches.length} batches of up to ${batchSize} parameters each`);
 
         const allResults: BackendMeshPoint[] = [];
         let totalProcessed = 0;
@@ -345,7 +345,7 @@ export function useHybridComputeManager(
           message: `GPU computation complete: ${finalResults.length} results in ${(totalTime/1000).toFixed(1)}s`
         });
 
-        console.log(`✅ GPU computation complete: ${totalProcessed} parameters in ${totalTime.toFixed(2)}ms`);
+        console.log(`SUCCESS: GPU computation complete: ${totalProcessed} parameters in ${totalTime.toFixed(2)}ms`);
 
         return {
           results: finalResults,
@@ -361,7 +361,7 @@ export function useHybridComputeManager(
 
       } else {
         // Fallback to CPU computation
-        console.log('🔧 Falling back to CPU computation');
+        console.log('FALLBACK: Falling back to CPU computation');
         
         if (extendedSettings.gpuAcceleration.enabled && !capabilities?.supported) {
           onProgress({
@@ -415,7 +415,7 @@ export function useHybridComputeManager(
           extendedSettings.gpuAcceleration.fallbackToCPU && 
           isGPUError) {
         
-        console.warn('🔄 GPU computation failed, falling back to CPU:', error.message);
+        console.warn('FALLBACK: GPU computation failed, falling back to CPU:', error.message);
         
         onProgress({
           type: 'COMPUTATION_START',
@@ -466,7 +466,7 @@ export function useHybridComputeManager(
   }, [cpuComputeManager, getGPUCapabilities, shouldUseGPU, generateGridPoints, convertGPUResultsToBackendMeshPoints]);
 
   const cancelComputation = useCallback(() => {
-    console.log('🛑 Cancelling hybrid computation');
+    console.log('CANCEL: Cancelling hybrid computation');
     cancelTokenRef.current.cancelled = true;
     isComputingRef.current = false;
     

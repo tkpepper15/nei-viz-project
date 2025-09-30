@@ -11,11 +11,15 @@ import {
   ChevronDownIcon,
   TableCellsIcon,
   CpuChipIcon,
-  ArrowDownTrayIcon
+  ArrowDownTrayIcon,
+  ChartBarIcon,
+  BeakerIcon
 } from '@heroicons/react/24/outline';
 import { ImpedanceComparisonTab } from './tabs/ImpedanceComparisonTab';
 import { CircuitConfigurationTab } from './tabs/CircuitConfigurationTab';
 import { ExportTab } from './tabs/ExportTab';
+import { ResnormRangeTab } from './tabs/ResnormRangeTab';
+import { AnalysisTab } from './tabs/AnalysisTab';
 import { ModelSnapshot, ResnormGroup } from '../types';
 import { CircuitParameters } from '../types/parameters';
 
@@ -36,6 +40,18 @@ export interface BottomPanelTabProps {
   isVisible: boolean;
   highlightedModelId?: string | null;
   gridSize?: number;
+
+  // Additional props for ResnormRangeTab
+  currentResnorm?: number | null;
+  onCurrentResnormChange?: (resnorm: number | null) => void;
+  selectedResnormRange?: {min: number; max: number} | null;
+  onResnormRangeChange?: (min: number, max: number) => void;
+  onResnormSelect?: (resnorm: number) => void;
+  navigationOffset?: number;
+  onNavigationOffsetChange?: (offset: number) => void;
+  navigationWindowSize?: number;
+  taggedModels?: Map<string, string>;
+  tagColors?: string[];
 }
 
 interface CollapsibleBottomPanelProps {
@@ -58,6 +74,18 @@ interface CollapsibleBottomPanelProps {
   minHeight?: number;
   maxHeight?: number;
   className?: string;
+
+  // Additional props for ResnormRangeTab
+  currentResnorm?: number | null;
+  onCurrentResnormChange?: (resnorm: number | null) => void;
+  selectedResnormRange?: {min: number; max: number} | null;
+  onResnormRangeChange?: (min: number, max: number) => void;
+  onResnormSelect?: (resnorm: number) => void;
+  navigationOffset?: number;
+  onNavigationOffsetChange?: (offset: number) => void;
+  navigationWindowSize?: number;
+  taggedModels?: Map<string, string>;
+  tagColors?: string[];
 }
 
 const DEFAULT_TABS: BottomPanelTab[] = [
@@ -72,6 +100,18 @@ const DEFAULT_TABS: BottomPanelTab[] = [
     label: 'Config',
     icon: CpuChipIcon,
     component: CircuitConfigurationTab
+  },
+  {
+    id: 'analysis',
+    label: 'Analysis',
+    icon: BeakerIcon,
+    component: AnalysisTab
+  },
+  {
+    id: 'resnorm',
+    label: 'Resnorm',
+    icon: ChartBarIcon,
+    component: ResnormRangeTab
   },
   {
     id: 'export',
@@ -95,7 +135,18 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
   onHeightChange,
   minHeight = 120,
   maxHeight = 800,
-  className = ''
+  className = '',
+  // Additional props for ResnormRangeTab
+  currentResnorm,
+  onCurrentResnormChange,
+  selectedResnormRange,
+  onResnormRangeChange,
+  onResnormSelect,
+  navigationOffset,
+  onNavigationOffsetChange,
+  navigationWindowSize = 1000,
+  taggedModels,
+  tagColors
 }) => {
   const [activeTab, setActiveTab] = useState<string>('impedance');
   const [isResizing, setIsResizing] = useState(false);
@@ -230,6 +281,17 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
               isVisible={!isCollapsed}
               highlightedModelId={highlightedModelId}
               gridSize={gridSize}
+              // Additional props for ResnormRangeTab
+              currentResnorm={currentResnorm}
+              onCurrentResnormChange={onCurrentResnormChange}
+              selectedResnormRange={selectedResnormRange}
+              onResnormRangeChange={onResnormRangeChange}
+              onResnormSelect={onResnormSelect}
+              navigationOffset={navigationOffset}
+              onNavigationOffsetChange={onNavigationOffsetChange}
+              navigationWindowSize={navigationWindowSize}
+              taggedModels={taggedModels}
+              tagColors={tagColors}
             />
           )}
         </div>

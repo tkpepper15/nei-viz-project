@@ -11,43 +11,37 @@
 import React, { useCallback, useState } from 'react';
 import { BottomPanelTabProps } from '../CollapsibleBottomPanel';
 import { ArrowDownTrayIcon, DocumentIcon, TableCellsIcon } from '@heroicons/react/24/outline';
-import { ConfigId } from '../../utils/configSerializer';
 
 interface ExportTabProps extends BottomPanelTabProps {
   exportFormat?: 'csv' | 'json';
 }
 
 /**
- * Helper function to extract or generate proper ConfigId from ModelSnapshot
+ * Helper function to extract or generate unique model ID from ModelSnapshot
  */
-const getConfigIdFromModelSnapshot = (modelSnapshot: any, index: number, gridSize: number = 9): string => {
-  // Check if ModelSnapshot.id contains a ConfigId (format: model_09_08_08_08_09_08_0)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getUniqueModelId = (modelSnapshot: { id?: string; parameters?: any }, index: number): string => {
+  // Use existing ID if available and valid
   if (modelSnapshot.id && typeof modelSnapshot.id === 'string') {
-    const match = modelSnapshot.id.match(/^model_(\d{2}_\d{2}_\d{2}_\d{2}_\d{2}_\d{2})_\d+$/);
-    if (match) {
-      // Extract the ConfigId part from serialized computation format
-      console.log(`🔧 Extracted ConfigId from ModelSnapshot: ${match[1]} (original: ${modelSnapshot.id})`);
-      return match[1];
-    }
+    return modelSnapshot.id;
   }
 
-  // For traditional computation or missing ConfigId, generate synthetic ConfigId
-  // Convert index to 5D grid coordinates distributed across parameter space
-  const totalCombinations = Math.pow(gridSize, 5);
-  const scaledIndex = Math.floor((index / 1000) * totalCombinations); // Assume max 1000 results for scaling
+  // Generate unique ID based on parameters to avoid duplicates
+  if (modelSnapshot.parameters) {
+    const params = modelSnapshot.parameters;
+    const paramHash = [
+      Math.round(params.Rsh * 1000),
+      Math.round(params.Ra * 1000),
+      Math.round(params.Ca * 1000000000), // Convert F to nF
+      Math.round(params.Rb * 1000),
+      Math.round(params.Cb * 1000000000)  // Convert F to nF
+    ].join('_');
 
-  // Convert to 5D grid coordinates
-  let remaining = scaledIndex;
-  const cbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
-  const rbIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
-  const caIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
-  const raIdx = remaining % gridSize; remaining = Math.floor(remaining / gridSize);
-  const rshIdx = remaining % gridSize;
+    return `model_${paramHash}_${index}`;
+  }
 
-  // Format as proper ConfigId string
-  const syntheticConfigId = `${gridSize.toString().padStart(2, '0')}_${rshIdx.toString().padStart(2, '0')}_${raIdx.toString().padStart(2, '0')}_${caIdx.toString().padStart(2, '0')}_${rbIdx.toString().padStart(2, '0')}_${cbIdx.toString().padStart(2, '0')}`;
-  console.log(`🔧 Generated synthetic ConfigId for index ${index}: ${syntheticConfigId} (original: ${modelSnapshot.id})`);
-  return syntheticConfigId;
+  // Fallback to simple index-based ID
+  return `model_${index}`;
 };
 
 export const ExportTab: React.FC<ExportTabProps> = ({
@@ -66,6 +60,25 @@ export const ExportTab: React.FC<ExportTabProps> = ({
     setIsExporting(true);
 
     try {
+      // Deduplicate models based on unique parameters to prevent duplicates
+      const uniqueModels = new Map();
+      const dedupedResults = gridResults.filter((result, index) => {
+        if (!result.parameters) return false;
+
+        const params = result.parameters;
+        const paramKey = `${params.Rsh}_${params.Ra}_${params.Ca}_${params.Rb}_${params.Cb}`;
+
+        if (uniqueModels.has(paramKey)) {
+          console.log(`DUPLICATE: Skipping duplicate model at index ${index} with params: ${paramKey}`);
+          return false;
+        }
+
+        uniqueModels.set(paramKey, true);
+        return true;
+      });
+
+      console.log(`DATA: CSV export deduplication: ${gridResults.length} → ${dedupedResults.length} models`);
+
       const headers = [
         'Model ID',
         'Resnorm',
@@ -73,34 +86,39 @@ export const ExportTab: React.FC<ExportTabProps> = ({
         'Ra (Ω)',
         'Rb (Ω)',
         'Ca (F)',
-        'Cb (F)',
-        'Frequency (Hz)',
-        'Real (Ω)',
-        'Imaginary (Ω)',
-        'Magnitude (Ω)'
+        'Cb (F)'
       ];
 
       const rows = [headers.join(',')];
 
-      gridResults.forEach((result, index) => {
-        if (result.parameters && result.data) {
-          const configId = getConfigIdFromModelSnapshot(result, index);
-          result.data.forEach(point => {
-            const row = [
-              configId,
-              result.resnorm?.toFixed(6) || '0',
-              result.parameters.Rsh.toFixed(6),
-              result.parameters.Ra.toFixed(6),
-              result.parameters.Rb.toFixed(6),
-              result.parameters.Ca.toExponential(6),
-              result.parameters.Cb.toExponential(6),
-              point.frequency.toFixed(6),
-              point.real.toFixed(6),
-              point.imaginary.toFixed(6),
-              point.magnitude.toFixed(6)
-            ];
-            rows.push(row.join(','));
-          });
+      // Add reference circuit as first entry with 0 resnorm
+      if (currentParameters) {
+        const referenceRow = [
+          'reference_circuit',
+          '0.000000',
+          currentParameters.Rsh.toFixed(6),
+          currentParameters.Ra.toFixed(6),
+          currentParameters.Rb.toFixed(6),
+          currentParameters.Ca.toExponential(6),
+          currentParameters.Cb.toExponential(6)
+        ];
+        rows.push(referenceRow.join(','));
+      }
+
+      // Add computed results (one row per model, no frequency breakdown)
+      dedupedResults.forEach((result, index) => {
+        if (result.parameters) {
+          const modelId = getUniqueModelId(result, index);
+          const row = [
+            modelId,
+            result.resnorm?.toFixed(6) || '0',
+            result.parameters.Rsh.toFixed(6),
+            result.parameters.Ra.toFixed(6),
+            result.parameters.Rb.toFixed(6),
+            result.parameters.Ca.toExponential(6),
+            result.parameters.Cb.toExponential(6)
+          ];
+          rows.push(row.join(','));
         }
       });
 
@@ -117,13 +135,14 @@ export const ExportTab: React.FC<ExportTabProps> = ({
       link.click();
       document.body.removeChild(link);
 
-      console.log(`✅ Exported ${gridResults.length} models to CSV`);
+      const totalExported = dedupedResults.length + (currentParameters ? 1 : 0);
+      console.log(`SUCCESS: Exported ${totalExported} models to CSV (${dedupedResults.length} computed + reference circuit)`);
     } catch (error) {
-      console.error('❌ CSV export failed:', error);
+      console.error('ERROR: CSV export failed:', error);
     } finally {
       setIsExporting(false);
     }
-  }, [gridResults]);
+  }, [gridResults, currentParameters]);
 
   // JSON export functionality
   const exportToJSON = useCallback(() => {
@@ -132,17 +151,35 @@ export const ExportTab: React.FC<ExportTabProps> = ({
     setIsExporting(true);
 
     try {
+      // Deduplicate models based on unique parameters to prevent duplicates
+      const uniqueModels = new Map();
+      const dedupedResults = gridResults.filter((result, index) => {
+        if (!result.parameters) return false;
+
+        const params = result.parameters;
+        const paramKey = `${params.Rsh}_${params.Ra}_${params.Ca}_${params.Rb}_${params.Cb}`;
+
+        if (uniqueModels.has(paramKey)) {
+          console.log(`DUPLICATE: Skipping duplicate model at index ${index} with params: ${paramKey}`);
+          return false;
+        }
+
+        uniqueModels.set(paramKey, true);
+        return true;
+      });
+
+      console.log(`DATA: Export deduplication: ${gridResults.length} → ${dedupedResults.length} models`);
+
       const exportData = {
         exportDate: new Date().toISOString(),
         referenceParameters: currentParameters,
-        models: gridResults.map((result, index) => {
-          const configId = getConfigIdFromModelSnapshot(result, index);
+        models: dedupedResults.map((result, index) => {
+          const modelId = getUniqueModelId(result, index);
           return {
-            configId: configId,  // Use proper ConfigId format
-            id: configId,        // Keep for backwards compatibility
+            id: modelId,  // Single unique identifier
             resnorm: result.resnorm,
             parameters: result.parameters,
-            impedanceData: result.data
+            impedanceData: result.data || []
           };
         })
       };
@@ -160,9 +197,9 @@ export const ExportTab: React.FC<ExportTabProps> = ({
       link.click();
       document.body.removeChild(link);
 
-      console.log(`✅ Exported ${gridResults.length} models to JSON`);
+      console.log(`SUCCESS: Exported ${dedupedResults.length} unique models to JSON (${gridResults.length} total filtered to ${dedupedResults.length})`);
     } catch (error) {
-      console.error('❌ JSON export failed:', error);
+      console.error('ERROR: JSON export failed:', error);
     } finally {
       setIsExporting(false);
     }
@@ -225,8 +262,8 @@ export const ExportTab: React.FC<ExportTabProps> = ({
           {exportFormat === 'csv' && (
             <div className="space-y-3">
               <p className="text-xs text-neutral-400">
-                Export impedance data as CSV file including model parameters, frequency points,
-                and complex impedance values. Compatible with Excel, Google Sheets, and data analysis tools.
+                Export circuit parameters and resnorm values as CSV file. Includes reference circuit
+                (resnorm=0) as first entry. Compatible with Excel, Google Sheets, and data analysis tools.
               </p>
               <button
                 onClick={exportToCSV}
@@ -286,10 +323,10 @@ export const ExportTab: React.FC<ExportTabProps> = ({
         <div className="bg-blue-900/20 rounded-lg p-3 border border-blue-700/30">
           <h4 className="text-xs font-medium text-blue-200 mb-2">Export Notes</h4>
           <ul className="text-xs text-blue-300/80 space-y-1">
-            <li>• CSV format: One row per frequency point per model</li>
-            <li>• JSON format: Hierarchical structure with metadata</li>
-            <li>• All impedance values in Ohms (Ω)</li>
-            <li>• Capacitance values in Farads (F)</li>
+            <li>• CSV format: One row per model with parameters and resnorm</li>
+            <li>• JSON format: Hierarchical structure with impedance data</li>
+            <li>• Reference circuit included as first entry (resnorm = 0)</li>
+            <li>• Resistance values in Ohms (Ω), Capacitance in Farads (F)</li>
             <li>• Files named with current date for organization</li>
           </ul>
         </div>

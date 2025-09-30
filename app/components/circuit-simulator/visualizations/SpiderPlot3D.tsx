@@ -553,10 +553,6 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (!referenceModel || !filteredModels.length) return;
 
     ctx.save();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.8;
-    ctx.setLineDash([6, 3]);
 
     // Calculate the full resnorm range from all filtered models
     const resnorms = filteredModels.map(m => m.resnorm || 0).filter(r => r > 0);
@@ -573,7 +569,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     };
 
     // Calculate ground truth vertices at different Z levels throughout the resnorm spectrum
-    const numLevels = 20; // Number of levels to draw the continuous line
+    const numLevels = 30; // Increased levels for smoother line
     const groundTruthVertices = Array.from({ length: numLevels }, (_, levelIndex) => {
       // Calculate Z height for this level
       const normalizedZ = levelIndex / (numLevels - 1);
@@ -583,17 +579,17 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       return params.map((param, i) => {
         const value = referenceModel.parameters[param as keyof typeof referenceModel.parameters] as number;
         const range = paramRanges[param as keyof typeof paramRanges];
-        
+
         // Normalize parameter value to 0-1 range (logarithmic) - same as convert3DPolygons
         const logMin = Math.log10(range.min);
         const logMax = Math.log10(range.max);
         const logValue = Math.log10(Math.max(range.min, Math.min(range.max, value)));
         const normalizedValue = (logValue - logMin) / (logMax - logMin);
-        
+
         // Calculate radar position (pentagon) - same as convert3DPolygons
         const angle = (i * 2 * Math.PI) / params.length - Math.PI / 2;
         const radius = normalizedValue * 2.0;
-        
+
         return {
           x: Math.cos(angle) * radius,
           y: Math.sin(angle) * radius,
@@ -605,7 +601,65 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       });
     });
 
+    // Enhanced overlay styling for maximum visibility
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = Math.max(3, 4 * camera.scale); // Thicker lines
+    ctx.globalAlpha = 0.95; // High opacity
+    ctx.setLineDash([8, 4]); // More prominent dashes
+
     // Draw vertical lines connecting ground truth vertices at each parameter position
+    for (let paramIndex = 0; paramIndex < params.length; paramIndex++) {
+      ctx.beginPath();
+      let pathStarted = false;
+
+      for (let levelIndex = 0; levelIndex < numLevels; levelIndex++) {
+        const vertex = groundTruthVertices[levelIndex][paramIndex];
+        const projected = project3D(vertex);
+
+        if (projected.visible) {
+          if (!pathStarted) {
+            ctx.moveTo(projected.x, projected.y);
+            pathStarted = true;
+          } else {
+            ctx.lineTo(projected.x, projected.y);
+          }
+        }
+      }
+
+      if (pathStarted) {
+        ctx.stroke();
+      }
+    }
+
+    // Draw horizontal connecting lines at each Z level to create continuous 3D structure
+    ctx.setLineDash([4, 2]); // Different dash pattern for horizontal lines
+    ctx.globalAlpha = 0.7;
+    ctx.lineWidth = Math.max(2, 3 * camera.scale);
+
+    for (let levelIndex = 0; levelIndex < numLevels; levelIndex += 3) { // Every 3rd level for clarity
+      const levelVertices = groundTruthVertices[levelIndex];
+      const projectedVertices = levelVertices.map(v => project3D(v)).filter(p => p.visible);
+
+      if (projectedVertices.length >= 3) {
+        ctx.beginPath();
+        ctx.moveTo(projectedVertices[0].x, projectedVertices[0].y);
+
+        for (let i = 1; i < projectedVertices.length; i++) {
+          ctx.lineTo(projectedVertices[i].x, projectedVertices[i].y);
+        }
+        ctx.closePath(); // Close the pentagon at this level
+        ctx.stroke();
+      }
+    }
+
+    // Add glowing effect for enhanced visibility
+    ctx.shadowColor = '#FFFFFF';
+    ctx.shadowBlur = 8;
+    ctx.globalAlpha = 0.6;
+    ctx.lineWidth = Math.max(1, 2 * camera.scale);
+    ctx.setLineDash([]);
+
+    // Redraw vertical lines with glow effect
     for (let paramIndex = 0; paramIndex < params.length; paramIndex++) {
       ctx.beginPath();
       let pathStarted = false;
@@ -669,29 +723,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
     });
     
-    // Draw wireframe polygon with adaptive line width and highlighting
-    const baseOpacity = Math.max(0.5, polygon.opacity * depthFactor);
+    // Draw filled wafer plate polygon with enhanced opacity and depth
+    const baseOpacity = Math.max(0.3, polygon.opacity * depthFactor);
     const baseLineWidth = Math.max(1, 2 * depthFactor * camera.scale);
-    
-    // Enhanced styling for hovered/tagged/highlighted models
-    if (isHovered) {
-      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.3);
-      ctx.lineWidth = baseLineWidth * 2;
-      ctx.strokeStyle = '#FFFF00'; // Yellow highlight for hover
-    } else if (isHighlighted) {
-      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.4);
-      ctx.lineWidth = baseLineWidth * 2.5;
-      ctx.strokeStyle = '#00FFFF'; // Cyan highlight for selected model
-    } else if (isTagged) {
-      ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.2);
-      ctx.lineWidth = baseLineWidth * 1.5;
-      ctx.strokeStyle = '#FF6B9D'; // Pink highlight for tagged
-    } else {
-      ctx.globalAlpha = baseOpacity;
-      ctx.lineWidth = baseLineWidth;
-      ctx.strokeStyle = polygon.color;
-    }
-    ctx.setLineDash([]);
 
     const projectedOnly = projectedVertices.map(p => p.projected);
     ctx.beginPath();
@@ -700,6 +734,39 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.lineTo(projectedOnly[i].x, projectedOnly[i].y);
     }
     ctx.closePath();
+
+    // Fill the wafer plate with semi-transparent color
+    if (isHovered) {
+      ctx.globalAlpha = Math.min(0.8, baseOpacity + 0.4);
+      ctx.fillStyle = '#FFFF00'; // Yellow highlight for hover
+    } else if (isHighlighted) {
+      ctx.globalAlpha = Math.min(0.85, baseOpacity + 0.5);
+      ctx.fillStyle = '#00FFFF'; // Cyan highlight for selected model
+    } else if (isTagged) {
+      ctx.globalAlpha = Math.min(0.7, baseOpacity + 0.3);
+      ctx.fillStyle = '#FF6B9D'; // Pink highlight for tagged
+    } else {
+      ctx.globalAlpha = Math.min(0.6, baseOpacity + 0.2);
+      ctx.fillStyle = polygon.color;
+    }
+    ctx.fill();
+
+    // Add subtle outline for wafer plate definition
+    ctx.globalAlpha = Math.min(1.0, baseOpacity + 0.3);
+    if (isHovered) {
+      ctx.lineWidth = baseLineWidth * 2;
+      ctx.strokeStyle = '#FFFF00'; // Yellow outline for hover
+    } else if (isHighlighted) {
+      ctx.lineWidth = baseLineWidth * 2.5;
+      ctx.strokeStyle = '#00FFFF'; // Cyan outline for selected model
+    } else if (isTagged) {
+      ctx.lineWidth = baseLineWidth * 1.5;
+      ctx.strokeStyle = '#FF6B9D'; // Pink outline for tagged
+    } else {
+      ctx.lineWidth = Math.max(0.5, baseLineWidth * 0.7);
+      ctx.strokeStyle = polygon.color;
+    }
+    ctx.setLineDash([]);
     ctx.stroke();
 
     // Draw vertices as adaptive-sized dots with highlighting
@@ -1935,7 +2002,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     if (e.target !== canvasRef.current) return;
 
     // Adaptive speeds based on current camera distance and scale
-    const moveSpeed = 0.3 * camera.distance * 0.1; // Scale with distance
+    // const moveSpeed = 0.3 * camera.distance * 0.1; // Scale with distance (unused)
     const rotateSpeed = 3; // Reduced for smoother rotation
     
     switch (e.key.toLowerCase()) {

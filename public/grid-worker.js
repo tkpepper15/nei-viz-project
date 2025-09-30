@@ -6,6 +6,58 @@ let sharedFrequencies = null;
 let sharedReferenceSpectrum = null;
 let workerId = null;
 
+// COMPUTATION CACHE: Persistent cache to avoid recomputing identical parameter combinations
+// Uses IndexedDB for persistence across browser sessions
+let computationCache = new Map(); // In-memory cache
+let cacheInitialized = false;
+
+// Initialize computation cache (simplified localStorage approach for web workers)
+async function initializeComputationCache() {
+  if (cacheInitialized) return;
+
+  try {
+    // Web workers can't access localStorage directly, so use IndexedDB or in-memory only
+    // For now, use in-memory cache that gets populated during computation
+    computationCache = new Map();
+    cacheInitialized = true;
+    console.log('🚀 Computation cache initialized');
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize computation cache:', error);
+    computationCache = new Map();
+    cacheInitialized = true;
+  }
+}
+
+// Create cache key for parameter combination
+function createCacheKey(params, frequencies) {
+  return [
+    params.Rsh.toFixed(10),
+    params.Ra.toFixed(10),
+    params.Ca.toExponential(10),
+    params.Rb.toFixed(10),
+    params.Cb.toExponential(10),
+    frequencies[0].toFixed(6), // min frequency
+    frequencies[frequencies.length - 1].toFixed(6), // max frequency
+    frequencies.length // number of frequency points
+  ].join('|');
+}
+
+// Check if computation result exists in cache
+function getCachedResult(cacheKey) {
+  return computationCache.get(cacheKey);
+}
+
+// Store computation result in cache
+function setCachedResult(cacheKey, result) {
+  // Limit cache size to prevent memory issues
+  if (computationCache.size > 10000) {
+    // Remove oldest entries (simple FIFO)
+    const oldestKey = computationCache.keys().next().value;
+    computationCache.delete(oldestKey);
+  }
+  computationCache.set(cacheKey, result);
+}
+
 // Complex number operations
 const complex = {
   add: (a, b) => ({
@@ -215,17 +267,17 @@ function generateLogSpaceWithReference(min, max, num, referenceValue) {
 // Stream grid points in chunks to prevent memory overflow
 function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnormConfig = { method: 'mae' }) {
   const totalPoints = Math.pow(gridSize, 5);
-  
+
   // Ground truth parameters (reference values to ensure are included)
   // Use input parameters if provided, otherwise use defaults
   const groundTruthParams = inputGroundTruth || {
     Rsh: 24,        // Shunt resistance (Ω)
-    Ra: 500,       // Apical resistance (Ω) 
+    Ra: 500,       // Apical resistance (Ω)
     Ca: 0.5e-6,    // Apical capacitance (F)
     Rb: 500,       // Basal resistance (Ω)
     Cb: 0.5e-6     // Basal capacitance (F)
   };
-  
+
   // Generate parameter ranges with ground truth values included
   // Use consistent ranges: all resistance parameters use 10-10000 Ω
   const rsValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rsh);
@@ -233,6 +285,9 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
   const rbValues = generateLogSpaceWithReference(10, 10000, gridSize, groundTruthParams.Rb);
   const caValues = generateLogSpaceWithReference(0.1e-6, 50e-6, gridSize, groundTruthParams.Ca);
   const cbValues = generateLogSpaceWithReference(0.1e-6, 50e-6, gridSize, groundTruthParams.Cb);
+
+  // DEDUPLICATION: Track unique parameter combinations to prevent recomputation
+  const parameterCache = new Set();
   
   // Debug: Check if ground truth values are included
   const debugInfo = {
@@ -270,18 +325,34 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
     const Ca = caValues[caIndex];
     const Rb = rbValues[rbIndex];
     const Cb = cbValues[cbIndex];
-    
+
+    // DEDUPLICATION: Create unique parameter key for caching
+    // Use fixed precision to handle floating point precision issues
+    const paramKey = [
+      Rsh.toFixed(10),
+      Ra.toFixed(10),
+      Ca.toExponential(10),
+      Rb.toFixed(10),
+      Cb.toExponential(10)
+    ].join('|');
+
+    // Skip if we've already processed this exact parameter combination
+    if (parameterCache.has(paramKey)) {
+      continue;
+    }
+    parameterCache.add(paramKey);
+
     // Symmetric grid optimization: skip duplicates where Ra/Ca > Rb/Cb
     if (useSymmetricGrid) {
       // Calculate time constants tau = RC for comparison
       const tauA = Ra * Ca;
       const tauB = Rb * Cb;
-      
+
       // Skip this combination if tauA > tauB (we'll get the equivalent from the swapped version)
       if (tauA > tauB) {
         continue;
       }
-      
+
       // If time constants are equal, enforce Ra <= Rb to break ties
       if (Math.abs(tauA - tauB) < 1e-15 && Ra > Rb) {
         continue;
@@ -304,6 +375,9 @@ function* streamGridPoints(gridSize, useSymmetricGrid, inputGroundTruth, resnorm
 
 // Optimized chunk processing function with minimal data transfer
 async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, totalChunks, referenceSpectrum, resnormConfig, taskId, maxComputationResults = 500000) {
+  // Initialize computation cache
+  await initializeComputationCache();
+
   // Ultra-efficient Top-N heap for massive datasets
   const MAX_RESULTS_DURING_COMPUTATION = maxComputationResults; // User-configurable limit
   const FINAL_TOP_RESULTS = maxComputationResults; // Final top results to return (user configurable)
@@ -440,9 +514,24 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
     for (const params of batch) {
       try {
         if (!params || typeof params.Rsh !== 'number') continue;
-        
-        const spectrum = calculateImpedanceSpectrum(params, frequencyArray);
-        const resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
+
+        // CACHE OPTIMIZATION: Check if we've already computed this parameter combination
+        const cacheKey = createCacheKey(params, frequencyArray);
+        let cachedResult = getCachedResult(cacheKey);
+
+        let spectrum, resnorm;
+        if (cachedResult) {
+          // Use cached result - avoid recomputation
+          spectrum = cachedResult.spectrum;
+          resnorm = cachedResult.resnorm;
+        } else {
+          // Compute new result and cache it
+          spectrum = calculateImpedanceSpectrum(params, frequencyArray);
+          resnorm = calculateResnorm(referenceSpectrum, spectrum, resnormConfig);
+
+          // Cache the result for future use
+          setCachedResult(cacheKey, { spectrum, resnorm });
+        }
         
         if (isFinite(resnorm)) {
           // Ultra-efficient Top-N: store minimal data during computation
@@ -496,8 +585,18 @@ async function processChunkOptimized(chunkParams, frequencyArray, chunkIndex, to
     const result = finalResults[i];
     
     if (i < FINAL_TOP_RESULTS) {
-      // Re-calculate spectrum for top results only  
-      const spectrum = calculateImpedanceSpectrum(result.parameters, frequencyArray);
+      // Re-calculate spectrum for top results only (or get from cache)
+      const cacheKey = createCacheKey(result.parameters, frequencyArray);
+      let cachedResult = getCachedResult(cacheKey);
+
+      let spectrum;
+      if (cachedResult) {
+        spectrum = cachedResult.spectrum;
+      } else {
+        spectrum = calculateImpedanceSpectrum(result.parameters, frequencyArray);
+        setCachedResult(cacheKey, { spectrum, resnorm: result.resnorm });
+      }
+
       topResultsWithSpectra.push({
         parameters: result.parameters,
         resnorm: result.resnorm,

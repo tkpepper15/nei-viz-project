@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { CircuitParameters } from '../types/parameters';
 import { StaticRenderSettings } from './StaticRenderControls';
 import { EnhancedInput } from './EnhancedInput';
@@ -96,9 +96,8 @@ interface CenterParameterPanelProps {
   isComputing: boolean;
   configurationName?: string;
   onConfigurationNameChange?: (name: string) => void;
+  onConfigurationNameBlur?: (name: string) => void;
   selectedProfileId?: string | null; // To know if there's a current profile to update
-  maxComputationResults: number;
-  onMaxComputationResultsChange: (limit: number) => void;
   // New SRD upload functionality
   onSRDUploaded?: (manager: SerializedComputationManager, metadata: { title: string; totalResults: number; gridSize: number }) => void;
   onUploadError?: (error: string) => void;
@@ -123,15 +122,25 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
   isComputing,
   configurationName = '',
   onConfigurationNameChange,
+  onConfigurationNameBlur,
   selectedProfileId,
-  maxComputationResults,
-  onMaxComputationResultsChange,
   onSRDUploaded,
   onUploadError
   // Removed resnorm config params since method is fixed to SSR
 }) => {
   // Operation mode state - compute or upload
   const [operationMode, setOperationMode] = useState<'compute' | 'upload'>('compute');
+
+  // Simple local state for immediate UI feedback
+  const [localConfigName, setLocalConfigName] = useState(configurationName);
+  const [isEditingName, setIsEditingName] = useState(false);
+
+  // Only update local state when prop changes AND we're not currently editing
+  useEffect(() => {
+    if (!isEditingName) {
+      setLocalConfigName(configurationName);
+    }
+  }, [configurationName, isEditingName]);
   // Circuit parameter change handlers
   const handleCircuitParamChange = useCallback((param: keyof CircuitParameters, value: number) => {
     if (param === 'frequency_range') return; // Handle separately
@@ -266,8 +275,18 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
           </label>
           <input
             type="text"
-            value={configurationName}
-            onChange={(e) => onConfigurationNameChange(e.target.value)}
+            value={localConfigName}
+            onChange={(e) => {
+              setLocalConfigName(e.target.value);
+              // Update parent state immediately for responsive UI
+              onConfigurationNameChange?.(e.target.value);
+            }}
+            onFocus={() => setIsEditingName(true)}
+            onBlur={(e) => {
+              setIsEditingName(false);
+              // Trigger save when user finishes editing
+              onConfigurationNameBlur?.(e.target.value);
+            }}
             placeholder="Enter configuration name..."
             className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
           />
@@ -426,31 +445,6 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   />
                 </div>
 
-                {/* Computation Result Limit */}
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-neutral-200">
-                      Max Results to Store
-                    </label>
-                    <div className="text-xs text-neutral-400">
-                      Top {maxComputationResults.toLocaleString()} kept
-                    </div>
-                  </div>
-                  <select
-                    value={maxComputationResults}
-                    onChange={(e) => onMaxComputationResultsChange(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
-                  >
-                    <option value={500}>500 (Ultra Fast)</option>
-                    <option value={1000}>1,000 (Fast)</option>
-                    <option value={2000}>2,000 (Balanced)</option>
-                    <option value={3000}>3,000 (Quality)</option>
-                    <option value={5000}>5,000 (High Quality)</option>
-                  </select>
-                  <div className="text-xs text-neutral-500 mt-2">
-                    Higher limits find better results but use more memory
-                  </div>
-                </div>
               </div>
 
               {/* Group Portion Control */}
@@ -639,9 +633,11 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                 onGridSizeChange(metadata.gridSize);
 
                 // Create a descriptive configuration name if none exists
-                if (onConfigurationNameChange && !configurationName) {
+                if (onConfigurationNameChange && !localConfigName) {
                   const timestamp = new Date().toLocaleDateString();
-                  onConfigurationNameChange(`${metadata.title} (Uploaded ${timestamp})`);
+                  const newName = `${metadata.title} (Uploaded ${timestamp})`;
+                  setLocalConfigName(newName);
+                  onConfigurationNameChange(newName);
                 }
 
                 // Call the parent handler

@@ -1,0 +1,45 @@
+{
+  "ground_truth_circuit": {
+    "Rsh": 25.88,
+    "Ra": 5011.87,
+    "Ca": 2.69e-05,
+    "Rb": 5011.87,
+    "Cb": 2.69e-05,
+    "frequency_range": [
+      1.0,
+      10000.0
+    ]
+  },
+  "variation_ranges": {
+    "Rsh": [
+      20.7,
+      31.06
+    ],
+    "Ra": [
+      4260.09,
+      5763.65
+    ],
+    "Ca": [
+      2.02e-05,
+      3.36e-05
+    ],
+    "Rb": [
+      4260.09,
+      5763.65
+    ],
+    "Cb": [
+      2.02e-05,
+      3.36e-05
+    ]
+  },
+  "num_variations": 100,
+  "frequency_range": [
+    1.0,
+    10000.0
+  ],
+  "num_frequencies": 30,
+  "run_name": "grid_example",
+  "grid_mode": true,
+  "grid_size": 4,
+  "timestamp": "2025-09-26T14:48:35.814485"
+}

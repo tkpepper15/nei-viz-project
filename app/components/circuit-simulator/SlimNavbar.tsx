@@ -13,13 +13,14 @@
 
 import React from 'react';
 import { UserProfile } from '../auth/UserProfile';
+import { User } from '@supabase/supabase-js';
 
 interface SlimNavbarProps {
   statusMessage?: string;
   gridResults?: unknown[];
   gridSize?: number;
   onSettingsOpen: () => void;
-  user?: unknown;
+  user?: User | null;
   onSignOut?: () => void;
 }
 
@@ -65,16 +66,14 @@ export const SlimNavbar: React.FC<SlimNavbarProps> = ({
           </svg>
         </button>
 
-        {user && (
+        {user ? (
           <div className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 rounded flex items-center">
             <UserProfile
               user={user}
-              onSignOut={onSignOut}
-              compact={true}
-              className="text-xs text-neutral-300"
+              onSignOut={onSignOut || (() => {})}
             />
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
