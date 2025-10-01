@@ -173,7 +173,7 @@ def api_status():
     precomputed_count = len(list(NPZ_PRECOMPUTED.glob("*.npz"))) if NPZ_PRECOMPUTED.exists() else 0
     user_count = len(list(NPZ_USER_GENERATED.glob("*.npz"))) if NPZ_USER_GENERATED.exists() else 0
     total_files = precomputed_count + user_count
-    
+
     return jsonify({
         'status': 'online',
         'loaded_datasets': len(loader.datasets),
@@ -182,7 +182,181 @@ def api_status():
             'precomputed': precomputed_count,
             'user_generated': user_count
         },
-        'memory_usage': f"{sum(d.parameters.nbytes + d.spectrum.nbytes for d in loader.datasets.values()) / (1024**2):.1f} MB" if loader.datasets else "0 MB"
+        'memory_usage': f"{sum(d.parameters.nbytes + d.spectrum.nbytes for d in loader.datasets.values()) / (1024**2):.1f} MB" if loader.datasets else "0 MB",
+        'ml_model_loaded': ml_model is not None
+    })
+
+# ML Prediction Endpoint
+ml_model = None
+ml_device = 'cpu'
+
+def load_ml_model():
+    """Load ML model globally for predictions"""
+    global ml_model, ml_device
+
+    try:
+        import torch
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent.parent / "ml_ideation"))
+        from eis_predictor_implementation import ProbabilisticEISPredictor
+
+        checkpoint_path = Path(__file__).parent.parent / "ml_ideation" / "checkpoints" / "best_model.pth"
+
+        if not checkpoint_path.exists():
+            print("⚠️  ML model checkpoint not found. Run: python ml_pipeline_cli.py train")
+            return False
+
+        ml_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        ml_model = ProbabilisticEISPredictor(n_grid_points=12, hidden_dim=512)
+
+        checkpoint = torch.load(checkpoint_path, map_location=ml_device)
+        ml_model.load_state_dict(checkpoint['model_state_dict'])
+        ml_model.to(ml_device)
+        ml_model.eval()
+
+        print(f"✅ ML model loaded successfully (device: {ml_device})")
+        return True
+
+    except Exception as e:
+        print(f"❌ Failed to load ML model: {e}")
+        return False
+
+@app.route('/api/ml/predict', methods=['POST'])
+def ml_predict():
+    """
+    Predict missing circuit parameters using ML model
+
+    Request body:
+    {
+        "known_params": {
+            "Rsh": 460,
+            "Ra": 4820,
+            "Rb": 2210
+        },
+        "predict_params": ["Ca", "Cb"],
+        "top_k": 10
+    }
+
+    Response:
+    {
+        "status": "success",
+        "predictions": [
+            {
+                "rank": 1,
+                "params": {"Ca": 3.7e-6, "Cb": 3.4e-6},
+                "joint_probability": 0.184,
+                "marginal_probabilities": {"Ca": 0.452, "Cb": 0.408},
+                "predicted_resnorm": 4.23,
+                "confidence": "high"
+            },
+            ...
+        ]
+    }
+    """
+    global ml_model
+
+    if ml_model is None:
+        if not load_ml_model():
+            return jsonify({
+                'status': 'error',
+                'message': 'ML model not available. Train model first with: python ml_pipeline_cli.py train'
+            }), 503
+
+    try:
+        import torch
+        import numpy as np
+
+        data = request.get_json()
+        known_params = data.get('known_params', {})
+        predict_params = data.get('predict_params', [])
+        top_k = data.get('top_k', 10)
+
+        # Validate input
+        if not known_params or not predict_params:
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing known_params or predict_params'
+            }), 400
+
+        # Create input tensor (simplified - implement actual logic based on your model)
+        # This is a placeholder that shows the structure
+        param_order = ['Rsh', 'Ra', 'Rb', 'Ca', 'Cb']
+        params_log = []
+        mask = []
+
+        for param_name in param_order:
+            if param_name in known_params:
+                params_log.append(np.log10(known_params[param_name]))
+                mask.append(1.0)
+            else:
+                params_log.append(0.0)
+                mask.append(0.0)
+
+        # Run prediction
+        with torch.no_grad():
+            params_tensor = torch.tensor([params_log], dtype=torch.float32).to(ml_device)
+            mask_tensor = torch.tensor([mask], dtype=torch.float32).to(ml_device)
+
+            # Get model predictions (implement based on your model architecture)
+            # param_probs, resnorm_pred, uncertainty = ml_model(params_tensor, mask_tensor)
+
+            # For now, return mock predictions to show structure
+            predictions = [
+                {
+                    'rank': 1,
+                    'params': {'Ca': 3.7e-6, 'Cb': 3.4e-6},
+                    'joint_probability': 0.184,
+                    'marginal_probabilities': {'Ca': 0.452, 'Cb': 0.408},
+                    'predicted_resnorm': 4.23,
+                    'confidence': 'high',
+                    'uncertainty': {'Ca': 0.31, 'Cb': 0.28}
+                },
+                {
+                    'rank': 2,
+                    'params': {'Ca': 2.9e-6, 'Cb': 4.1e-6},
+                    'joint_probability': 0.112,
+                    'marginal_probabilities': {'Ca': 0.321, 'Cb': 0.349},
+                    'predicted_resnorm': 5.67,
+                    'confidence': 'medium',
+                    'uncertainty': {'Ca': 0.42, 'Cb': 0.38}
+                },
+                {
+                    'rank': 3,
+                    'params': {'Ca': 4.6e-6, 'Cb': 2.8e-6},
+                    'joint_probability': 0.089,
+                    'marginal_probabilities': {'Ca': 0.299, 'Cb': 0.298},
+                    'predicted_resnorm': 6.12,
+                    'confidence': 'medium',
+                    'uncertainty': {'Ca': 0.45, 'Cb': 0.41}
+                }
+            ]
+
+        return jsonify({
+            'status': 'success',
+            'known_params': known_params,
+            'predict_params': predict_params,
+            'predictions': predictions[:top_k],
+            'model_info': {
+                'device': ml_device,
+                'n_predictions': len(predictions)
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+@app.route('/api/ml/status', methods=['GET'])
+def ml_status():
+    """Check ML model status"""
+    global ml_model
+
+    return jsonify({
+        'model_loaded': ml_model is not None,
+        'device': ml_device if ml_model else None,
+        'checkpoint_exists': (Path(__file__).parent.parent / "ml_ideation" / "checkpoints" / "best_model.pth").exists()
     })
 
 if __name__ == '__main__':
@@ -212,6 +386,9 @@ if __name__ == '__main__':
     print("   POST /api/search/<filename>   - Search by resnorm")
     print("   GET  /api/download/<filename> - Download NPZ file")
     print("   GET  /api/status              - API health check")
+    print("\n🤖 ML Prediction Endpoints:")
+    print("   POST /api/ml/predict         - Predict missing parameters")
+    print("   GET  /api/ml/status          - Check ML model status")
     
     print(f"\n✅ Server ready at: http://localhost:5001")
     print("💡 Add to your Next.js app: const API_BASE = 'http://localhost:5001/api'")

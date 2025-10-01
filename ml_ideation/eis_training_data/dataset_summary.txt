@@ -1,0 +1,22 @@
+======================================================================
+DATASET SUMMARY REPORT
+======================================================================
+
+Total Ground Truths: 5
+Total Models: 1,244,165
+Models per Ground Truth: 248,833
+
+Parameter Ranges:
+  Rsh (Ω): 1.00e+01 to 1.00e+04
+  Ra (Ω): 1.00e+01 to 1.00e+04
+  Rb (Ω): 1.00e+01 to 1.00e+04
+  Ca (F): 1.00e-07 to 5.00e-05
+  Cb (F): 1.00e-07 to 5.00e-05
+
+Resnorm Statistics:
+  Min: 0.0000
+  25th percentile: 676.5158
+  Median: 1709.4567
+  75th percentile: 3029.2642
+  90th percentile: 6422.2272
+  Max: 17741.1545

@@ -3002,8 +3002,8 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
   // Modify the main content area to show the correct tab content
   return (
-    <div className="h-screen bg-black text-white flex overflow-hidden">
-      {/* Left Navigation Sidebar - Full Height like ChatGPT */}
+    <div className="h-screen bg-white text-white flex overflow-hidden">
+      {/* Left Navigation Sidebar */}
       <div 
         className={`${leftNavCollapsed ? 'w-16' : 'w-64'} bg-neutral-900 flex flex-col transition-all duration-300 ease-in-out h-full relative group`}
       >

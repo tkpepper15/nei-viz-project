@@ -724,7 +724,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
     
     // Draw filled wafer plate polygon with enhanced opacity and depth
-    const baseOpacity = Math.max(0.3, polygon.opacity * depthFactor);
+    const baseOpacity = Math.max(0.2, polygon.opacity * depthFactor);
     const baseLineWidth = Math.max(1, 2 * depthFactor * camera.scale);
 
     const projectedOnly = projectedVertices.map(p => p.projected);
@@ -746,7 +746,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.globalAlpha = Math.min(0.7, baseOpacity + 0.3);
       ctx.fillStyle = '#FF6B9D'; // Pink highlight for tagged
     } else {
-      ctx.globalAlpha = Math.min(0.6, baseOpacity + 0.2);
+      ctx.globalAlpha = Math.min(0.5, baseOpacity + 0.2);
       ctx.fillStyle = polygon.color;
     }
     ctx.fill();

@@ -111,7 +111,7 @@ def run_training(args):
     
     import torch
     from torch.utils.data import DataLoader
-    from multi_gt_trainer import MultiGroundTruthDataset, AdaptiveEISPredictor, MultiGTTrainer
+    from eis_predictor_implementation import EISDataset, ProbabilisticEISPredictor, train_model
     
     # Paths
     data_path = Path(args.data_dir) / f"combined_dataset_{args.n_ground_truths}gt.csv"
@@ -131,40 +131,38 @@ def run_training(args):
     ]
     
     # Load dataset
-    full_dataset = MultiGroundTruthDataset(
-        csv_path=str(data_path),
-        metadata_path=str(metadata_path),
+    full_dataset = EISDataset(
+        data_path=str(data_path),
         masking_patterns=masking_patterns,
-        augmentation_factor=3
+        samples_per_pattern=10000
     )
-    
+
     # Split
     train_size = int(0.8 * len(full_dataset))
-    val_size = int(0.1 * len(full_dataset))
-    test_size = len(full_dataset) - train_size - val_size
-    
-    train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
-        full_dataset, [train_size, val_size, test_size]
+    val_size = len(full_dataset) - train_size
+
+    train_dataset, val_dataset = torch.utils.data.random_split(
+        full_dataset, [train_size, val_size]
     )
-    
+
     # Dataloaders
     train_loader = DataLoader(train_dataset, batch_size=512, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=512, num_workers=4)
-    
+
     # Model
-    model = AdaptiveEISPredictor(n_grid_points=12, hidden_dim=512)
-    
+    model = ProbabilisticEISPredictor(n_grid_points=12, hidden_dim=512)
+
     # Train
-    trainer = MultiGTTrainer(model)
-    history = trainer.train(
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    history = train_model(
+        model,
         train_loader,
         val_loader,
         n_epochs=args.n_epochs,
-        learning_rate=0.001,
-        checkpoint_dir=args.checkpoint_dir
+        device=device
     )
     
-    print(f"\n✓ Training complete! Best model saved to {args.checkpoint_dir}")
+    print(f"\n✓ Training complete! Best model saved to best_eis_predictor.pth")
 
 
 def run_inference(args):
@@ -176,26 +174,24 @@ def run_inference(args):
     import torch
     import json
     import numpy as np
-    from multi_gt_trainer import AdaptiveEISPredictor
-    
+    from eis_predictor_implementation import ProbabilisticEISPredictor
+
     # Load model
-    checkpoint_path = Path(args.checkpoint_dir) / 'best_model.pth'
-    
+    checkpoint_path = Path('best_eis_predictor.pth')
+
     if not checkpoint_path.exists():
         print(f"Error: Model checkpoint not found at {checkpoint_path}")
         print("Please run with --mode train first")
         sys.exit(1)
-    
+
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = AdaptiveEISPredictor(n_grid_points=12, hidden_dim=512)
-    
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model = ProbabilisticEISPredictor(n_grid_points=12, hidden_dim=512)
+
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     model.to(device)
     model.eval()
-    
-    print(f"✓ Loaded model from epoch {checkpoint['epoch']}")
-    print(f"✓ Validation loss: {checkpoint['val_loss']:.4f}")
+
+    print(f"✓ Loaded model from {checkpoint_path}")
     
     # Load ground truth metadata
     metadata_path = Path(args.data_dir) / "ground_truth_metadata.json"
@@ -229,47 +225,39 @@ def run_inference(args):
     with torch.no_grad():
         params_tensor = torch.tensor([known_params_log], dtype=torch.float32).to(device)
         mask_tensor = torch.tensor([mask], dtype=torch.float32).to(device)
-        
-        param_probs, resnorm_pred, uncertainty = model(params_tensor, mask_tensor)
-    
+
+        param_probs, resnorm_pred = model(params_tensor, mask_tensor)
+
     # Extract predictions for Ca and Cb
     ca_probs = param_probs[3][0].cpu().numpy()
     cb_probs = param_probs[4][0].cpu().numpy()
-    
+
     print(f"\nPrediction (knowing Rsh, Ra, Rb):")
     print(f"  Predicted Resnorm: {resnorm_pred.item():.4f}")
-    
+
     # Top predictions for Ca
     top_ca_indices = np.argsort(ca_probs)[-3:][::-1]
-    print(f"\n  Top 5 joint predictions (Ca, Cb):")
-    for i, flat_idx in enumerate(top_joint_indices, 1):
-        ca_idx, cb_idx = flat_idx // 12, flat_idx % 12
-        prob = flat_joint[flat_idx]
-        print(f"    {i}. Ca[{ca_idx}] × Cb[{cb_idx}]: P = {prob:.4f}")
-    
-    print(f"\n  Uncertainty estimates:")
-    uncert = uncertainty[0].cpu().numpy()
-    param_names = ['Rsh', 'Ra', 'Rb', 'Ca', 'Cb']
-    for i, name in enumerate(param_names):
-        if mask[i] == 0:  # Only show uncertainty for predicted params
-            print(f"    {name}: {uncert[i]:.4f}")
-
-
-if __name__ == "__main__":
-    main()
-3 Ca predictions:")
+    print(f"\n  Top 3 Ca predictions:")
     for i, idx in enumerate(top_ca_indices, 1):
         print(f"    {i}. Index {idx}: P = {ca_probs[idx]:.4f}")
-    
+
     # Top predictions for Cb
     top_cb_indices = np.argsort(cb_probs)[-3:][::-1]
     print(f"\n  Top 3 Cb predictions:")
     for i, idx in enumerate(top_cb_indices, 1):
         print(f"    {i}. Index {idx}: P = {cb_probs[idx]:.4f}")
-    
+
     # Joint predictions
     joint = np.outer(ca_probs, cb_probs)
     flat_joint = joint.flatten()
     top_joint_indices = np.argsort(flat_joint)[-5:][::-1]
-    
-    print(f"\n  Top 
+
+    print(f"\n  Top 5 joint predictions (Ca, Cb):")
+    for i, flat_idx in enumerate(top_joint_indices, 1):
+        ca_idx, cb_idx = flat_idx // 12, flat_idx % 12
+        prob = flat_joint[flat_idx]
+        print(f"    {i}. Ca[{ca_idx}] × Cb[{cb_idx}]: P = {prob:.4f}")
+
+
+if __name__ == "__main__":
+    main()

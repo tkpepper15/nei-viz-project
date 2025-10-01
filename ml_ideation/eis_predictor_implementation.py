@@ -27,11 +27,17 @@ class EISDataset(Dataset):
             samples_per_pattern: Number of samples to generate per masking pattern
         """
         self.data = pd.read_csv(data_path)
-        self.data = self.data[self.data['Model ID'] != 'reference_circuit']  # Remove ground truth
+        # Remove reference/ground truth circuits
+        self.data = self.data[~self.data['Model ID'].str.contains('reference', na=False)]
         
         # Extract grid indices from Model IDs
         self.data['indices'] = self.data['Model ID'].apply(self._extract_indices)
-        
+
+        # Drop rows where indices couldn't be extracted
+        self.data = self.data.dropna(subset=['indices'])
+
+        print(f"Loaded {len(self.data)} valid data points")
+
         # Build grid mappings (log-spaced parameter values)
         self.build_grid_mappings()
         
@@ -39,12 +45,19 @@ class EISDataset(Dataset):
         self.samples = self._generate_masked_samples(masking_patterns, samples_per_pattern)
         
     def _extract_indices(self, model_id: str) -> List[int]:
-        """Extract grid indices from model_id like 'model_12_11_07_06_03_12'"""
+        """Extract grid indices from model_id like 'model_01_02_03_04_05'"""
         import re
+        # Try 5-index format first (model_01_02_03_04_05)
+        match = re.search(r'model_(\d+)_(\d+)_(\d+)_(\d+)_(\d+)$', model_id)
+        if match:
+            return [int(match.group(i)) - 1 for i in range(1, 6)]  # Convert to 0-indexed
+
+        # Try 6-index format (model_12_01_02_03_04_05)
         match = re.search(r'model_(\d+)_(\d+)_(\d+)_(\d+)_(\d+)_(\d+)', model_id)
         if match:
-            # Return indices [1-5] (skip first index which is always 12)
+            # Skip first index, return indices 2-6
             return [int(match.group(i)) - 1 for i in range(2, 7)]  # Convert to 0-indexed
+
         return None
     
     def build_grid_mappings(self):

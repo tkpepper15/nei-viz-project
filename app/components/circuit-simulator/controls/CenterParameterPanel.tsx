@@ -425,7 +425,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
               </div>
 
               {/* Grid Configuration */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Points per Parameter */}
                 <div>
                   <div className="flex items-center justify-between mb-3">
@@ -444,9 +444,6 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                     showSlider={true}
                   />
                 </div>
-
-              </div>
-
               {/* Group Portion Control */}
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -466,6 +463,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   step={groupPortionSampler.getStepSize(currentGroupPercentage)}
                   showSlider={true}
                 />
+              </div>
               </div>
             </div>
           </CollapsibleSection>
@@ -543,20 +541,6 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
                   <option value="nyquist">Nyquist Plot</option>
                 </select>
               </div>
-
-              {/* Resnorm Method - Fixed to SSR */}
-              <div>
-                <label className="block text-sm font-medium text-neutral-200 mb-3">
-                  Resnorm Method
-                </label>
-                <div className="w-full px-3 py-2 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-200">
-                  SSR - Sum of Squared Residuals (Fixed)
-                </div>
-                <p className="text-xs text-neutral-400 mt-2">
-                  Classic least-squares in complex plane - equal weight to real and imaginary parts
-                </p>
-              </div>
-
             </div>
           </CollapsibleSection>
 
@@ -658,32 +642,7 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
             </div>
           )}
 
-          {/* Upload Benefits */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-gradient-to-br from-green-900/20 to-blue-900/20 border border-green-600/30 rounded-lg p-4">
-              <div className="flex items-center gap-3 mb-2">
-                <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-                <h4 className="font-semibold text-green-200">Instant Results</h4>
-              </div>
-              <p className="text-sm text-green-300">
-                Load pre-computed analysis results immediately without waiting for grid computation
-              </p>
-            </div>
 
-            <div className="bg-gradient-to-br from-purple-900/20 to-pink-900/20 border border-purple-600/30 rounded-lg p-4">
-              <div className="flex items-center gap-3 mb-2">
-                <svg className="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-                </svg>
-                <h4 className="font-semibold text-purple-200">Memory Optimized</h4>
-              </div>
-              <p className="text-sm text-purple-300">
-                Ultra-compressed format provides 98% memory reduction compared to traditional data
-              </p>
-            </div>
-          </div>
         </div>
       )}
     </div>

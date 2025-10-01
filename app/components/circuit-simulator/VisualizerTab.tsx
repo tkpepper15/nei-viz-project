@@ -635,9 +635,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     <div className="h-full flex flex-col bg-neutral-900">
       {hasComputedResults ? (
         <>
-          {/* Top Toolbar - Clean and Minimal */}
-          <div className="flex items-center justify-between px-4 py-2 bg-neutral-800 border-b border-neutral-700 flex-shrink-0">
-            <div className="flex items-center gap-4">
+          {/* Main Content Area */}
+          <div className="flex-1 flex min-h-0">
+            {/* Left Sidebar - Scrollable Control Panels */}
+            <div className="w-80 bg-neutral-800 border-r border-neutral-700 flex flex-col">
+              {/* Scrollable Content Container */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              <div className="flex items-center gap-4">
               {/* Visualization Type Selection */}
               <select
                 value={visualizationType}
@@ -649,32 +653,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 <option value="tsne">t-SNE 3D Space</option>
                 <option value="pentagon-gt">Sweeper</option>
               </select>
-
-              {/* Debug Info - Grid Stats and Frequency Range */}
-              <div className="text-xs text-neutral-400 font-mono">
-                {(() => {
-                  const computedCount = gridResults?.length || 0;
-                  const totalPossible = Math.pow(gridSize, 5);
-                  const freqMin = effectiveGroundTruthParams.frequency_range?.[0] || 0.1;
-                  const freqMax = effectiveGroundTruthParams.frequency_range?.[1] || 100000;
-                  return `${computedCount.toLocaleString()} computed/${totalPossible.toLocaleString()} total | Freq: ${freqMin} - ${freqMax.toLocaleString()} Hz`;
-                })()}
-              </div>
             </div> {/* End left toolbar controls */}
-
-            {/* Right side toolbar controls */}
-            <div className="flex items-center gap-3">
-              {/* Removed panel toggle - now handled by bottom-right caret only */}
-            </div> {/* End right toolbar controls */}
-
-          </div> {/* End toolbar */}
-
-          {/* Main Content Area */}
-          <div className="flex-1 flex min-h-0">
-            {/* Left Sidebar - Scrollable Control Panels */}
-            <div className="w-80 bg-neutral-800 border-r border-neutral-700 flex flex-col">
-              {/* Scrollable Content Container */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-4">
                 {/* Ground Truth Control */}
                 <div className="bg-neutral-700 rounded-lg p-3">
                   <div className="flex items-center justify-between">
@@ -696,14 +675,14 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     </button>
                   </div>
                   <p className="text-xs text-neutral-400 mt-2">
-                    Show reference parameters from toolbox
+                    Reference Params
                   </p>
                 </div>
 
                 {/* 3D Controls - only show when 3D is enabled */}
                 {view3D && (
                   <div className="bg-neutral-700 rounded-lg p-3">
-                    <h4 className="text-sm font-medium text-neutral-200 mb-2">3D Controls</h4>
+                    <h4 className="text-sm font-medium text-neutral-200 mb-2">Plot Style</h4>
 
                     <div className="space-y-3">
                       {/* 3D Scale Control */}
@@ -864,18 +843,17 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   {/* Granular Navigation Controls */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs text-neutral-400">Step Navigation</span>
+                      <span className="text-xs text-neutral-400">Step Size</span>
                       <div className="flex items-center gap-2">
                         <input
-                          type="range"
+                          type="text"
                           min="1"
-                          max="50"
+                          max="100000"
                           value={navigationStepSize}
                           onChange={(e) => setNavigationStepSize(Number(e.target.value))}
-                          className="w-16 h-1 bg-neutral-600 rounded-lg appearance-none slider"
+                          className="w-full px-1 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
                           title={`Step size: ${navigationStepSize} models`}
                         />
-                        <span className="text-xs text-neutral-300 min-w-[20px]">{navigationStepSize}</span>
                       </div>
                     </div>
 
@@ -1033,17 +1011,6 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                     </div>
                   </div>
                 )}
-
-                {/* Fixed Resnorm Method Display */}
-                <div className="bg-neutral-700 rounded-lg p-3">
-                  <h4 className="text-sm font-medium text-neutral-200 mb-2">Analysis Method</h4>
-                  <div className="text-sm text-neutral-300">
-                    SSR - Sum of Squared Residuals
-                  </div>
-                  <p className="text-xs text-neutral-400 mt-1">
-                    Fixed to SSR method for consistent impedance analysis
-                  </p>
-                </div>
 
               </div> {/* End scrollable container */}
             </div> {/* End left sidebar */}

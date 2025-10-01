@@ -1,0 +1,28 @@
+# MLX-Optimized EIS Parameter Prediction Requirements
+# For Apple Silicon (M1/M2/M3/M4)
+
+# Core MLX Framework (Apple Silicon only)
+mlx>=0.28.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+
+# Progress Bars
+tqdm>=4.65.0
+
+# Visualization (Optional)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Alternative: PyTorch Backend (for non-Apple systems)
+# Uncomment if not using MLX:
+# torch>=2.0.0
+# torchvision>=0.15.0
+
+# Note: MLX is only available on macOS with Apple Silicon
+# System Requirements:
+# - macOS 13.3+ (Ventura or later)
+# - Apple Silicon (M1/M2/M3/M4)
+# - Python 3.8+

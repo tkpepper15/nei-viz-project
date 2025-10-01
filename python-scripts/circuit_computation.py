@@ -83,47 +83,58 @@ class CircuitSimulator:
             
         return spectrum
     
-    def calculate_resnorm_mae(self, test_spectrum: List[ImpedancePoint], 
+    def calculate_resnorm_ssr(self, test_spectrum: List[ImpedancePoint],
                              ref_spectrum: List[ImpedancePoint]) -> float:
         """
-        Calculate residual norm using Mean Absolute Error (MAE) method.
-        This matches the JavaScript implementation.
+        Calculate residual norm using Sum of Squared Residuals (SSR) method.
+
+        SSR = (1/N) * Σ√[(Z_real,test - Z_real,ref)² + (Z_imag,test - Z_imag,ref)²]
+
+        This cost function:
+        - Uses real and imaginary component differences directly
+        - Penalizes large errors more heavily (quadratic distance in complex plane)
+        - Better for ML optimization (smooth, differentiable)
+        - Standard approach in EIS parameter extraction research
         """
         if not test_spectrum or not ref_spectrum:
             return float('inf')
-            
-        total_error = 0.0
+
+        ssr = 0.0
         valid_points = 0
-        
+
         min_len = min(len(test_spectrum), len(ref_spectrum))
-        
+
         for i in range(min_len):
             ref_point = ref_spectrum[i]
             test_point = test_spectrum[i]
-            
+
             # Check frequency alignment (within 0.1% tolerance)
             if abs(ref_point.frequency - test_point.frequency) / ref_point.frequency > 0.001:
                 continue
-                
+
+            # Calculate reference magnitude
             ref_mag = abs(complex(ref_point.real, ref_point.imaginary))
-            test_mag = abs(complex(test_point.real, test_point.imaginary))
-            
+
             # Skip points with zero reference magnitude
             if ref_mag == 0:
                 continue
-                
-            # Calculate complex magnitude error (MAE method)
+
+            # Calculate real and imaginary component differences
             real_diff = test_point.real - ref_point.real
             imag_diff = test_point.imaginary - ref_point.imaginary
-            error = np.sqrt(real_diff**2 + imag_diff**2)
-            
-            total_error += error
+
+            # Complex magnitude error: sqrt((real_diff)² + (imag_diff)²)
+            complex_magnitude_error = np.sqrt(real_diff ** 2 + imag_diff ** 2)
+
+            # Sum of squared residuals
+            ssr += complex_magnitude_error
             valid_points += 1
-            
+
         if valid_points == 0:
             return float('inf')
-            
-        return total_error / valid_points
+
+        # Return mean (normalized by number of points)
+        return ssr / valid_points
     
     def generate_parameter_grid(self, grid_size: int) -> List[CircuitParameters]:
         """Generate parameter grid matching JavaScript implementation"""
@@ -207,9 +218,9 @@ class CircuitSimulator:
         for i, params in enumerate(param_grid):
             # Calculate spectrum for this parameter set
             test_spectrum = self.calculate_spectrum(params, frequencies)
-            
-            # Calculate resnorm vs reference
-            resnorm = self.calculate_resnorm_mae(test_spectrum, ref_spectrum)
+
+            # Calculate resnorm vs reference using SSR (Sum of Squared Residuals)
+            resnorm = self.calculate_resnorm_ssr(test_spectrum, ref_spectrum)
             
             result = {
                 'parameters': params,

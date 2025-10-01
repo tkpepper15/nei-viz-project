@@ -62,7 +62,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({ user, onSignOut }) => 
       {/* Profile circle button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-medium hover:ring-2 hover:ring-white/20 transition-all ${getAvatarColor(user.email || '')}`}
+        className={`w-8 h-8 rounded flex items-center justify-center text-white text-sm font-medium hover:ring-2 hover:ring-white/20 transition-all ${getAvatarColor(user.email || '')}`}
       >
         {getInitials(user.email || '')}
       </button>

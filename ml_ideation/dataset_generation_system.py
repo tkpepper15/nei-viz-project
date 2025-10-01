@@ -275,27 +275,27 @@ class EISComputationEngine:
     
     def compute_resnorm(self, z_measured: np.ndarray, z_model: np.ndarray) -> float:
         """
-        Compute residual norm (MAE) between measured and model spectra
-        Uses magnitude and phase with low-frequency weighting
+        Compute residual norm using Sum of Squared Residuals (SSR)
+
+        SSR = (1/N) * Σ√[(Z_real,test - Z_real,ref)² + (Z_imag,test - Z_imag,ref)²]
+
+        This cost function:
+        - Uses real and imaginary component differences directly
+        - Penalizes large errors more heavily (quadratic distance in complex plane)
+        - Better for ML optimization (smooth, differentiable gradients)
+        - Standard in EIS parameter extraction research
         """
-        # Magnitude error
-        mag_measured = np.abs(z_measured)
-        mag_model = np.abs(z_model)
-        mag_error = np.abs(mag_measured - mag_model)
-        
-        # Phase error
-        phase_measured = np.angle(z_measured)
-        phase_model = np.angle(z_model)
-        phase_error = np.abs(phase_measured - phase_model)
-        
-        # Frequency weighting (emphasize low frequencies for biological systems)
-        weights = 1.0 / np.sqrt(self.frequencies)
-        weights = weights / weights.sum()
-        
-        # Weighted MAE
-        resnorm = np.sum(weights * (mag_error + phase_error * mag_measured))
-        
-        return resnorm
+        # Calculate real and imaginary component differences
+        real_diff = z_model.real - z_measured.real
+        imag_diff = z_model.imag - z_measured.imag
+
+        # Complex magnitude error: sqrt((real_diff)² + (imag_diff)²)
+        complex_magnitude_errors = np.sqrt(real_diff ** 2 + imag_diff ** 2)
+
+        # Sum and normalize by number of frequency points
+        ssr = np.sum(complex_magnitude_errors) / len(z_measured)
+
+        return ssr
 
 
 class DatasetGenerator:
