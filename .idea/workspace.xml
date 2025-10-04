@@ -4,20 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/SlimNavbar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/SlimNavbar.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/StaticRenderControls.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/StaticRenderControls.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/CollapsibleBottomPanel.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/CollapsibleBottomPanel.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/hooks/useUserProfiles.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useUserProfiles.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/page.tsx" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/sweeper/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/sweeper/page.tsx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/image (82).png" beforeDir="false" afterPath="$PROJECT_DIR$/image (82).png" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ml_ideation/eis_training_data/combined_dataset_5gt.csv" beforeDir="false" />
-    </list>
+    <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
