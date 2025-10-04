@@ -724,7 +724,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     });
     
     // Draw filled wafer plate polygon with enhanced opacity and depth
-    const baseOpacity = Math.max(0.2, polygon.opacity * depthFactor);
+    const baseOpacity = Math.max(0., polygon.opacity * depthFactor);
     const baseLineWidth = Math.max(1, 2 * depthFactor * camera.scale);
 
     const projectedOnly = projectedVertices.map(p => p.projected);
@@ -2149,9 +2149,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   // Remove complex scheduling - just trigger render on data changes
 
   return (
-    <div ref={containerRef} className="relative bg-black overflow-hidden w-full h-full">
+    <div ref={containerRef} className="relative bg-neutral-950 overflow-hidden w-full h-full">
       {!isComponentReady ? (
-        <div className="absolute inset-0 bg-black flex items-center justify-center">
+        <div className="absolute inset-0 bg-neutral-950 flex items-center justify-center">
           <div className="w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
         </div>
       ) : null}

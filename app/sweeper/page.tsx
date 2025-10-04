@@ -108,6 +108,7 @@ export default function SweeperPage() {
         gridResults={models}
         gridSize={userSettings?.visualization_settings?.gridSize || 9}
         onSettingsOpen={() => {}} // No settings for sweeper page
+        onModelInfoOpen={() => {}} // TODO: Implement model info modal
         user={user}
         onSignOut={signOut}
       />

@@ -31,7 +31,7 @@ export const useUserProfiles = () => {
       for (const key of keys) {
         const stored = localStorage.getItem(key);
         if (stored) {
-          console.log('📂 Found profiles in localStorage key:', key);
+          console.log('Found profiles in localStorage key:', key);
           const data = JSON.parse(stored);
           const profiles = Array.isArray(data) ? data : (data.profiles || []);
           if (profiles.length > 0) {
@@ -40,9 +40,9 @@ export const useUserProfiles = () => {
         }
       }
       
-      console.log('📭 No profiles found in localStorage');
+      console.log('No profiles found in localStorage');
     } catch (error) {
-      console.error('❌ Error loading profiles from localStorage:', error);
+      console.error('Error loading profiles from localStorage:', error);
     }
     return [];
   }, [user]);
@@ -50,28 +50,28 @@ export const useUserProfiles = () => {
   // Load profiles when user changes
   const loadProfiles = useCallback(async () => {
     if (!user) {
-      console.log('👤 No user found, clearing profiles');
+      console.log('No user found, clearing profiles');
       setProfilesState(prev => ({ ...prev, profiles: [] }));
       return;
     }
 
-    console.log('📥 Loading profiles for user:', user.id);
+    console.log('Loading profiles for user:', user.id);
     setLoading(true);
     setError(null);
     
     try {
-      console.log('🔄 Attempting to load profiles from database...');
+      console.log('Attempting to load profiles from database...');
       const profiles = await ProfilesService.getUserProfiles(user.id);
-      console.log('✅ Loaded', profiles.length, 'profiles from Supabase');
+      console.log('Loaded', profiles.length, 'profiles from Supabase');
       setProfilesState(prev => ({ ...prev, profiles }));
       setError(null);
     } catch (err) {
-      console.error('❌ Error loading profiles from Supabase:');
+      console.error('Error loading profiles from Supabase:');
       console.error('Error object:', err);
       console.error('Error stringified:', JSON.stringify(err, null, 2));
       
       const localProfiles = loadProfilesFromLocalStorage();
-      console.log('📂 Loaded', localProfiles.length, 'profiles from localStorage fallback');
+      console.log('Loaded', localProfiles.length, 'profiles from localStorage fallback');
       setProfilesState(prev => ({ ...prev, profiles: localProfiles }));
       
       // If we have local profiles, partially clear the error
@@ -93,13 +93,13 @@ export const useUserProfiles = () => {
       if (user) {
         // Save user-specific profiles
         localStorage.setItem(`user-profiles-${user.id}`, JSON.stringify(profiles));
-        console.log('💾 Saved', profiles.length, 'profiles to localStorage for user:', user.id);
+        console.log('Saved', profiles.length, 'profiles to localStorage for user:', user.id);
       }
       
       // Also save to legacy location for backward compatibility
       localStorage.setItem('nei-viz-saved-profiles', JSON.stringify({ profiles }));
     } catch (error) {
-      console.error('❌ Failed to save profiles to localStorage:', error);
+      console.error('Failed to save profiles to localStorage:', error);
     }
   }, [user]);
 
@@ -113,7 +113,7 @@ export const useUserProfiles = () => {
     numPoints: number,
     description?: string
   ): SavedProfile => {
-    console.log('📱 Creating local profile (no database):', name);
+    console.log('Creating local profile (no database):', name);
     const now = Date.now();
     const newProfile: SavedProfile = {
       id: crypto.randomUUID(),
@@ -133,8 +133,8 @@ export const useUserProfiles = () => {
     const updatedProfiles = [...profilesState.profiles, newProfile];
     setProfilesState(prev => ({ ...prev, profiles: updatedProfiles }));
     saveProfilesToLocalStorage(updatedProfiles);
-    
-    console.log('📦 Local profile created successfully:', newProfile.id);
+
+    console.log('Local profile created successfully:', newProfile.id);
     return newProfile;
   }, [profilesState.profiles, saveProfilesToLocalStorage]);
 
@@ -147,27 +147,27 @@ export const useUserProfiles = () => {
     numPoints: number,
     description?: string
   ): Promise<SavedProfile | null> => {
-    console.log('👤 CreateProfile called:', { hasUser: !!user, userId: user?.id, name, authLoading });
-    
+    console.log('CreateProfile called:', { hasUser: !!user, userId: user?.id, name, authLoading });
+
     if (authLoading) {
-      console.warn('⏳ Authentication still loading - waiting before creating profile...');
+      console.warn('Authentication still loading - waiting before creating profile...');
       // Wait a moment for auth to complete, then retry
       await new Promise(resolve => setTimeout(resolve, 500));
       if (!user) {
-        console.warn('⚠️ No authenticated user after waiting - creating local profile instead');
+        console.warn('No authenticated user after waiting - creating local profile instead');
         return createLocalProfile(name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
       }
     }
     
     if (!user) {
-      console.warn('⚠️ No authenticated user - creating local profile instead');
+      console.warn('No authenticated user - creating local profile instead');
       return createLocalProfile(name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
     }
 
     try {
-      console.log('🔄 Calling ProfilesService.createProfile...');
+      console.log('Calling ProfilesService.createProfile...');
       const newProfile = await ProfilesService.createProfile(user.id, name, parameters, gridSize, minFreq, maxFreq, numPoints, description);
-      console.log('✅ ProfilesService.createProfile succeeded:', newProfile);
+      console.log('ProfilesService.createProfile succeeded:', newProfile);
       
       const updatedProfiles = [newProfile, ...profilesState.profiles];
       setProfilesState(prev => ({
@@ -177,8 +177,8 @@ export const useUserProfiles = () => {
       
       // Also save to localStorage as backup
       saveProfilesToLocalStorage(updatedProfiles);
-      
-      console.log('📦 Profile state updated, total profiles:', updatedProfiles.length);
+
+      console.log('Profile state updated, total profiles:', updatedProfiles.length);
       return newProfile;
     } catch (err) {
       console.error('Error creating profile:', err);

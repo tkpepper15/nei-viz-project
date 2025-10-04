@@ -14,12 +14,14 @@
 import React from 'react';
 import { UserProfile } from '../auth/UserProfile';
 import { User } from '@supabase/supabase-js';
+import { ModelInfoButton } from '../model-info/ModelInfoButton';
 
 interface SlimNavbarProps {
   statusMessage?: string;
   gridResults?: unknown[];
   gridSize?: number;
   onSettingsOpen: () => void;
+  onModelInfoOpen: () => void;
   user?: User | null;
   onSignOut?: () => void;
 }
@@ -27,13 +29,13 @@ interface SlimNavbarProps {
 export const SlimNavbar: React.FC<SlimNavbarProps> = ({
   statusMessage,
   gridResults = [],
-  gridSize = 9,
+  gridSize: _gridSize = 9, // eslint-disable-line @typescript-eslint/no-unused-vars
   onSettingsOpen,
+  onModelInfoOpen,
   user,
   onSignOut
 }) => {
   const computedCount = gridResults.length;
-  const totalPossible = Math.pow(gridSize, 5);
 
   return (
     <div className="h-12 px-4 flex items-center justify-between bg-neutral-900 flex-shrink-0">
@@ -59,8 +61,10 @@ export const SlimNavbar: React.FC<SlimNavbarProps> = ({
         </div>
       </div>
 
-      {/* Right side: Settings and user */}
+      {/* Right side: Model Info, Settings and user */}
       <div className="flex items-center gap-2">
+        <ModelInfoButton onClick={onModelInfoOpen} />
+
         <button
           onClick={onSettingsOpen}
           className="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-400 hover:text-neutral-200 transition-colors flex items-center"

@@ -8,18 +8,21 @@
 
 import React, { useState, useCallback } from 'react';
 import {
-  ChevronDownIcon,
   TableCellsIcon,
   CpuChipIcon,
   ArrowDownTrayIcon,
   ChartBarIcon,
-  BeakerIcon
+  BeakerIcon,
+  ChartPieIcon,
+  BoltIcon
 } from '@heroicons/react/24/outline';
 import { ImpedanceComparisonTab } from './tabs/ImpedanceComparisonTab';
 import { CircuitConfigurationTab } from './tabs/CircuitConfigurationTab';
 import { ExportTab } from './tabs/ExportTab';
 import { ResnormRangeTab } from './tabs/ResnormRangeTab';
 import { AnalysisTab } from './tabs/AnalysisTab';
+import { QuartileAnalysisTab } from './tabs/QuartileAnalysisTab';
+import { TERTECAnalysisTab } from './tabs/TERTECAnalysisTab';
 import { ModelSnapshot, ResnormGroup } from '../types';
 import { CircuitParameters } from '../types/parameters';
 
@@ -52,6 +55,9 @@ export interface BottomPanelTabProps {
   navigationWindowSize?: number;
   taggedModels?: Map<string, string>;
   tagColors?: string[];
+
+  // TER/TEC filtering props
+  onTERTECFilterChange?: (filteredModelIds: string[]) => void;
 }
 
 interface CollapsibleBottomPanelProps {
@@ -86,6 +92,9 @@ interface CollapsibleBottomPanelProps {
   navigationWindowSize?: number;
   taggedModels?: Map<string, string>;
   tagColors?: string[];
+
+  // TER/TEC filtering props
+  onTERTECFilterChange?: (filteredModelIds: string[]) => void;
 }
 
 const DEFAULT_TABS: BottomPanelTab[] = [
@@ -106,6 +115,18 @@ const DEFAULT_TABS: BottomPanelTab[] = [
     label: 'Analysis',
     icon: BeakerIcon,
     component: AnalysisTab
+  },
+  {
+    id: 'quartile',
+    label: 'Quartile',
+    icon: ChartPieIcon,
+    component: QuartileAnalysisTab
+  },
+  {
+    id: 'tertec',
+    label: 'TER/TEC',
+    icon: BoltIcon,
+    component: TERTECAnalysisTab
   },
   {
     id: 'resnorm',
@@ -146,7 +167,9 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
   onNavigationOffsetChange,
   navigationWindowSize = 1000,
   taggedModels,
-  tagColors
+  tagColors,
+  // TER/TEC filtering props
+  onTERTECFilterChange
 }) => {
   const [activeTab, setActiveTab] = useState<string>('impedance');
   const [isResizing, setIsResizing] = useState(false);
@@ -254,17 +277,6 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
               {height}px
             </span>
           )}
-
-          {/* Collapse button when expanded */}
-          {!isCollapsed && (
-            <button
-              onClick={() => onToggleCollapse(true)}
-              className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 rounded transition-colors"
-              title="Hide data panel"
-            >
-              <ChevronDownIcon className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -292,6 +304,8 @@ export const CollapsibleBottomPanel: React.FC<CollapsibleBottomPanelProps> = ({
               navigationWindowSize={navigationWindowSize}
               taggedModels={taggedModels}
               tagColors={tagColors}
+              // TER/TEC filtering props
+              onTERTECFilterChange={onTERTECFilterChange}
             />
           )}
         </div>

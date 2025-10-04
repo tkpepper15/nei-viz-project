@@ -3,11 +3,13 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { SpiderPlot3D } from './visualizations/SpiderPlot3D';
 import { TSNEPlot3D } from './visualizations/TSNEPlot3D';
 import { PentagonGroundTruth } from './visualizations/PentagonGroundTruth';
+import { PentagonBoxWhisker } from './visualizations/PentagonBoxWhisker';
 import { ModelSnapshot, ResnormGroup } from './types';
 import { GridParameterArrays } from './types';
 import { CircuitParameters } from './types/parameters';
 import { StaticRenderSettings } from './controls/StaticRenderControls';
 import { ResnormConfig, calculateResnormWithConfig, calculate_impedance_spectrum } from './utils/resnorm';
+import { calculateTER, calculateTEC, getTERRange, getTECRange, formatTER, formatTEC } from './utils/terTecCalculations';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { calculateTimeConstants } from './math/utils';
 import { CollapsibleBottomPanel } from './panels/CollapsibleBottomPanel';
@@ -15,7 +17,7 @@ import { CollapsibleBottomPanel } from './panels/CollapsibleBottomPanel';
 interface VisualizationSettings {
   groupPortion: number;
   selectedOpacityGroups: number[];
-  visualizationType: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt';
+  visualizationType: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt' | 'pentagon-quartile';
   resnormMatchingPortion?: number; // For fine-tuning resnorm grouping
 }
 
@@ -58,7 +60,10 @@ interface VisualizerTabProps {
   // Tagged models support
   taggedModels?: Map<string, { tagName: string; profileId: string; resnormValue: number; taggedAt: number; notes?: string }>;
   onModelTag?: (model: ModelSnapshot, tagName: string, profileId?: string) => void;
-  
+
+  // TER/TEC filtering from bottom panel
+  terTecFilteredModelIds?: string[];
+  onTERTECFilterChange?: (filteredIds: string[]) => void;
 }
 
 export const VisualizerTab: React.FC<VisualizerTabProps> = ({
@@ -97,7 +102,11 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   
   // Tagged models support
   taggedModels,
-  onModelTag
+  onModelTag,
+
+  // TER/TEC filtering from bottom panel
+  terTecFilteredModelIds = [],
+  onTERTECFilterChange
 }) => {
 
   // Removed old control states - now using compact sidebar design
@@ -112,9 +121,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Use visualization settings from static render settings - defaulting to 3D only
   const visualizationType = staticRenderSettings.visualizationType === 'nyquist' ? 'nyquist' :
                            staticRenderSettings.visualizationType === 'tsne' ? 'tsne' :
-                           staticRenderSettings.visualizationType === 'pentagon-gt' ? 'pentagon-gt' : 'spider3d';
+                           staticRenderSettings.visualizationType === 'pentagon-gt' ? 'pentagon-gt' :
+                           staticRenderSettings.visualizationType === 'pentagon-quartile' ? 'pentagon-quartile' : 'spider3d';
   const view3D = visualizationType === 'spider3d';
-  const setVisualizationType = (type: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt') => {
+  const setVisualizationType = (type: 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt' | 'pentagon-quartile') => {
     onStaticRenderSettingsChange({
       ...staticRenderSettings,
       visualizationType: type
@@ -176,7 +186,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
 
   // State for comparison selection
   const [selectedComparisonModel, setSelectedComparisonModel] = useState<ModelSnapshot | null>(null);
-  
+
+  // State for TER/TEC filtering
+  const [terTecFilterEnabled, setTerTecFilterEnabled] = useState<boolean>(false);
+  const [terTecFilterType, setTerTecFilterType] = useState<'TER' | 'TEC'>('TER');
+  const [terTecTargetValue, setTerTecTargetValue] = useState<number>(0);
+  const [terTecTolerance, setTerTecTolerance] = useState<number>(5); // Percentage
+
   // State for tagged models - convert parent prop to local Map format
   const localTaggedModels = useMemo(() => {
     if (!taggedModels) return new Map<string, string>();
@@ -190,9 +206,23 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   // Loading state for smooth initialization
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Bottom panel state management
+  // Panel state management with localStorage persistence
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('visualizerLeftPanelCollapsed');
+      return saved === 'true';
+    }
+    return false;
+  });
   const [bottomPanelCollapsed, setBottomPanelCollapsed] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(400);
+
+  // Persist left panel collapse state to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('visualizerLeftPanelCollapsed', String(leftPanelCollapsed));
+    }
+  }, [leftPanelCollapsed]);
 
   
 
@@ -238,7 +268,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
   const modelsWithUpdatedResnorm = useMemo(() => {
     // Use gridResults if available (new portion-based system), otherwise fall back to resnormGroups
     if (gridResults && gridResults.length > 0) {
-      console.log('🔄 Using gridResults for visualization:', gridResults.length, 'models');
+      console.log('Using gridResults for visualization:', gridResults.length, 'models');
       
       // Get reference spectrum from user reference params (for future enhancement)
       // const referenceSpectrum = userReferenceParams ? 
@@ -466,12 +496,58 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     return sortedModels.slice(0, calculatedModelCount);
   }, [sortedModels, logModelPercent]);
 
+  // Apply TER/TEC filtering if enabled
+  const terTecFilteredModels: ModelSnapshot[] = useMemo(() => {
+    // Priority 1: Bottom panel filter (from TER/TEC Analysis tab)
+    if (terTecFilteredModelIds && terTecFilteredModelIds.length > 0) {
+      const idSet = new Set(terTecFilteredModelIds);
+      return allFilteredModels.filter(m => idSet.has(m.id));
+    }
+
+    // Priority 2: Left sidebar filter
+    if (!terTecFilterEnabled || terTecTargetValue === 0) {
+      return allFilteredModels;
+    }
+
+    const toleranceFraction = terTecTolerance / 100;
+    const range = terTecFilterType === 'TER'
+      ? getTERRange(terTecTargetValue, toleranceFraction)
+      : getTECRange(terTecTargetValue, toleranceFraction);
+
+    return allFilteredModels.filter(model => {
+      const value = terTecFilterType === 'TER'
+        ? calculateTER(model.parameters)
+        : calculateTEC(model.parameters);
+      return value >= range.min && value <= range.max;
+    });
+  }, [allFilteredModels, terTecFilterEnabled, terTecFilterType, terTecTargetValue, terTecTolerance, terTecFilteredModelIds]);
+
+  // Get unique TER/TEC values for the slider/selector
+  const uniqueTerTecValues = useMemo(() => {
+    const values = allFilteredModels.map(m => {
+      const value = terTecFilterType === 'TER'
+        ? calculateTER(m.parameters)
+        : calculateTEC(m.parameters);
+      // For TEC (very small values), use more precision
+      if (terTecFilterType === 'TEC') {
+        // Round to 3 significant figures instead of 3 decimals
+        const magnitude = Math.floor(Math.log10(Math.abs(value)));
+        const scale = Math.pow(10, magnitude - 2);
+        return Math.round(value / scale) * scale;
+      }
+      return Math.round(value * 1000) / 1000; // Round to 3 decimals for TER
+    });
+    const uniqueSet = new Set(values.filter(v => v > 0)); // Filter out zero/invalid values
+    return Array.from(uniqueSet).sort((a, b) => a - b);
+  }, [allFilteredModels, terTecFilterType]);
+
   // Granular model navigation function
   const navigateModel = useCallback((direction: 'first' | 'previous' | 'next' | 'last') => {
-    if (!allFilteredModels.length) return;
+    const modelsToNavigate = terTecFilterEnabled ? terTecFilteredModels : allFilteredModels;
+    if (!modelsToNavigate.length) return;
 
     const currentIndex = highlightedModelId ?
-      allFilteredModels.findIndex(m => m.id === highlightedModelId) : -1;
+      modelsToNavigate.findIndex(m => m.id === highlightedModelId) : -1;
 
     let newIndex: number;
 
@@ -480,27 +556,27 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         newIndex = 0;
         break;
       case 'last':
-        newIndex = allFilteredModels.length - 1;
+        newIndex = modelsToNavigate.length - 1;
         break;
       case 'previous':
         if (currentIndex <= 0) {
-          newIndex = allFilteredModels.length - 1; // Wrap to last
+          newIndex = modelsToNavigate.length - 1; // Wrap to last
         } else {
           newIndex = Math.max(0, currentIndex - navigationStepSize);
         }
         break;
       case 'next':
-        if (currentIndex >= allFilteredModels.length - 1 || currentIndex < 0) {
+        if (currentIndex >= modelsToNavigate.length - 1 || currentIndex < 0) {
           newIndex = 0; // Wrap to first or start from beginning
         } else {
-          newIndex = Math.min(allFilteredModels.length - 1, currentIndex + navigationStepSize);
+          newIndex = Math.min(modelsToNavigate.length - 1, currentIndex + navigationStepSize);
         }
         break;
       default:
         return;
     }
 
-    const targetModel = allFilteredModels[newIndex];
+    const targetModel = modelsToNavigate[newIndex];
     if (targetModel) {
       setHighlightedModelId(targetModel.id);
       setCurrentResnorm(targetModel.resnorm || null);
@@ -510,18 +586,24 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
         setSelectedComparisonModel(targetModel);
       }
     }
-  }, [allFilteredModels, highlightedModelId, navigationStepSize, selectedComparisonModel]);
+  }, [allFilteredModels, terTecFilteredModels, terTecFilterEnabled, highlightedModelId, navigationStepSize, selectedComparisonModel]);
 
   // Get visible models within current navigation window
   const visibleModels: ModelSnapshot[] = useMemo(() => {
-    if (!allFilteredModels.length) return [];
+    // Use terTecFilteredModels which already handles both bottom panel and left sidebar filters
+    const modelsToShow = terTecFilteredModels.length > 0 &&
+                         (terTecFilterEnabled || (terTecFilteredModelIds && terTecFilteredModelIds.length > 0))
+      ? terTecFilteredModels
+      : allFilteredModels;
+
+    if (!modelsToShow.length) return [];
 
     // Navigation window: show up to 1000 models at current offset position
-    const startIndex = Math.max(0, Math.min(navigationOffset, allFilteredModels.length - 1));
-    const endIndex = Math.min(startIndex + navigationWindowSize, allFilteredModels.length);
+    const startIndex = Math.max(0, Math.min(navigationOffset, modelsToShow.length - 1));
+    const endIndex = Math.min(startIndex + navigationWindowSize, modelsToShow.length);
 
-    return allFilteredModels.slice(startIndex, endIndex);
-  }, [allFilteredModels, navigationOffset, navigationWindowSize]);
+    return modelsToShow.slice(startIndex, endIndex);
+  }, [allFilteredModels, terTecFilteredModels, terTecFilterEnabled, terTecFilteredModelIds, navigationOffset, navigationWindowSize]);
 
   // Memoized tagged model data for Nyquist plot to avoid recalculation
   const taggedModelNyquistData = useMemo(() => {
@@ -624,7 +706,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     items: modelsWithUpdatedResnorm || []
   }];
 
-  console.log('🔧 Bottom panel configurations:', {
+  console.log('Bottom panel configurations:', {
     configCount: bottomPanelConfigs.length,
     firstConfigItems: bottomPanelConfigs[0]?.items?.length || 0,
     sampleModel: bottomPanelConfigs[0]?.items?.[0]
@@ -635,23 +717,24 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     <div className="h-full flex flex-col bg-neutral-900">
       {hasComputedResults ? (
         <>
-          {/* Main Content Area */}
-          <div className="flex-1 flex min-h-0">
-            {/* Left Sidebar - Scrollable Control Panels */}
-            <div className="w-80 bg-neutral-800 border-r border-neutral-700 flex flex-col">
+          {/* Main Content Area - Split into visualization and bottom panel */}
+          <div className="flex-1 flex min-h-0 relative">
+            {/* Left Sidebar - Collapsible Control Panels (stops at bottom panel) */}
+            <div className={`${leftPanelCollapsed ? 'w-0' : 'w-80'} bg-neutral-800 border-r border-neutral-700 flex flex-col transition-all duration-300 overflow-hidden absolute left-0 top-0 bottom-0 z-10`}>
               {/* Scrollable Content Container */}
               <div className="flex-1 overflow-y-auto p-3 space-y-4">
               <div className="flex items-center gap-4">
               {/* Visualization Type Selection */}
               <select
                 value={visualizationType}
-                onChange={(e) => setVisualizationType(e.target.value as 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt')}
+                onChange={(e) => setVisualizationType(e.target.value as 'spider3d' | 'nyquist' | 'tsne' | 'pentagon-gt' | 'pentagon-quartile')}
                 className="px-3 py-1.5 text-sm bg-neutral-900 border border-neutral-600 rounded-md text-neutral-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               >
                 <option value="spider3d">Spider 3D</option>
                 <option value="nyquist">Nyquist Plot</option>
                 <option value="tsne">t-SNE 3D Space</option>
-                <option value="pentagon-gt">Sweeper</option>
+                <option value="pentagon-gt">Pentagon Ground Truth</option>
+                <option value="pentagon-quartile">Pentagon Quartile</option>
               </select>
             </div> {/* End left toolbar controls */}
                 {/* Ground Truth Control */}
@@ -777,6 +860,107 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   </div>
                 </div>
 
+                {/* TER/TEC Filtering */}
+                <div className="bg-neutral-700 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-neutral-200">TER/TEC Filter</h4>
+                    <button
+                      onClick={() => setTerTecFilterEnabled(!terTecFilterEnabled)}
+                      className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${
+                        terTecFilterEnabled ? 'bg-emerald-600' : 'bg-neutral-600'
+                      }`}
+                    >
+                      <span
+                        className={`inline-block h-2 w-2 transform rounded-full bg-white transition-transform ${
+                          terTecFilterEnabled ? 'translate-x-5' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {terTecFilterEnabled && (
+                    <div className="space-y-3 mt-3">
+                      {/* Metric Type Toggle */}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setTerTecFilterType('TER')}
+                          className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
+                            terTecFilterType === 'TER'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-750'
+                          }`}
+                        >
+                          TER
+                        </button>
+                        <button
+                          onClick={() => setTerTecFilterType('TEC')}
+                          className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
+                            terTecFilterType === 'TEC'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-750'
+                          }`}
+                        >
+                          TEC
+                        </button>
+                      </div>
+
+                      {/* Target Value Dropdown */}
+                      <div>
+                        <label className="block text-xs text-neutral-400 mb-1">
+                          Target {terTecFilterType}
+                        </label>
+                        <select
+                          value={terTecTargetValue}
+                          onChange={(e) => setTerTecTargetValue(parseFloat(e.target.value) || 0)}
+                          className="w-full px-2 py-1 text-xs bg-neutral-800 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                          <option value={0}>Select {terTecFilterType} value...</option>
+                          {uniqueTerTecValues.map((value, index) => (
+                            <option key={index} value={value}>
+                              {terTecFilterType === 'TER' ? formatTER(value) : formatTEC(value)}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="text-xs text-neutral-500 mt-1">
+                          {uniqueTerTecValues.length} unique values
+                        </div>
+                      </div>
+
+                      {/* Tolerance Slider */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-neutral-400">Tolerance</span>
+                          <span className="text-xs text-neutral-200">±{terTecTolerance}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="20"
+                          step="1"
+                          value={terTecTolerance}
+                          onChange={(e) => setTerTecTolerance(parseInt(e.target.value))}
+                          className="w-full h-2 bg-neutral-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-500"
+                        />
+                      </div>
+
+                      {/* Filter Results */}
+                      <div className="bg-neutral-800 rounded px-2 py-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-neutral-400">Filtered Models</span>
+                          <span className="text-xs font-semibold text-emerald-400">
+                            {terTecFilteredModels.length.toLocaleString()}
+                          </span>
+                        </div>
+                        {terTecTargetValue > 0 && (
+                          <div className="text-xs text-neutral-500 mt-1">
+                            {terTecFilterType === 'TER' ? formatTER(terTecTargetValue) : formatTEC(terTecTargetValue)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
 
                 {/* Nyquist Configuration Selector - only for Nyquist plot */}
                 {visualizationType === 'nyquist' && topConfigurations.length > 0 && (
@@ -864,7 +1048,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         title="Go to first model"
                         disabled={!allFilteredModels.length}
                       >
-                        ⏮
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M8.354 1.146a.5.5 0 0 0-.708 0l-6 6a.5.5 0 0 0 0 .708l6 6a.5.5 0 0 0 .708-.708L2.707 7.5H14.5a.5.5 0 0 0 0-1H2.707l5.647-5.646a.5.5 0 0 0 0-.708z"/>
+                          <path d="M1 1v14h1V1H1z"/>
+                        </svg>
                       </button>
                       <button
                         onClick={() => navigateModel('previous')}
@@ -872,7 +1059,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         title={`Previous ${navigationStepSize} model(s)`}
                         disabled={!allFilteredModels.length}
                       >
-                        ⏪
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                          <path fillRule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+                          <path fillRule="evenodd" d="M6.354 1.646a.5.5 0 0 1 0 .708L.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+                        </svg>
                       </button>
                       <button
                         onClick={() => navigateModel('next')}
@@ -880,7 +1070,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         title={`Next ${navigationStepSize} model(s)`}
                         disabled={!allFilteredModels.length}
                       >
-                        ⏩
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                          <path fillRule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+                          <path fillRule="evenodd" d="M9.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L15.293 8 9.646 2.354a.5.5 0 0 1 0-.708z"/>
+                        </svg>
                       </button>
                       <button
                         onClick={() => navigateModel('last')}
@@ -888,7 +1081,10 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         title="Go to last model"
                         disabled={!allFilteredModels.length}
                       >
-                        ⏭
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+                          <path d="M7.646 1.146a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L13.293 7.5H1.5a.5.5 0 0 1 0-1h11.793L7.646 1.854a.5.5 0 0 1 0-.708z"/>
+                          <path d="M15 1v14h-1V1h1z"/>
+                        </svg>
                       </button>
                     </div>
 
@@ -952,13 +1148,13 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                         }
                       }}
                     >
-                      <option value="ground-truth">⚪ Ground Truth (Reference)</option>
+                      <option value="ground-truth">Ground Truth (Reference)</option>
                       {highlightedModelId && (
-                        <option value="current">● Current Selection</option>
+                        <option value="current">Current Selection</option>
                       )}
                       {Array.from(localTaggedModels.entries()).map(([modelId, tagName]) => (
                         <option key={modelId} value={`tagged:${modelId}`}>
-                          ▲ {tagName} {(() => {
+                          {tagName} {(() => {
                             const model = allFilteredModels.find(m => m.id === modelId);
                             return model ? `(${model.resnorm?.toFixed(4) || 'N/A'})` : '';
                           })()}
@@ -1013,17 +1209,41 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 )}
 
               </div> {/* End scrollable container */}
+
+              {/* Collapse toggle button */}
+              <button
+                onClick={() => setLeftPanelCollapsed(true)}
+                className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded bg-neutral-700 hover:bg-neutral-600 transition-colors z-10"
+                title="Collapse panel"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
             </div> {/* End left sidebar */}
 
+            {/* Expand button when collapsed */}
+            {leftPanelCollapsed && (
+              <button
+                onClick={() => setLeftPanelCollapsed(false)}
+                className="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-12 flex items-center justify-center rounded-r bg-neutral-800 hover:bg-neutral-700 border-r border-t border-b border-neutral-600 transition-colors z-10"
+                title="Expand panel"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            )}
+
             {/* Visualization and Bottom Panel Container */}
-            <div className="flex-1 flex flex-col min-h-0">
+            <div className={`flex-1 flex flex-col min-h-0 ${leftPanelCollapsed ? '' : 'ml-80'} transition-all duration-300`}>
               {/* Primary Visualization Area */}
-              <div className="flex-1 relative bg-black min-h-0">
+              <div className="flex-1 relative bg-neutral-950 min-h-0">
               {visualizationType === 'spider3d' ? (
                 /* Spider 3D Visualization */
                 <div className="w-full h-full relative overflow-hidden">
                   {isInitializing && visibleModelsWithOpacity.length > 0 ? (
-                    <div className="absolute inset-0 bg-black flex items-center justify-center">
+                    <div className="absolute inset-0 bg-neutral-950 flex items-center justify-center">
                       <div className="text-white text-lg flex items-center gap-3">
                         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                         <span>Initializing 3D visualization...</span>
@@ -1063,7 +1283,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 /* Parameter Space 3D Visualization */
                 <div className="w-full h-full relative overflow-hidden">
                   {isInitializing && visibleModelsWithOpacity.length > 0 ? (
-                    <div className="absolute inset-0 bg-black flex items-center justify-center">
+                    <div className="absolute inset-0 bg-neutral-950 flex items-center justify-center">
                       <div className="text-white text-lg flex items-center gap-3">
                         <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                         <span>Computing parameter space...</span>
@@ -1093,6 +1313,15 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                   <PentagonGroundTruth
                     models={visibleModelsWithOpacity}
                     currentParameters={groundTruthParams}
+                  />
+                </div>
+              ) : visualizationType === 'pentagon-quartile' ? (
+                /* Pentagon Quartile Box-Whisker Visualization */
+                <div className="w-full h-full relative overflow-hidden">
+                  <PentagonBoxWhisker
+                    models={visibleModelsWithOpacity}
+                    currentParameters={effectiveGroundTruthParams}
+                    gridSize={gridSize}
                   />
                 </div>
               ) : (
@@ -1276,6 +1505,12 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                 navigationWindowSize={navigationWindowSize}
                 taggedModels={localTaggedModels}
                 tagColors={tagColors}
+                onTERTECFilterChange={(filteredIds) => {
+                  // Propagate TER/TEC filter to parent CircuitSimulator
+                  if (onTERTECFilterChange) {
+                    onTERTECFilterChange(filteredIds);
+                  }
+                }}
               />
             </div> {/* End Visualization and Bottom Panel Container */}
 
