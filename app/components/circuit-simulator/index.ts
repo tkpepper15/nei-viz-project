@@ -10,7 +10,4 @@ export * from './utils/index';
 export * from './visualizations';
 
 // Main component (refactored and cleaned up)
-export { CircuitSimulator } from '../CircuitSimulator';
-
-// Export all components for easier imports
-export { ParamSlider } from './ParamSlider'; 
+export { CircuitSimulator } from '../CircuitSimulator'; 

@@ -119,24 +119,19 @@ Complex impedance calculation: `Z(ω) = Rs + Ra/(1+jωRaCa) + Rb/(1+jωRbCb)`
 - `next-env.d.ts` - Next.js TypeScript environment definitions
 - `CLAUDE.md` - Development guidelines and project instructions for AI assistance
 
-### Organized Supporting Files
+### Documentation
 
-#### `/docs` - Documentation and Context
-All documentation files moved here for organization:
-- `SETUP_INSTRUCTIONS.md` - Initial project setup and installation
-- `COMPUTATION_PIPELINE_DOCUMENTATION.md` - Detailed computation architecture
-- `SERIALIZATION_INTEGRATION_COMPLETE.md` - Serialized storage system documentation
-- `PERFORMANCE_ANALYSIS.md` - Performance benchmarking and optimization results
-- `OPTIMIZATION_MATHEMATICS.md` - Mathematical foundations and algorithms
-- `SUPABASE_IMPLEMENTATION_PLAN.md` - Database integration architecture
-- `ML_IMPLEMENTATION_PLAN.md` - Machine learning enhancement roadmap
-- `UI_SETTINGS_DATABASE_SCHEMA.md` - Database schema documentation
-- Multiple deployment and integration guides
+All project documentation is organized in `/docs` with the following structure:
 
-#### `/docs/context-images` - Visual Context and Screenshots
-- `img_1.png`, `img_2.png`, `img_3.png`, `img_4.png` - Development context images
-- `nyquist_inspiration.png`, `inspo.png` - Design inspiration references
-- `reworks/reworks_1.png` - Historical development iterations
+- **📖 [Documentation Index](docs/INDEX.md)** - Complete guide to all documentation
+- **🏗️ [Architecture](docs/architecture/)** - System design and structure
+- **🔧 [Setup](docs/setup/)** - Installation and configuration guides
+- **🤖 [Machine Learning](docs/ml/)** - ML features and training
+- **🚀 [Deployment](docs/deployment/)** - Production deployment guides
+- **📚 [Reference](docs/reference/)** - Technical references and status
+- **🗃️ [Archive](docs/archive/)** - Historical documentation
+
+See [`docs/INDEX.md`](docs/INDEX.md) for a complete documentation map.
 
 #### `/data` - Sample Data and Testing
 - `sample-outputs/` - Example computation results

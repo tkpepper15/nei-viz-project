@@ -21,6 +21,7 @@ interface SpiderPlot3DProps {
   showLabels?: boolean; // New: toggle for parameter labels, values, and resnorm markers
   resnormRange?: { min: number; max: number } | null; // New: filter models by resnorm range
   onModelTag?: (model: ModelSnapshot, tag: string) => void; // Callback for tagging models
+  onModelSelect?: (model: ModelSnapshot | null) => void; // Callback when a model is clicked/selected
   taggedModels?: Map<string, string>; // Map of model id to tag name
   currentResnorm?: number | null; // Current resnorm value being navigated
   onResnormSelect?: (resnorm: number) => void; // Callback for shift-click resnorm selection
@@ -118,6 +119,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   showLabels = true, // eslint-disable-line @typescript-eslint/no-unused-vars
   resnormRange = null,
   onModelTag,
+  onModelSelect,
   taggedModels = new Map(),
   currentResnorm = null,
   onResnormSelect,
@@ -184,13 +186,14 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   const circuitParams = React.useMemo(() => getCircuitParameters(), []);
   const paramKeys = React.useMemo(() => circuitParams.map(p => p.key), [circuitParams]);
 
-  // Utility function to check if a point is inside a polygon
-  const isPointInPolygon = useCallback((x: number, y: number, polygon: {x: number; y: number}[]): boolean => {
+  // Utility function to check if a point is inside a polygon with tolerance
+  const isPointInPolygon = useCallback((x: number, y: number, polygon: {x: number; y: number}[], tolerance: number = 0): boolean => {
     if (polygon.length < 3) return false;
-    
+
+    // First check exact polygon containment
     let inside = false;
     let j = polygon.length - 1;
-    
+
     for (let i = 0; i < polygon.length; i++) {
       if (((polygon[i].y > y) !== (polygon[j].y > y)) &&
           (x < (polygon[j].x - polygon[i].x) * (y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
@@ -198,8 +201,49 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       }
       j = i;
     }
-    
-    return inside;
+
+    if (inside) return true;
+
+    // If tolerance is provided, also check distance to edges and vertices
+    if (tolerance > 0) {
+      // Check distance to each vertex
+      for (const vertex of polygon) {
+        const dx = x - vertex.x;
+        const dy = y - vertex.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= tolerance) {
+          return true;
+        }
+      }
+
+      // Check distance to each edge
+      for (let i = 0; i < polygon.length; i++) {
+        const j = (i + 1) % polygon.length;
+        const p1 = polygon[i];
+        const p2 = polygon[j];
+
+        // Calculate distance from point to line segment
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared === 0) continue;
+
+        // Project point onto line segment
+        const t = Math.max(0, Math.min(1, ((x - p1.x) * dx + (y - p1.y) * dy) / lengthSquared));
+        const projX = p1.x + t * dx;
+        const projY = p1.y + t * dy;
+
+        const distX = x - projX;
+        const distY = y - projY;
+        const distance = Math.sqrt(distX * distX + distY * distY);
+
+        if (distance <= tolerance) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }, []);
 
   
@@ -225,8 +269,9 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   
   // Model selection and tagging state
   const [hoveredModel, setHoveredModel] = useState<ModelSnapshot | null>(null);
-  const [showTagDialog, setShowTagDialog] = useState<{model: ModelSnapshot; x: number; y: number} | null>(null);
-  
+  const [selectedModelForTag, setSelectedModelForTag] = useState<ModelSnapshot | null>(null);
+  const [tagInputValue, setTagInputValue] = useState<string>('');
+
   // Tagging state
   const [isTagging, setIsTagging] = useState<boolean>(false);
 
@@ -471,23 +516,43 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
   const findModelAtPoint = useCallback((clickX: number, clickY: number): ModelSnapshot | null => {
     // Check polygons from front to back (reverse order since we render back to front)
     const sortedPolygons = [...convert3DPolygons].sort((a, b) => b.zHeight - a.zHeight);
-    
+
+    // Use adaptive tolerance based on camera zoom - more tolerance when zoomed out
+    const baseTolerance = 15; // Base pixel tolerance
+    const scaledTolerance = baseTolerance / Math.max(0.5, camera.scale); // Adjust for zoom level
+
+    // First pass: exact containment check
     for (const polygon of sortedPolygons) {
       const projectedVertices = polygon.vertices
         .map(vertex => project3D(vertex as Point3D))
         .filter(p => p.visible);
-      
+
       if (projectedVertices.length >= 3) {
         const polygonPoints = projectedVertices.map(p => ({ x: p.x, y: p.y }));
-        
-        if (isPointInPolygon(clickX, clickY, polygonPoints)) {
+
+        if (isPointInPolygon(clickX, clickY, polygonPoints, 0)) {
           return polygon.model;
         }
       }
     }
-    
+
+    // Second pass: check with tolerance if no exact match
+    for (const polygon of sortedPolygons) {
+      const projectedVertices = polygon.vertices
+        .map(vertex => project3D(vertex as Point3D))
+        .filter(p => p.visible);
+
+      if (projectedVertices.length >= 3) {
+        const polygonPoints = projectedVertices.map(p => ({ x: p.x, y: p.y }));
+
+        if (isPointInPolygon(clickX, clickY, polygonPoints, scaledTolerance)) {
+          return polygon.model;
+        }
+      }
+    }
+
     return null;
-  }, [convert3DPolygons, project3D, isPointInPolygon]);
+  }, [convert3DPolygons, project3D, isPointInPolygon, camera.scale]);
 
   // Draw 3D radar grid with dynamic scaling
   const draw3DRadarGrid = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -700,10 +765,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     const avgDepth = projectedVertices.reduce((sum, p) => sum + p.projected.depth, 0) / projectedVertices.length;
     const depthFactor = Math.max(0.3, Math.min(1.0, 10 / avgDepth)); // Closer = more visible
     
-    // Check if this model is hovered, tagged, or highlighted
-    const isHovered = hoveredModel?.id === polygon.model.id;
+    // Check if this model is hovered, tagged, highlighted, or selected for tagging
+    const isHovered = hoveredModel?.id === polygon.model.id && !selectedModelForTag; // Don't show hover if model is selected
     const isTagged = taggedModels.has(polygon.model.id);
-    const isHighlighted = highlightedModelId === polygon.model.id;
+    const isHighlighted = highlightedModelId === polygon.model.id || selectedModelForTag?.id === polygon.model.id;
     const tagName = taggedModels.get(polygon.model.id);
     
     // Draw vertical lines from base to polygon (depth indicators) with adaptive styling
@@ -740,8 +805,8 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.globalAlpha = Math.min(0.8, baseOpacity + 0.4);
       ctx.fillStyle = '#FFFF00'; // Yellow highlight for hover
     } else if (isHighlighted) {
-      ctx.globalAlpha = Math.min(0.85, baseOpacity + 0.5);
-      ctx.fillStyle = '#00FFFF'; // Cyan highlight for selected model
+      ctx.globalAlpha = Math.min(0.9, baseOpacity + 0.6);
+      ctx.fillStyle = '#00FFFF'; // Bright cyan highlight for selected model
     } else if (isTagged) {
       ctx.globalAlpha = Math.min(0.7, baseOpacity + 0.3);
       ctx.fillStyle = '#FF6B9D'; // Pink highlight for tagged
@@ -757,8 +822,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.lineWidth = baseLineWidth * 2;
       ctx.strokeStyle = '#FFFF00'; // Yellow outline for hover
     } else if (isHighlighted) {
-      ctx.lineWidth = baseLineWidth * 2.5;
-      ctx.strokeStyle = '#00FFFF'; // Cyan outline for selected model
+      ctx.lineWidth = baseLineWidth * 3.5;
+      ctx.strokeStyle = '#00FFFF'; // Thicker cyan outline for selected model
+      ctx.shadowColor = '#00FFFF';
+      ctx.shadowBlur = 15;
     } else if (isTagged) {
       ctx.lineWidth = baseLineWidth * 1.5;
       ctx.strokeStyle = '#FF6B9D'; // Pink outline for tagged
@@ -769,13 +836,20 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     ctx.setLineDash([]);
     ctx.stroke();
 
+    // Reset shadow
+    if (isHighlighted) {
+      ctx.shadowBlur = 0;
+    }
+
     // Draw vertices as adaptive-sized dots with highlighting
     if (isHovered) {
       ctx.fillStyle = '#FFFF00';
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.6) * depthFactor);
     } else if (isHighlighted) {
       ctx.fillStyle = '#00FFFF';
-      ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.7) * depthFactor);
+      ctx.globalAlpha = 1.0;
+      ctx.shadowColor = '#00FFFF';
+      ctx.shadowBlur = 10;
     } else if (isTagged) {
       ctx.fillStyle = '#FF6B9D';
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.5) * depthFactor);
@@ -783,10 +857,10 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.fillStyle = polygon.color;
       ctx.globalAlpha = Math.min(1.0, (polygon.opacity + 0.4) * depthFactor);
     }
-    
+
     const baseDotSize = Math.max(1.5, 3 * depthFactor * camera.scale);
-    const dotSize = isHovered ? baseDotSize * 1.5 : 
-                    (isHighlighted ? baseDotSize * 2 : 
+    const dotSize = isHovered ? baseDotSize * 1.5 :
+                    (isHighlighted ? baseDotSize * 2.5 :
                      (isTagged ? baseDotSize * 1.2 : baseDotSize));
     
     projectedOnly.forEach(vertex => {
@@ -794,6 +868,11 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
       ctx.arc(vertex.x, vertex.y, dotSize, 0, 2 * Math.PI);
       ctx.fill();
     });
+
+    // Reset shadow after vertices
+    if (isHighlighted) {
+      ctx.shadowBlur = 0;
+    }
     
     // Draw tag label if model is tagged - positioned outside the radar like parameter labels
     if (isTagged && tagName) {
@@ -848,7 +927,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     }
 
     ctx.restore();
-  }, [project3D, camera.scale, hoveredModel, taggedModels, highlightedModelId]);
+  }, [project3D, camera.scale, hoveredModel, taggedModels, highlightedModelId, selectedModelForTag]);
 
   // Draw enhanced 3D radar labels with intelligent value markers (min/max/median only)
   const draw3DRadarLabels = React.useCallback((ctx: CanvasRenderingContext2D) => {
@@ -1663,16 +1742,37 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
     }
     
     // Check for model selection on left click without modifiers
-    if (e.button === 0 && !e.shiftKey && !e.ctrlKey && onModelTag) {
+    if (e.button === 0 && !e.shiftKey && !e.ctrlKey) {
       const clickedModel = findModelAtPoint(clickX, clickY);
       if (clickedModel) {
-        // Show tag dialog
-        setShowTagDialog({
-          model: clickedModel,
-          x: e.clientX,
-          y: e.clientY
-        });
-        return; // Don't start dragging if we're showing tag dialog
+        // Only allow one model to be selected at a time
+        // Clear previous selection if clicking on a different model
+        if (selectedModelForTag?.id === clickedModel.id) {
+          // Clicking same model again - deselect it
+          setSelectedModelForTag(null);
+          setTagInputValue('');
+          if (onModelSelect) {
+            onModelSelect(null);
+          }
+        } else {
+          // Select new model (this automatically clears the previous one)
+          setSelectedModelForTag(clickedModel);
+          // Pre-fill with existing tag if available
+          const existingTag = taggedModels.get(clickedModel.id);
+          setTagInputValue(existingTag || '');
+          // Notify parent of selection
+          if (onModelSelect) {
+            onModelSelect(clickedModel);
+          }
+        }
+        return; // Don't start dragging
+      } else {
+        // Clicked empty space - clear selection
+        setSelectedModelForTag(null);
+        setTagInputValue('');
+        if (onModelSelect) {
+          onModelSelect(null);
+        }
       }
     }
     
@@ -1788,32 +1888,44 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
           
           // Precise crosshair scrolling with strict alignment (only when no model is selected)
           if (!isModelSelected) {
-            const smoothResnorm = findSmoothResnormAtPoint(hoverX, hoverY);
-            if (smoothResnorm !== null) {
-              // Smooth interpolation for ultra-precise visual movement
-              const currentVisual = visualResnorm || smoothResnorm;
-              const diff = smoothResnorm - currentVisual;
-              const interpolationFactor = 0.15; // Smooth interpolation
-              const newVisualResnorm = Math.abs(diff) > 0.001 
-                ? currentVisual + diff * interpolationFactor
-                : smoothResnorm;
-              
-              setVisualResnorm(newVisualResnorm);
-              
-              // Debounced computational sync (discrete values only)
-              updateComputationalResnorm(newVisualResnorm);
-              
-              // Set hovered model to nearest actual model for proper polygon highlighting
-              const nearestModel = findNearestActualModel(newVisualResnorm);
-              setHoveredModel(nearestModel);
+            // Try direct model hit detection first for better accuracy
+            const directModel = findModelAtPoint(hoverX, hoverY);
+
+            if (directModel) {
+              // Direct hit on a model polygon - use its exact resnorm
+              const modelResnorm = directModel.resnorm || 0;
+              setVisualResnorm(modelResnorm);
+              setHoveredModel(directModel);
+              updateComputationalResnorm(modelResnorm);
             } else {
-              // Clear visual crosshair and hover when outside strict detection area
-              setVisualResnorm(null);
-              setHoveredModel(null);
-              // Clear computational state as well
-              if (onCurrentResnormChange && lastComputationalResnorm.current !== null) {
-                lastComputationalResnorm.current = null;
-                onCurrentResnormChange(null);
+              // Fallback to smooth resnorm detection
+              const smoothResnorm = findSmoothResnormAtPoint(hoverX, hoverY);
+              if (smoothResnorm !== null) {
+                // Smooth interpolation for ultra-precise visual movement
+                const currentVisual = visualResnorm || smoothResnorm;
+                const diff = smoothResnorm - currentVisual;
+                const interpolationFactor = 0.15; // Smooth interpolation
+                const newVisualResnorm = Math.abs(diff) > 0.001
+                  ? currentVisual + diff * interpolationFactor
+                  : smoothResnorm;
+
+                setVisualResnorm(newVisualResnorm);
+
+                // Debounced computational sync (discrete values only)
+                updateComputationalResnorm(newVisualResnorm);
+
+                // Set hovered model to nearest actual model for proper polygon highlighting
+                const nearestModel = findNearestActualModel(newVisualResnorm);
+                setHoveredModel(nearestModel);
+              } else {
+                // Clear visual crosshair and hover when outside strict detection area
+                setVisualResnorm(null);
+                setHoveredModel(null);
+                // Clear computational state as well
+                if (onCurrentResnormChange && lastComputationalResnorm.current !== null) {
+                  lastComputationalResnorm.current = null;
+                  onCurrentResnormChange(null);
+                }
               }
             }
           } else {
@@ -1825,7 +1937,7 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
             } else {
               setHoveredModel(null);
             }
-            
+
             // Legacy discrete resnorm detection when model is selected
             const hoveredResnorm = findResnormAtPoint(hoverX, hoverY);
             if (onCurrentResnormChange) {
@@ -2288,88 +2400,101 @@ export const SpiderPlot3D: React.FC<SpiderPlot3DProps> = ({
         </div>
       )}
 
-      {/* Tag Dialog */}
-      {showTagDialog && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 bg-black bg-opacity-50 z-40"
-            onClick={() => setShowTagDialog(null)}
-          />
-          
-          {/* Dialog */}
-          <div 
-            className="fixed z-50 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-xl"
-            style={{ 
-              left: Math.min(showTagDialog.x + 10, window.innerWidth - 200), 
-              top: Math.max(10, showTagDialog.y - 50)
-            }}
-          >
-            <div className="text-white text-sm mb-2">
-              Tag Model 
-              <span className="text-gray-400 text-xs ml-2">
-                (Resnorm: {showTagDialog.model.resnorm?.toFixed(4) || 'N/A'})
+      {/* Inline Tag Input - Non-blocking */}
+      {selectedModelForTag && onModelTag && (
+        <div
+          className="absolute bottom-4 left-4 z-30 bg-neutral-800 border border-neutral-600 rounded-lg p-3 shadow-xl"
+          style={{ maxWidth: '350px' }}
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-white text-sm">
+              Tag Model
+              <span className="text-neutral-400 text-xs ml-2">
+                (Resnorm: {selectedModelForTag.resnorm?.toFixed(4) || 'N/A'})
               </span>
             </div>
-            <input
-              type="text"
-              placeholder="Enter tag name..."
-              className="w-40 px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-white focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500"
-              onKeyDown={async (e) => {
-                if (e.key === 'Enter') {
-                  const tagName = e.currentTarget.value.trim();
-                  if (tagName && showTagDialog && onModelTag) {
-                    setIsTagging(true);
-                    try {
-                      // Use parent callback for tagging
-                      onModelTag(showTagDialog.model, tagName);
-                    } catch (error) {
-                      console.error('Failed to tag model:', error);
-                    } finally {
-                      setIsTagging(false);
-                    }
-                  }
-                  setShowTagDialog(null);
-                } else if (e.key === 'Escape') {
-                  setShowTagDialog(null);
+            <button
+              onClick={() => {
+                setSelectedModelForTag(null);
+                setTagInputValue('');
+                if (onModelSelect) {
+                  onModelSelect(null);
                 }
               }}
-              autoFocus
-            />
-            <div className="flex gap-2 mt-2">
-              <button
-                className="px-2 py-1 text-xs bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 transition-colors rounded text-white"
-                disabled={isTagging}
-                onClick={async () => {
-                  if (!showTagDialog || !onModelTag) return;
-                  
-                  const input = document.querySelector('input[placeholder="Enter tag name..."]') as HTMLInputElement;
-                  const tagName = input?.value.trim();
-                  if (!tagName) return;
-                  
+              className="text-neutral-400 hover:text-neutral-200 text-lg leading-none"
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
+          <input
+            type="text"
+            value={tagInputValue}
+            onChange={(e) => setTagInputValue(e.target.value)}
+            placeholder={`Model ${selectedModelForTag.id.slice(0, 8)}...`}
+            className="w-full px-3 py-2 text-sm bg-neutral-700 border border-neutral-600 rounded text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter') {
+                const tagName = tagInputValue.trim();
+                if (tagName && selectedModelForTag && onModelTag) {
                   setIsTagging(true);
                   try {
-                    // Use parent callback for tagging
-                    onModelTag(showTagDialog.model, tagName);
+                    onModelTag(selectedModelForTag, tagName);
                   } catch (error) {
                     console.error('Failed to tag model:', error);
                   } finally {
                     setIsTagging(false);
                   }
-                  setShowTagDialog(null);
-                }}
-              >
-                {isTagging ? 'Saving...' : 'Tag'}
-              </button>
-              <button
-                className="px-2 py-1 text-xs bg-gray-600 hover:bg-gray-700 transition-colors rounded text-white"
-                onClick={() => setShowTagDialog(null)}
-              >
-                Cancel
-              </button>
-            </div>
+                }
+                // Keep model selected after tagging, just clear the input
+                setTagInputValue('');
+              } else if (e.key === 'Escape') {
+                // Escape clears selection entirely
+                setSelectedModelForTag(null);
+                setTagInputValue('');
+                if (onModelSelect) {
+                  onModelSelect(null);
+                }
+              }
+            }}
+            autoFocus
+          />
+          <div className="flex gap-2 mt-2">
+            <button
+              className="flex-1 px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-600 transition-colors rounded text-white"
+              disabled={isTagging || !tagInputValue.trim()}
+              onClick={async () => {
+                const tagName = tagInputValue.trim();
+                if (!tagName || !selectedModelForTag || !onModelTag) return;
+
+                setIsTagging(true);
+                try {
+                  onModelTag(selectedModelForTag, tagName);
+                } catch (error) {
+                  console.error('Failed to tag model:', error);
+                } finally {
+                  setIsTagging(false);
+                }
+                // Keep model selected after tagging, just clear the input
+                setTagInputValue('');
+              }}
+            >
+              {isTagging ? 'Saving...' : 'Save Tag'}
+            </button>
+            <button
+              className="px-3 py-1.5 text-xs bg-neutral-600 hover:bg-neutral-500 transition-colors rounded text-white"
+              onClick={() => {
+                setSelectedModelForTag(null);
+                setTagInputValue('');
+                if (onModelSelect) {
+                  onModelSelect(null);
+                }
+              }}
+            >
+              Cancel
+            </button>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

@@ -263,8 +263,8 @@ export const CenterParameterPanel: React.FC<CenterParameterPanelProps> = ({
     <div className="w-full">
       {/* Welcome Header */}
       <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-white mb-2">What are you looking to visualize?</h1>
-        <p className="text-neutral-400 text-lg">Configure your circuit parameters for the electrochemical impedance spectroscopy simulation</p>
+        <h1 className="text-4xl font-bold text-white mb-2">Looking to visualize a biological circuit?</h1>
+        <p className="text-neutral-400 text-lg">Configure circuit parameters for the electrochemical impedance spectroscopy simulation</p>
       </div>
 
       {/* Configuration Name Input - Moved to top */}

@@ -1,9 +1,0 @@
-chmod +x start_backend.sh  # Make the script executable (only needed once)
-./start_backend.sh
-
-npm run dev  # or yarn dev if you're using yarn
-
-git add .
-git commit -m "Commit message"
-git push origin
-# updating to git

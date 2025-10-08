@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Image from 'next/image';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import 'katex/dist/katex.min.css';
 import { 
   BackendMeshPoint 
@@ -26,7 +27,6 @@ import { ProfilesService } from '../../lib/profilesService';
 import { CentralizedLimitsManager, setGlobalLimitsManager } from './circuit-simulator/utils/centralizedLimits';
 
 // Tab components
-import { MathDetailsTab } from './circuit-simulator/MathDetailsTab';
 import { VisualizerTab } from './circuit-simulator/VisualizerTab';
 // PentagonGroundTruth removed - now accessed via VisualizerTab dropdown
 
@@ -40,11 +40,17 @@ import { ResnormConfig, ResnormMethod } from './circuit-simulator/utils/resnorm'
 import { AuthModal } from './auth/AuthModal';
 import { useAuth } from './auth/AuthProvider';
 import { SlimNavbar } from './circuit-simulator/SlimNavbar';
+import { ModelInfoModal } from './model-info/ModelInfoModal';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;
 
 export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
+  // Routing
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   // Authentication
   const { user, loading: authLoading, signOut } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -165,6 +171,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   // Settings modal state
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
+  // Model info modal state
+  const [modelInfoModalOpen, setModelInfoModalOpen] = useState(false);
+
   // Memory optimization settings
   const [visibleResultsLimit, setVisibleResultsLimit] = useState(100000); // Increased limit for comprehensive data analysis
   const [memoryOptimizationEnabled, setMemoryOptimizationEnabled] = useState(true);
@@ -220,6 +229,26 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     lastComputedResults,
     updateDefaultGridSize
   } = useComputationState(defaultGridSize);
+
+  // Track when we have rendered results to avoid showing center panel during navigation
+  const [hasRenderedResults, setHasRenderedResults] = useState(false);
+
+  // Helper to get the playground URL with computed param if available
+  const getPlaygroundUrl = useCallback(() => {
+    const computedId = searchParams.get('computed');
+    if (computedId && hasRenderedResults) {
+      return `/simulator?computed=${computedId}`;
+    }
+    return '/simulator';
+  }, [searchParams, hasRenderedResults]);
+
+  // Set hasRenderedResults when we have grid results
+  useEffect(() => {
+    if (gridResults && gridResults.length > 0) {
+      setHasRenderedResults(true);
+    }
+  }, [gridResults]);
+
 
   // Sync grid size with enhanced user settings (only when settings change, not when gridSize changes)
   useEffect(() => {
@@ -425,7 +454,30 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
   const setVisualizationTab = setActiveTab;
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_parameterChanged, setParameterChanged] = useState<boolean>(false);
-  
+
+  // Sync route with visualization tab state
+  useEffect(() => {
+    if (pathname === '/simulator/activity' && visualizationTab !== 'activity') {
+      setVisualizationTab('activity');
+    } else if (pathname?.startsWith('/simulator/grid/') && visualizationTab !== 'visualizer') {
+      // Grid computation routes should show the visualizer tab
+      setVisualizationTab('visualizer');
+    } else if (pathname === '/simulator' && visualizationTab !== 'visualizer') {
+      setVisualizationTab('visualizer');
+    }
+  }, [pathname, visualizationTab, setVisualizationTab]);
+
+  // Keep hasRenderedResults in sync with actual results
+  // This ensures the visualization stays visible even when navigating between tabs
+  useEffect(() => {
+    if (gridResults.length > 0) {
+      setHasRenderedResults(true);
+    } else if (pathname === '/simulator' && !isComputingGrid) {
+      // Only reset if explicitly on base simulator and not computing
+      setHasRenderedResults(false);
+    }
+  }, [gridResults.length, pathname, isComputingGrid]);
+
   // Load user's default grid size when user changes
   useEffect(() => {
     if (user?.id && !authLoading) {
@@ -1067,6 +1119,16 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
 
         // Auto-collapse left navigation sidebar after successful computation
         setLeftNavCollapsed(true);
+
+        // Update URL to include computed config ID without causing remount
+        // Use query params instead of route change to preserve state
+        if (activeConfigId) {
+          const newUrl = `/simulator?computed=${activeConfigId}`;
+          router.push(newUrl, { scroll: false });
+        }
+
+        // Ensure hasRenderedResults is set so visualization shows
+        setHasRenderedResults(true);
 
         // Also create a backup profile entry in localStorage as failsafe
         try {
@@ -2705,6 +2767,10 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
     // Clear any existing results
     resetComputationState();
 
+    // Clear rendered results flag and URL param
+    setHasRenderedResults(false);
+    router.push('/simulator', { scroll: false });
+
     // Reset to requested default configuration
     const newParameters = {
       Rsh: 870,
@@ -3030,12 +3096,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           <div className={`flex items-center transition-all duration-300 ${leftNavCollapsed ? 'justify-center' : 'justify-between'}`}>
             {/* Logo section */}
             <button
+              onClick={() => window.location.href = '/'}
               className="w-10 h-10 flex items-center justify-center rounded-md hover:bg-neutral-700 transition-all duration-200"
-              title="SpideyPlot"
+              title="Return to Home"
             >
-              <Image 
+              <Image
                 src="/logo.png"
-                alt="SpideyPlot" 
+                alt="SpideyPlot"
                 width={24}
                 height={24}
                 className="flex-shrink-0"
@@ -3105,13 +3172,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           
           {/* Navigation Tabs - Extended */}
           <div className="px-3 pb-3 space-y-1 flex-shrink-0">
-            <button 
+            <button
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'visualizer' 
-                  ? 'bg-neutral-800 text-white' 
+                visualizationTab === 'visualizer'
+                  ? 'bg-neutral-800 text-white'
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => setVisualizationTab('visualizer')}
+              onClick={() => router.push(getPlaygroundUrl())}
             >
               <div className="flex items-center gap-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3120,28 +3187,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 <span>Playground</span>
               </div>
             </button>
-            <button 
-              className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
-                visualizationTab === 'math'
-                  ? 'bg-neutral-800 text-white' 
-                  : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('math')}
-            >
-              <div className="flex items-center gap-3">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-                <span>Model</span>
-              </div>
-            </button>
             <button
               className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-200 ${
                 visualizationTab === 'activity'
                   ? 'bg-neutral-800 text-white'
                   : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => setVisualizationTab('activity')}
+              onClick={() => router.push('/simulator/activity')}
             >
               <div className="flex items-center gap-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3312,43 +3364,17 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           
           {/* Vertical tab icons */}
           <div className="flex-1 flex flex-col items-center py-2 space-y-1">
-                        <button 
+            <button
               className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'visualizer' 
-                  ? 'bg-neutral-800 text-white' 
+                visualizationTab === 'visualizer'
+                  ? 'bg-neutral-800 text-white'
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => setVisualizationTab('visualizer')}
+              onClick={() => router.push(getPlaygroundUrl())}
               title="Playground"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-              </svg>
-            </button>
-            <button 
-              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'math' 
-                  ? 'bg-neutral-800 text-white' 
-                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('math')}
-              title="Model"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-              </svg>
-            </button>
-            <button
-              className={`w-10 h-10 flex items-center justify-center rounded-md transition-all duration-200 ${
-                visualizationTab === 'data'
-                  ? 'bg-neutral-800 text-white'
-                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
-              }`}
-              onClick={() => setVisualizationTab('data')}
-              title="File Manager"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
               </svg>
             </button>
             <button
@@ -3357,14 +3383,13 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                   ? 'bg-neutral-800 text-white'
                   : 'text-neutral-500 hover:bg-neutral-800 hover:text-white'
               }`}
-              onClick={() => setVisualizationTab('activity')}
+              onClick={() => router.push('/simulator/activity')}
               title="Activity Log"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
             </button>
-            {/* Orchestrator tab removed - functionality integrated into Playground */}
           </div>
         </div>
       </div>
@@ -3377,16 +3402,18 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
           gridResults={gridResults}
           gridSize={gridSize}
           onSettingsOpen={() => setSettingsModalOpen(true)}
-          onModelInfoOpen={() => {}} // TODO: Implement model info modal
+          onModelInfoOpen={() => setModelInfoModalOpen(true)}
           user={user}
           onSignOut={signOut}
         />
 
         {/* Main visualization area with right sidebar */}
         <div className="flex-1 flex overflow-hidden">
-          <div className={`flex-1 p-4 bg-neutral-950 overflow-hidden transition-all duration-300 ${leftNavCollapsed ? 'ml-0' : ''}`}>
-            {isComputingGrid ? (
-              <div className="flex flex-col h-full bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md overflow-hidden">
+          <div className={`flex-1 bg-neutral-950 overflow-hidden transition-all duration-300 ${leftNavCollapsed ? 'ml-0' : ''} relative`}>
+            {/* Smooth fade-in loading overlay */}
+            {isComputingGrid && (
+              <div className="absolute inset-0 z-50 bg-neutral-950/95 backdrop-blur-sm flex flex-col animate-fade-in">
+                <div className="flex flex-col h-full bg-neutral-900/50 border border-neutral-700 rounded-lg shadow-md overflow-hidden m-4">
                 {/* Header with Progress */}
                 <div className="flex-shrink-0 p-4 border-b border-neutral-700">
                   <div className="flex items-center justify-between mb-3">
@@ -3522,8 +3549,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     </div>
                   </div>
                 </div>
+                </div>
               </div>
-            ) : gridError ? (
+            )}
+
+            {/* Main content - always rendered */}
+            {gridError ? (
               <div className="p-4 bg-danger-light border border-danger rounded-lg text-sm text-danger">
                 <div className="flex items-start">
                   <svg className="w-5 h-5 mr-2 mt-0.5 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3534,16 +3565,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     <p className="mt-1">{gridError}</p>
                   </div>
                 </div>
-              </div>
-            ) : visualizationTab === 'math' ? (
-              <div className="h-full overflow-y-auto">
-                <MathDetailsTab 
-                  parameters={parameters}
-                  minFreq={minFreq}
-                  maxFreq={maxFreq}
-                  numPoints={numPoints}
-                  referenceModel={referenceModel}
-                />
               </div>
             ) : visualizationTab === 'activity' ? (
               <div className="h-full flex flex-col overflow-hidden">
@@ -3589,10 +3610,9 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                 </div>
               </div>
             ) : visualizationTab === 'visualizer' ? (
-              // Show visualization if we have grid results (current portion-based system)
-              gridResults && gridResults.length > 0 ? (
-                <div className="h-full">
-                  <VisualizerTab
+              // Show visualization if we have grid results OR hasRenderedResults flag is set
+              (gridResults && gridResults.length > 0) || hasRenderedResults ? (
+                <VisualizerTab
                     resnormGroups={resnormGroups.length > 0 ? resnormGroups : []}
                     gridResults={gridResults}
                     hiddenGroups={hiddenGroups}
@@ -3615,7 +3635,6 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
                     terTecFilteredModelIds={terTecFilteredModelIds}
                     onTERTECFilterChange={setTerTecFilteredModelIds}
                   />
-                </div>
               ) : (
                 <div className="h-full flex items-start justify-center p-4 overflow-y-auto">
                   <div className="w-full max-w-4xl">
@@ -3672,6 +3691,12 @@ export const CircuitSimulator: React.FC<CircuitSimulatorProps> = () => {
         isComputing={isComputingGrid}
         centralizedLimits={centralizedLimits}
         onMasterLimitChange={handleMasterLimitChange}
+      />
+
+      {/* Model Info Modal */}
+      <ModelInfoModal
+        isOpen={modelInfoModalOpen}
+        onClose={() => setModelInfoModalOpen(false)}
       />
 
       {/* Authentication Modal */}

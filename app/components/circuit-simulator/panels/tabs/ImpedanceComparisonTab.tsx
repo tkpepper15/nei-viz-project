@@ -31,7 +31,7 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
   topConfigurations,
   currentParameters,
   selectedConfigIndex,
-  onConfigurationSelect,
+  onConfigurationSelect, // eslint-disable-line @typescript-eslint/no-unused-vars
   isVisible,
   highlightedModelId // eslint-disable-line @typescript-eslint/no-unused-vars
 }) => {
@@ -200,29 +200,14 @@ export const ImpedanceComparisonTab: React.FC<BottomPanelTabProps> = ({
     <div className="flex-1 overflow-y-auto min-h-0 bg-neutral-900">
       <div className="p-4 space-y-4">
 
-        {/* Resnorm Model Selection Dropdown */}
-        {topConfigurations.length > 0 && (
+        {/* Model info display - no dropdown, uses parent's Compare with Reference selection */}
+        {selectedModel && (
           <div className="flex items-center justify-between bg-neutral-800 rounded-lg p-3">
-            <div className="flex items-center gap-3">
-              <label className="text-sm font-medium text-neutral-200">Compare Against:</label>
-              <select
-                value={selectedConfigIndex}
-                onChange={(e) => onConfigurationSelect(Number(e.target.value))}
-                className="px-3 py-1.5 text-sm bg-neutral-700 border border-neutral-600 rounded-md text-neutral-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors min-w-[200px]"
-              >
-                {topConfigurations.map((config, index) => {
-                  const firstModel = config.items?.[0];
-                  const resnorm = firstModel?.resnorm || 0;
-                  return (
-                    <option key={index} value={index}>
-                      #{index + 1} - Resnorm: {resnorm.toFixed(4)} ({config.items?.length || 0} models)
-                    </option>
-                  );
-                })}
-              </select>
+            <div className="text-sm text-neutral-200">
+              Comparing against: <span className="font-medium">{selectedConfigIndex === 0 ? 'Ground Truth' : `Selected Model (Resnorm: ${selectedModel.resnorm?.toFixed(4) || 'N/A'})`}</span>
             </div>
             <div className="text-xs text-neutral-400">
-              Selected model ID: {selectedModel?.id || 'None'}
+              Model ID: {selectedModel.id || 'None'}
             </div>
           </div>
         )}

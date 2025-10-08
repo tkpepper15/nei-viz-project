@@ -86,6 +86,14 @@ test-supabase-profiles.js
 *.db
 render_jobs.db
 
+# ML training data (large CSV files)
+ml_ideation/eis_training_data/*.csv
+ml_ideation/eis_training_data/*.npz
+ml_ideation/eis_training_data/*.pkl
+
+# Backup directories
+deleted_files_backup_*/
+
 # macOS files
 .DS_Store
 **/.DS_Store

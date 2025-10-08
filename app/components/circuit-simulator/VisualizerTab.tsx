@@ -257,6 +257,20 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
     }
   }, [onModelTag]);
 
+  // Handle model selection - update comparison model and highlighted ID
+  const handleModelSelect = useCallback((model: ModelSnapshot | null) => {
+    if (model) {
+      setSelectedComparisonModel(model);
+      setHighlightedModelId(model.id);
+      setCurrentResnorm(model.resnorm || null);
+    } else {
+      // Deselect - clear comparison model but keep ground truth
+      setSelectedComparisonModel(null);
+      setHighlightedModelId(null);
+      setCurrentResnorm(null);
+    }
+  }, []);
+
   // Memoized tag colors to avoid recalculation
   const tagColors = useMemo(() => [
     '#FF6B9D', '#4ECDC4', '#45B7D1', '#96CEB4', 
@@ -1270,6 +1284,7 @@ export const VisualizerTab: React.FC<VisualizerTabProps> = ({
                       useResnormCenter={staticRenderSettings.useResnormCenter}
                       resnormRange={selectedResnormRange}
                       onModelTag={handleModelTag}
+                      onModelSelect={handleModelSelect}
                       taggedModels={localTaggedModels}
                       currentResnorm={currentResnorm}
                       onResnormSelect={handleResnormSelect}

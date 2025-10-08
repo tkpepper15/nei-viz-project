@@ -33,6 +33,7 @@ export default function LandingPage() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function FeatureCard({ title, description, icon }: { title: string; description: string; icon: string }) {
   return (
     <div className="bg-neutral-800/50 border border-neutral-700 rounded-lg p-6 hover:border-orange-600 transition-colors">
@@ -43,6 +44,7 @@ function FeatureCard({ title, description, icon }: { title: string; description:
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function QuickLink({ href, title, description }: { href: string; title: string; description: string }) {
   return (
     <Link
