@@ -22,6 +22,28 @@ export const metadata: Metadata = {
     shortcut: '/spiderweb.png',
     apple: '/spiderweb.png',
   },
+  openGraph: {
+    title: "SpideyPlot - NEI Visualization Tool",
+    description: "Advanced electrochemical impedance spectroscopy (EIS) simulation for retinal pigment epithelium research with 3D visualization and parameter exploration",
+    siteName: "SpideyPlot",
+    url: "https://nei-viz-project.vercel.app",
+    type: "website",
+    images: [
+      {
+        url: "/spiderweb.png",
+        width: 512,
+        height: 512,
+        alt: "SpideyPlot - EIS Visualization Tool",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SpideyPlot - NEI Visualization Tool",
+    description: "Advanced EIS simulation and visualization for bioimpedance circuit analysis",
+    images: ["/spiderweb.png"],
+  },
+  metadataBase: new URL("https://nei-viz-project.vercel.app"),
 };
 
 export default function RootLayout({
