@@ -1925,7 +1925,77 @@ interface PipeDragState {
   id: string; ox: number; oy: number; sx: number; sy: number; moved: boolean;
 }
 
-function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChange: (c: ProcessMLCfg) => void }) {
+const STAGE_SNIPPETS: Record<string, string> = {
+  input: `from circuit_filter import FreqSeries
+
+# Z(ω, t) — impedance cube arriving per time-point
+# shape: [T, F] complex128
+def preprocess(raw: FreqSeries) -> FreqSeries:
+    return raw.normalize_magnitude()`,
+
+  mdn: `from models import MDNTransformer
+
+# MDN: mixture density network over transformer backbone
+# Outputs: (μ, σ, π) for each parameter × mixture component
+model = MDNTransformer.load(cfg.model_path)
+with torch.no_grad():
+    mu, sigma, pi = model(Z_normalized)   # [B, K, P]
+theta_mdn = mdn_sample(mu, sigma, pi)     # [B, P]`,
+
+  rbpf: `from circuit_filter import RBPFFilter, Param, FilterConfig
+
+filt = RBPFFilter(FilterConfig(
+    n_particles = cfg.n_particles,        # default 200
+    process_noise = cfg.process_noise,    # per-param σ_Q
+    resample_threshold = 0.5,
+))
+# State: θ = [Ra, Rb, Ca, Cb, Rsh]
+# Nonlinear part: discrete Ca>Cb mode
+# Linear part: Kalman-updated R, C magnitudes
+particles, weights = filt.update(Z_t, theta_mdn)`,
+
+  rts: `from circuit_filter import RTSSmoother
+
+# Rauch–Tung–Striebel backward pass
+# Converts causal RBPF filter → full-data smoother
+smoother = RTSSmoother()
+mu_smooth, sigma_smooth = smoother.smooth(
+    mu_filt   = particles_weighted_mean,  # [T, P]
+    sigma_filt = filter_covs,             # [T, P, P]
+)
+# mu_smooth is the final trajectory estimate`,
+
+  ecm: `from circuit_filter import ECMBaseline
+from scipy.optimize import minimize
+
+# Classical equivalent-circuit model fitting per time-point
+# Minimizes: ||Z_pred(θ, ω) - Z_obs(ω)||₁  (MAE)
+ecm = ECMBaseline(circuit='RCRC_parallel_Rsh')
+theta_ecm = ecm.fit_all(
+    Z_cube  = Z,          # [T, F] complex
+    bounds  = cfg.bounds, # from Param constraints
+    method  = 'L-BFGS-B',
+)`,
+
+  output: `from circuit_filter import EnsembleAggregator
+
+# Weighted ensemble of enabled pipeline branches
+agg = EnsembleAggregator(weights={
+    'rts': 0.60,   # smoothed Kalman posterior
+    'rbpf': 0.25,  # causal particle filter
+    'ecm': 0.15,   # deterministic baseline
+})
+theta_hat, uncertainty = agg.combine(
+    rts=mu_smooth, rbpf=particles_mean, ecm=theta_ecm
+)`,
+};
+
+function PipelineView({ cfg, onConfigChange, selectedStage, onSelectStage }: {
+  cfg: ProcessMLCfg;
+  onConfigChange: (c: ProcessMLCfg) => void;
+  selectedStage: string | null;
+  onSelectStage: (id: string | null) => void;
+}) {
   const [pos, setPos] = useState<Record<string, PipelinePos>>(() => ({ ...PIPE_DEFAULT_POS }));
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<PipeDragState | null>(null);
@@ -1997,7 +2067,10 @@ function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChan
   const onMouseUp = () => { dragRef.current = null; };
 
   const onNodeMouseUp = (stage: PipeStage) => {
-    if (!dragRef.current?.moved) toggle(stage);
+    if (!dragRef.current?.moved) {
+      toggle(stage);
+      onSelectStage(selectedStage === stage.id ? null : stage.id);
+    }
     dragRef.current = null;
   };
 
@@ -2038,6 +2111,7 @@ function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChan
           const p = pos[stage.id] ?? PIPE_DEFAULT_POS[stage.id];
           const on = isOn(stage.id);
           const toggleable = !!stage.cfgKey;
+          const sel = selectedStage === stage.id;
           return (
             <div
               key={stage.id}
@@ -2047,8 +2121,8 @@ function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChan
                 top: p.y,
                 width: PIPE_W,
                 height: PIPE_H,
-                background: on ? '#0e0e14' : '#08080b',
-                border: `1px solid ${on ? stage.color + '44' : '#1a1a22'}`,
+                background: sel ? '#12121c' : on ? '#0e0e14' : '#08080b',
+                border: `1px solid ${sel ? stage.color + 'aa' : on ? stage.color + '44' : '#1a1a22'}`,
                 borderRadius: 4,
                 display: 'flex',
                 flexDirection: 'column',
@@ -2057,7 +2131,8 @@ function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChan
                 opacity: on ? 1 : 0.3,
                 cursor: toggleable ? 'pointer' : 'grab',
                 userSelect: 'none',
-                transition: 'opacity 0.15s, border-color 0.15s',
+                transition: 'opacity 0.15s, border-color 0.15s, background 0.15s',
+                boxShadow: sel ? `0 0 0 1px ${stage.color}33` : undefined,
               }}
               onMouseDown={e => onMouseDown(e, stage.id)}
               onMouseUp={() => onNodeMouseUp(stage)}
@@ -2092,6 +2167,7 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [codeError, setCodeError] = useState<string | null>(null);
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`${ML_API_BASE}/model_info`)
@@ -2182,7 +2258,37 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
           )}
         </div>
 
-        <PipelineView cfg={cfg} onConfigChange={onConfigChange}/>
+        <PipelineView
+          cfg={cfg}
+          onConfigChange={onConfigChange}
+          selectedStage={selectedStage}
+          onSelectStage={setSelectedStage}
+        />
+
+        {selectedStage && STAGE_SNIPPETS[selectedStage] && (() => {
+          const stage = PIPE_STAGES.find(s => s.id === selectedStage);
+          return (
+            <div className="flex flex-col rounded bg-[#07070a] border border-[#1a1a22] overflow-hidden">
+              <div className="flex items-center justify-between px-2 py-1 border-b border-[#1a1a22]">
+                <span className="font-mono text-[9px]" style={{ color: stage?.color ?? '#9a9aa2' }}>
+                  {stage?.short ?? selectedStage} · {stage?.sub}
+                </span>
+                <button
+                  onClick={() => setSelectedStage(null)}
+                  className="font-mono text-[8px] text-[#2a2a38] hover:text-[#4a4a58] transition-colors focus:outline-none"
+                >
+                  ✕
+                </button>
+              </div>
+              <pre
+                className="font-mono text-[8px] leading-relaxed px-2 py-1.5 overflow-x-auto text-[#7a7a92] whitespace-pre"
+                style={{ maxHeight: 120 }}
+              >
+                {STAGE_SNIPPETS[selectedStage]}
+              </pre>
+            </div>
+          );
+        })()}
 
         <div className="h-px bg-[#1a1a22]"/>
 
@@ -2810,6 +2916,7 @@ function VizTrajectoryBody({ node, inputData, inputData2, onConfigChange }: Node
                 colors={HYP_COLORS}
                 kalman={activeResult?.kalman}
                 activePipeline={activeResult?.activePipeline}
+                changepoints={activeResult?.changepoints}
                 view={cfg.view}
                 useLogScale={useLogScale}
                 chartHeight={node.height - NODE_CHROME.headerH - NODE_CHROME.ctrlBarH - NODE_CHROME.chartPadH}/>
@@ -2926,6 +3033,7 @@ interface HypothesisTrajectoryChartProps {
   view?: TrajView;
   useLogScale: boolean;
   activePipeline?: { useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean };
+  changepoints?: ChangePoint[];
 }
 
 // Derive stage color from trajectory label so chart colors stay in sync with pipeline nodes
@@ -2937,7 +3045,7 @@ function stageColorForTraj(label: string, fallback: string): string {
   return fallback;
 }
 
-function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTruth, timeMin, atpLo, atpHi, ecmResnorm, colors = HYP_COLORS, kalman, chartHeight, view = 'trajectory', useLogScale, activePipeline }: HypothesisTrajectoryChartProps) {
+function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTruth, timeMin, atpLo, atpHi, ecmResnorm, colors = HYP_COLORS, kalman, chartHeight, view = 'trajectory', useLogScale, activePipeline, changepoints }: HypothesisTrajectoryChartProps) {
   const localH = chartHeight ?? H_TRAJ;
   const CHART_ECM_COLOR = STAGE_COLOR.ecm;
   const CHART_GT_COLOR  = '#4ade80';
@@ -3066,6 +3174,18 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
             </button>
           );
         })}
+        {kalman && activePipeline?.useKalman !== false && (() => {
+          const isVis = !hiddenLines.has('kal');
+          return (
+            <button onClick={() => toggleLine('kal')} className="flex items-center gap-1.5 select-none focus:outline-none" style={{ opacity: isVis ? 1 : 0.35 }}>
+              <div style={{ width: 10, height: 10, flexShrink: 0, border: `1.5px solid ${STAGE_COLOR.rts}`, borderRadius: 2, backgroundColor: isVis ? STAGE_COLOR.rts : 'transparent' }} />
+              <svg width="20" height="7" style={{ flexShrink: 0 }}>
+                <line x1="0" y1="3.5" x2="20" y2="3.5" stroke={STAGE_COLOR.rts} strokeWidth={2.0} />
+              </svg>
+              <span className="text-[9.5px]" style={{ color: STAGE_COLOR.rts }}>RTS smoother</span>
+            </button>
+          );
+        })()}
         {showEcmPath && (() => {
           const isVis = !hiddenLines.has('ecm');
           return (
@@ -3517,6 +3637,10 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           const v = trajDisplayValue(param, raw);
           rows.push({ label: traj.label.replace(/ECM/g, 'Fitted'), color: stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]), val: isFinite(v) && v > 0 ? v : null });
         }
+        // Kalman smoother
+        if (kalMeasPts.length > hoverIdx && !hiddenLines.has('kal') && kalMeasPts[hoverIdx]) {
+          rows.push({ label: 'RTS', color: STAGE_COLOR.rts, val: kalMeasPts[hoverIdx].v > 0 ? kalMeasPts[hoverIdx].v : null });
+        }
         // Baseline
         if (showEcmPath && !hiddenLines.has('ecm') && ecmColdPath[hoverIdx]) {
           const raw = extractEcmValue(param, ecmColdPath[hoverIdx]);
@@ -3739,6 +3863,50 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           );
         })}
 
+
+        {/* Kalman smoother: uncertainty band + mean line + measurement dots */}
+        {kalGridPts.length > 1 && !hiddenLines.has('kal') && (() => {
+          const measured = kalGridPts.filter(p => !p.isExtrap);
+          const extrap   = kalGridPts.filter(p => p.isExtrap);
+          const bandPoly = (pts: typeof kalGridPts) =>
+            [...pts.map(p => `${sx(p.t)},${syClip(p.vHi)}`), ...[...pts].reverse().map(p => `${sx(p.t)},${syClip(p.vLo)}`)].join(' ');
+          const linePts  = kalGridPts.map(p => `${sx(p.t)},${syClip(p.v)}`).join(' ');
+          return (
+            <g>
+              {measured.length > 2 && <polygon points={bandPoly(measured)} fill={STAGE_COLOR.rts} opacity={0.10} stroke="none"/>}
+              {extrap.length > 2   && <polygon points={bandPoly(extrap)}   fill={STAGE_COLOR.rts} opacity={0.05} stroke="none"/>}
+              <polyline points={linePts} fill="none" stroke={STAGE_COLOR.rts} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round"/>
+              {kalMeasPts.map((p, i) => (
+                <circle key={i} cx={sx(p.t)} cy={syClip(p.v)} r={3.2} fill={STAGE_COLOR.rts} stroke="#07070a" strokeWidth={1.4} opacity={0.92}/>
+              ))}
+            </g>
+          );
+        })()}
+
+        {/* Kalman hover dot */}
+        {hoverIdx !== null && kalMeasPts[hoverIdx] && !hiddenLines.has('kal') && (
+          <circle cx={sx(kalMeasPts[hoverIdx].t)} cy={syClip(kalMeasPts[hoverIdx].v)}
+            r={4.5} fill={STAGE_COLOR.rts} stroke="#07070a" strokeWidth={1.5} opacity={0.95}/>
+        )}
+
+        {/* Changepoint annotations — vertical dashed marker + param label */}
+        {changepoints && changepoints.map((cp, i) => {
+          if (cp.time_min == null) return null;
+          const cx2 = sx(cp.time_min);
+          if (cx2 < MG_TRAJ.left - 2 || cx2 > MG_TRAJ.left + pw + 2) return null;
+          const arrow = cp.direction === 'increase' ? '↑' : cp.direction === 'decrease' ? '↓' : '~';
+          return (
+            <g key={i}>
+              <line x1={cx2} y1={MG_TRAJ.top} x2={cx2} y2={MG_TRAJ.top + ph}
+                stroke="#c4a040" strokeWidth={0.9} strokeDasharray="2 3" opacity={0.45}/>
+              <text x={cx2 + 2.5} y={MG_TRAJ.top + 8}
+                fill="#c4a040" fontSize={6.5} fontFamily="monospace" opacity={0.75}
+                style={{ userSelect: 'none' }}>
+                {cp.dominant_param}{arrow}
+              </text>
+            </g>
+          );
+        })}
 
         {/* Hover crosshair + dots */}
         {hoverIdx !== null && hoverIdx < timeMin.length && (() => {
@@ -5422,6 +5590,38 @@ function MechanismBody({ node, inputData }: NodeBodyProps) {
                   </div>
                 );
               })}
+            </div>
+          </>
+        )}
+
+        {/* ─── EVENT TIMELINE ─── */}
+        {result?.changepoints && result.changepoints.length > 0 && (
+          <>
+            <div className={NODE_DIVIDER}/>
+            <div className={SECTION_LABEL}>Event timeline</div>
+            <div className="mt-1 flex flex-col gap-1.5">
+              {result.changepoints
+                .slice()
+                .sort((a, b) => (a.time_min ?? 0) - (b.time_min ?? 0))
+                .map((cp, ci) => {
+                  const arrow = cp.direction === 'increase' ? '↑' : cp.direction === 'decrease' ? '↓' : '~';
+                  const paramLabel = DIAG_PARAM_LABELS[cp.dominant_param] ?? cp.dominant_param;
+                  return (
+                    <div key={ci} className="flex items-start gap-2">
+                      <span className="font-mono text-[8px] text-[#c4a040] flex-shrink-0 w-10 pt-px tabular-nums">
+                        {cp.time_min != null ? `${cp.time_min.toFixed(0)}m` : '—'}
+                      </span>
+                      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-[8px] font-semibold" style={{ color: STAGE_COLOR.rts }}>{paramLabel}{arrow}</span>
+                        </div>
+                        {cp.interpretation && (
+                          <span className="text-[7.5px] text-[#7a7a82] leading-snug">{cp.interpretation}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </>
         )}
