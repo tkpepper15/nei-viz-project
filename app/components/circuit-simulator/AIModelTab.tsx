@@ -2942,18 +2942,11 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
   const CHART_ECM_COLOR = STAGE_COLOR.ecm;
   const CHART_GT_COLOR  = '#4ade80';
 
-  // Filter trajectories whose stage is toggled off in the pipeline
-  const visTrajectories = React.useMemo(() => {
-    if (!activePipeline) return trajectories;
-    return trajectories.filter(traj => {
-      const l = traj.label.toLowerCase();
-      if ((l.includes('smooth') || l.includes('fitted')) && !activePipeline.useKalman) return false;
-      if ((l.includes('rbpf') || l.includes('particle')) && !activePipeline.useRBPF) return false;
-      if (l.includes('mdn') && !l.includes('rbpf') && !activePipeline.useTransformer) return false;
-      return true;
-    });
-  }, [trajectories, activePipeline]);
+  // Backend already omits data for disabled stages — no client-side filtering needed.
+  // We use visTrajectories as an alias so all downstream references stay consistent.
+  const visTrajectories = trajectories;
 
+  // ECM cold path: gate client-side since it's returned separately from cluster paths
   const showEcmPath = ecmColdPath.length > 0 && (activePipeline?.useEcm !== false);
   // hiddenLines: set of keys ('hyp0'..'hyp3', 'ecm', 'gt') that are toggled off
   const [hiddenLines, setHiddenLines] = React.useState<ReadonlySet<string>>(new Set<string>());
