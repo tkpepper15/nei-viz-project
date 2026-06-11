@@ -1,0 +1,113 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*.local
+.env
+.env.production
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/*.so
+**/.Python
+**/env/
+.venv/
+**/build/
+**/develop-eggs/
+**/dist/
+**/downloads/
+**/eggs/
+**/.eggs/
+**/lib64/
+**/parts/
+**/sdist/
+**/var/
+**/wheels/
+**/*.egg-info/
+**/.installed.cfg
+**/*.egg
+
+# Temp files
+**/*.bak
+**/*.tmp
+**/*.temp
+
+# Database check scripts (contain debugging info)
+check-database.js
+test-supabase-profiles.js
+
+# JetBrains IDE
+.idea/
+
+# VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Data files and generated content
+/data/npz/user_generated/
+/data/demo_*/
+/data/test_*/
+/data/sample-outputs/
+/data/query_*/
+*.db
+render_jobs.db
+
+# ML training data (large CSV files)
+ml_ideation/eis_training_data/*.csv
+ml_ideation/eis_training_data/*.pkl
+
+# Python Analysis Scripts (local experimentation - not part of webapp)
+python-scripts/fitting-analysis/data/*.csv
+python-scripts/fitting-analysis/data/checkpoints/
+python-scripts/fitting-analysis/outputs/*.png
+python-scripts/fitting-analysis/outputs/*.pdf
+
+# Backup directories
+deleted_files_backup_*/
+
+# macOS files
+.DS_Store
+**/.DS_Store
+
+# Docker files (not needed for this project)
+Dockerfile*
+docker-compose*
+.dockerignore
+.env.docker

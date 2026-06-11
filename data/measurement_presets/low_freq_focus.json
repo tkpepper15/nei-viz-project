@@ -1,0 +1,24 @@
+{
+  "min_freq": 0.001,
+  "max_freq": 100.0,
+  "n_points": 200,
+  "spacing": "log",
+  "measurement_type": "impedance",
+  "complex_format": "rectangular",
+  "precision": "double",
+  "units": {
+    "frequency": "Hz",
+    "impedance": "ohm",
+    "phase": "degrees",
+    "time": "seconds"
+  },
+  "name": "Low Frequency Focus",
+  "description": "Detailed low frequency characterization",
+  "created_by": "system",
+  "version": "1.0",
+  "_metadata": {
+    "file_version": "1.0",
+    "config_type": "measurement",
+    "generated_by": "measurement_config.py"
+  }
+}

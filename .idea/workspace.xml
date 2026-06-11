@@ -1,0 +1,705 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/AI_MODEL_FRONTEND_UPDATE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/CLAUDE.md" beforeDir="false" afterPath="$PROJECT_DIR$/CLAUDE.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/EVOLVED_STRATEGIES_INTEGRATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/FOVEATED_GRID_VISUALIZATION_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/FOVEATED_RENDERING_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/GEOMETRIC_FEATURES_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/MODEL_UPDATE_V7.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/PHYSICS_TRANSFORMER_V2_INTEGRATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/PROJECT_STRUCTURE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/QUICK_START_FOVEATED.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/(landing)/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/(landing)/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/CircuitSimulator.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/DatabaseDiagnostics.tsx.disabled" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/auth/AuthModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/auth/AuthModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/auth/AuthProvider.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/auth/AuthProvider.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/auth/UserProfile.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/auth/UserProfile.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/AIModelTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/AIModelTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/AIModelTab.tsx.backup" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/AIModelTab_old.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/ConstraintExplorer.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/ConstraintExplorer.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/FoveatedExplorationTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/FoveatedExplorationTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/MathDetailsTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/MathDetailsTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/ParameterAnalysisTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/ParameterAnalysisTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/SlimNavbar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/SlimNavbar.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/SpectrumShiftingAnalysis.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/SpectrumShiftingAnalysis.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/VisualizerTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/CenterParameterPanel.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/CenterParameterPanel.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ComputationLimitsControl.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ComputationLimitsControl.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/EditProfileModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/EditProfileModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/EnhancedInput.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/EnhancedInput.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ImportResultsDialog.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ImportResultsDialog.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/OptimizationControls.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/OptimizationControls.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/PerformanceControls.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/PerformanceControls.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ProfileCard.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ProfileCard.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SaveProfileModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SaveProfileModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SavedProfiles.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/SavedProfiles.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ToolboxSidebar.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/ToolboxSidebar.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/controls/VisualizationLimitsControl.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/controls/VisualizationLimitsControl.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/insights/ResnormDisplay.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/insights/ResnormDisplay.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/CircuitModelSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/CircuitModelSection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/ComplexImpedanceSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/ComplexImpedanceSection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/CoreEquationsSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/CoreEquationsSection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/NyquistPlotSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/NyquistPlotSection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/ParameterDisplaySection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/ParameterDisplaySection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/math/ResnormMethodsSection.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/math/ResnormMethodsSection.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/CollapsibleBottomPanel.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/CollapsibleBottomPanel.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/AnalysisTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/AnalysisTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/CircuitConfigurationTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/CircuitConfigurationTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/DiagnosticsTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/DiagnosticsTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ExportTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ExportTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ImpedanceComparisonTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ImpedanceComparisonTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/QuartileAnalysisTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/QuartileAnalysisTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ResnormRangeTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/ResnormRangeTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/TERTECAnalysisTab.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/panels/tabs/TERTECAnalysisTab.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/impedance.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/impedance.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/utils/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/utils/meshComputation.ts" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/CircuitDiagram.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/CircuitDiagram.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/CorrelationMatrixView.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/DerivedParametersDisplay.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/PCALatentSpaceView.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/PentagonGroundTruth.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/PentagonGroundTruth.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/ResidualPlot.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/ResidualPlot.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SolutionManifoldView.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlot3D.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlotWebGL.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/SpiderPlotWebGLEnhanced.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/index.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/circuit-simulator/visualizations/index.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/model-info/ModelInfoButton.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/model-info/ModelInfoButton.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/model-info/ModelInfoModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/model-info/ModelInfoModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/settings/SettingsModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/settings/SettingsModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/components/settings/SimplifiedSettingsModal.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/components/settings/SimplifiedSettingsModal.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/globals.css" beforeDir="false" afterPath="$PROJECT_DIR$/app/globals.css" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/hooks/useAuth.tsx" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/hooks/useEnhancedUserSettings.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useEnhancedUserSettings.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/hooks/useSessionManagement.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useSessionManagement.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/hooks/useSimpleSessionManagement.ts.disabled" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/hooks/useUserSettings.ts" beforeDir="false" afterPath="$PROJECT_DIR$/app/hooks/useUserSettings.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/layout.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/layout.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/page.tsx.old" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/profiles/loading.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/profiles/loading.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/settings/loading.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/settings/loading.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/simulator/loading.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/simulator/loading.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/simulator/math-details/loading.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/simulator/math-details/loading.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/simulator/visualizer/loading.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/simulator/visualizer/loading.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/sweeper/page.tsx" beforeDir="false" afterPath="$PROJECT_DIR$/app/sweeper/page.tsx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/eslint.config.mjs" beforeDir="false" afterPath="$PROJECT_DIR$/eslint.config.mjs" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/circuitConfigService.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/circuitConfigService.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/databaseSetup.ts.disabled" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/ml-data-interface.ts.disabled" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/profilesService.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/profilesService.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/session-database-service.ts.disabled" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/supabase.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/supabase.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/taggedModelsService.ts" beforeDir="false" afterPath="$PROJECT_DIR$/lib/taggedModelsService.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/01_generate_dataset.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/02_train_baseline.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/02_train_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/03_train_physics.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/04_evaluate_models.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/05_analyze_identifiability.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/05_evaluate_static.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/06_visualize_knowledge_gap.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/COMPREHENSIVE_MATHEMATICAL_OUTLINE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/DEGENERACY_QUICKSTART.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/DEGENERACY_RESEARCH_PLAN.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/EPSILON_PARM_README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/GENERATE_DATA_QUICK.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/PARM_README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/PHYSICS_REGULARIZED_V2_README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/START_TRAINING.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/TRAINING_OUTPUT_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/analyze_parm_identifiability.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/ADVANCED_ARCHITECTURE_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/ADVANCED_MDN_OPTIMIZATIONS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/CLEANUP_COMPLETED.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/DETAILED_LOGGING_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/EXPERIMENTAL_DESIGN_ISSUES.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FOUR_MODEL_RESULTS_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FOUR_MODEL_STATUS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FREQUENCY_DEPENDENCE_METHODOLOGY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FREQUENCY_RANDOMIZATION_EXPLAINED.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FREQUENCY_RANGE_FINDINGS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/FREQUENCY_WEIGHTING_EXPLAINED.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/IDENTIFIABILITY_README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/IMPLEMENTATION_COMPLETE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/IMPLEMENTATION_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/IMPROVED_BASELINE_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/MDN_TO_MAE_FLOW.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/ML_PIPELINE_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/NEXT_STEPS_PATTERN_DISCOVERY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/NOISE_ROBUSTNESS_FINDINGS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/OTHER_SYMMETRIES_AND_IMPROVEMENTS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/PATTERN_DISCOVERY_COMPLETE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/PATTERN_DISCOVERY_PHASE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/PATTERN_DISCOVERY_STATUS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/PHYSICS_VALUE_EXPERIMENT.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/PIPELINE_STRUCTURE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/README_PHYSICS_VALUE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/RECOMMENDED_WORKFLOW.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/SAMPLING_BIAS_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/SESSION_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/SIGMA_REGULARIZATION_EXPLAINED.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/STATISTICAL_VALIDATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/SYMMETRY_PROBLEM_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/TAU_ANCHORING_IMPLEMENTATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/TOPOLOGY_FIX_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/TRAINING_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/TRAINING_IMPROVEMENT_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/TRANSFORMER_V2_IMPROVEMENTS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/VISUALIZATION_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/docs/VISUALIZATION_RECOMMENDATIONS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/checkpoint_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/checkpoint_epoch_15.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/checkpoint_epoch_5.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/config.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/global_stats_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/global_stats_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_mae_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_mae_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_nll_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_nll_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_sigma_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/baseline_improved_20251230_110642_d256_L6_mdn2_sig0.05_std_NO_PHYSICS/per_parameter_sigma_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_12.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_14.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_16.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_18.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_20.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_4.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_6.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/checkpoint_epoch_8.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/config.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/improvement_over_baseline.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/learning_cascade_actual_errors.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/learning_progress_absolute.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/loss_components_breakdown.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/loss_components_detailed.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/per_parameter_mae_detailed.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/per_parameter_mae_with_baseline.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/per_parameter_progression.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_log_enc_queries_mdn2_perm_inv_ent0p010_freq_wt/training_log.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/cascade_analysis_20251225_102111_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/coordinate_systems.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/mdn_to_mae_flow_diagram.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/models/phase1_marginal_20251225_180118_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/PHASE2_FAILURE_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/TWO_PHASE_TRAINING_EXPLANATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase1_training_output.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_225932_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231157_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231310_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231407_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231522_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/best_phase2_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/checkpoint_phase2_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/checkpoint_phase2_epoch_2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/checkpoint_phase2_epoch_4.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/checkpoint_phase2_epoch_6.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/checkpoint_phase2_epoch_8.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644/phase2_training_log.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_231644_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_232456_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_232852_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233653_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/best_phase2_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/checkpoint_phase2_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/checkpoint_phase2_epoch_2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/checkpoint_phase2_epoch_4.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/checkpoint_phase2_epoch_6.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/checkpoint_phase2_epoch_8.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/per_parameter_progression.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852/phase2_training_log.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_joint_consistency_20251225_233852_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_output.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/phase2_training.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/run_phase1_training.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/phase2_experiments_20251230/visualize_phase1_per_parameter.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/four_model_comparison/four_model_comparison.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/four_model_comparison/four_model_results.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/four_model_uncertainty/four_model_results_with_ci.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/four_model_uncertainty/four_model_with_uncertainty.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/four_model_uncertainty/training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/freq_dependence/frequency_dependence.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/freq_dependence/frequency_dependence_results.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/freq_dependence/mae_frequency_dependence.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/freq_dependence/resnorm_frequency_dependence.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/noise_robustness/noise_robustness.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/results/noise_robustness/noise_robustness_results.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/calculate_baseline_performance.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/compare_physics_value.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_epoch_progression.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_four_models.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_frequency_ranges.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_noise_robustness.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_with_confidence_intervals.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/evaluate_with_nll.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/plot_improvement_over_baseline.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/plot_learning_cascade.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/plot_loss_components.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/plot_mae_nll_composite.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/train_baseline_improved.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/train_hybrid_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/train_physics_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_comprehensive_learning_dynamics.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_mae_evolution_with_ci.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_mae_vs_baseline.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_mdn_flow.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_normalized_mae_descent.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/scripts/visualize_per_parameter_uncertainty.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/cleanup_phase2.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/run_baseline_high_capacity.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/run_baseline_improved.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/run_baseline_transformer.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/run_improved_training.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/run_physics_transformer.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/archive/shell_scripts/start_physics_api.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/.gitkeep" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/mixed_distribution_v1/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/mixed_distribution_v1/test.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/mixed_distribution_v1/train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/mixed_distribution_v1/val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/physics_constrained_corrected/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/physics_constrained_corrected/test.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/physics_constrained_corrected/train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/data/physics_constrained_corrected/val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/.gitkeep" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/CLEANUP_PLAN.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/DEGENERACY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/KNOWLEDGE_GAP.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/LOSS_DESIGN.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/docs/MATHEMATICAL_VERIFICATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_3d_trajectories.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_comprehensive.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_epsilon_slices.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_parm.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_parm_pentagon_comparison.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/evaluate_parm_vs_classical_ecm.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_12.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_14.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_16.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_18.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_20.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_4.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_6.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/checkpoint_epoch_8.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/global_stats_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/global_stats_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_mae_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_mae_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_nll_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_nll_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_sigma_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/per_parameter_sigma_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/baseline_NO_PHYSICS/training_log.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/deterministic_baseline_20260107_094257/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/deterministic_baseline_20260107_094257/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/deterministic_baseline_20260107_094257/history.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/epsilon_parm_20260107_133327/best_model_phase1.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/epsilon_parm_20260107_133327/best_model_phase2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/epsilon_parm_20260107_133327/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/epsilon_parm_20260107_133327/history.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/identifiable_corrected/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/identifiable_corrected/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/identifiable_corrected/training_history.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/identifiable_v1/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260107_105018/best_model_phase1.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260107_112513/best_model_phase1.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260107_112513/best_model_phase2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260107_112513/training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260107_112513/training_summary.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260108_113146/best_model_phase1.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260108_113146/best_model_phase2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260111_031431/best_model_phase1.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260111_031431/best_model_phase2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260111_031431/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260111_031431/history.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/parm_20260111_031431/training_curves_with_ecm_baseline.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_12.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_14.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_16.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_18.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_2.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_20.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_4.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_6.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/checkpoint_epoch_8.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/config.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/global_stats_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/global_stats_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/improvement_over_baseline_evolution.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/loss_components_progression.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/mae_evolution_per_parameter_with_ci.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/mae_evolution_with_ci.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/mae_vs_baseline_evolution.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/mae_with_confidence_intervals.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/mae_with_confidence_intervals.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/normalized_mae_descent.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/normalized_mae_descent.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_mae_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_mae_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_nll_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_nll_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_sigma_train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_sigma_val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/per_parameter_uncertainty_calibration.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/training_log.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_informed/uncertainty_calibration_stats.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2/checkpoint_epoch_5.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/checkpoint_epoch_10.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/checkpoint_epoch_15.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/checkpoint_epoch_20.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/checkpoint_epoch_5.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/physics_reg_v2_fixed/training_history.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/simple_debug/best_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/simple_debug/final_model.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/models/simple_debug/training_history.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/parm_pentagon_visualization.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/physics_api.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/precompute_deterministic_fits.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/requirements.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/requirements_mlx.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/summary.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/summary_comparison.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_0_3d.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_0_params.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_1_3d.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_1_params.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_2_3d.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/3d_trajectories_20260107_153942/trajectory_2_params.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/TER_manifold.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/correlation_heatmaps_TER.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/correlation_heatmaps_tau_a.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/correlation_heatmaps_tau_b.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/tau_manifold_tau_a.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_analysis/tau_manifold_tau_b.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_forward/degeneracy_manifold_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_forward/manifold_params_TER100.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/degeneracy_forward/metadata_TER100.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/ecm_vs_parm_test/ecm_vs_parm_comparison.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/ecm_vs_parm_test/error_progression_charts.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/ecm_vs_parm_test/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/epsilon_slices_20260107_145905/clip_fraction_vs_epsilon.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/epsilon_slices_20260107_145905/epsilon_parameter_trajectories.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/epsilon_slices_20260107_145905/epsilon_sensitivity_ranking.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/epsilon_slices_20260107_145905/impedance_vs_epsilon.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/epsilon_slices_20260107_145905/summary.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/identifiability_analysis/degeneracy_vs_conditioning.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/identifiability_analysis/degenerate_samples.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/identifiability_analysis/identifiability_analysis.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/identifiability_analysis/parameter_correlations.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/identifiability_analysis/singular_value_spectra.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/COMPLETE_ANALYSIS_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/FIGURE_2_CAPTION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/GENERALIZATION_TEST_GUIDE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/OPTIMIZATION_LANDSCAPE_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/VISUALIZATION_IMPROVEMENTS_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/comparison_results_TER100.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/delta_error_analysis_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/delta_error_spatial_map_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/frequency_error_heatmap_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/impedance_3D_trajectory_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/manifold_collapse_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/nyquist_manifold_overlay_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/optimization_landscape_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/parameter_error_pentagons_3D_TER100.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/inverse_comparison/summary_TER100.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/knowledge_gap_analysis/fisher_vs_learned.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/knowledge_gap_analysis/identifiability_hierarchy.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/knowledge_gap_analysis/knowledge_gap_summary.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/knowledge_gap_analysis/manifold_uncertainty_alignment.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_154827/parm_comparison.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_154920/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_154920/parm_comparison.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_154920/parm_parameter_error_pentagons_3D.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_160339/error_progression_charts.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_160339/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_160339/parm_comparison.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_160339/parm_comparison_v2.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_pentagon_comparison_20260107_160339/parm_parameter_error_pentagons_3D.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_training_curves.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/parm_training_summary.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/physics_value_analysis.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/physics_value_comparison.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/COMPLETE_RESULTS_SUMMARY.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/LEARNING_ANALYSIS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/WHY_DETERMINISTIC_WINS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/distribution_shift_summary.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/manifold_vs_random_pentagon_comparison.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/parameter_error_pentagons_3D_random.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/pentagon_error_summary.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/random_circuits_comparison.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/train_test_distribution_comparison.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/results/random_circuits/train_test_distribution_stats.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/run_3d_trajectory_comparison.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/run_complete_pipeline.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/run_epsilon_parm_pipeline.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/run_parm_pentagon_visualization.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/run_parm_pipeline.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/baselines/deterministic_fit.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/data/randles_circuit_simulator.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/advanced_physics_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/deterministic_impedance_model.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/epsilon_parm_loss.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/epsilon_parm_model.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/gradient_orthogonalization.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/hybrid_physics_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/identifiable_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/mdn_loss.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/parm_loss.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/parm_model.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/physics_regularized_transformer_v2.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/models/physics_transformer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/pipeline/__init__.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/pipeline/gpf.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/pipeline/ptg.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/confidence_intervals.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/detailed_logging.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/frequency_weighting.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/physics_utils.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/sensitivity_computation.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/soft_clamp.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/ter_tec_from_spectrum.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/src/utils/uncertainty_quantification.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/start_api.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/test_identifiable_model.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/test_model_fixes.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/analyze_degeneracy_forward.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/analyze_optimization_landscape.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/analyze_parameter_degeneracy.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/baseline_random_comparison.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/compare_inverse_models_delta.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/compare_manifold_vs_random_pentagons.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/compare_train_test_distributions.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/generate_mixed_distribution_dataset.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/test_random_circuits.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/visualize_impedance_space_manifold.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/tools/visualize_parameter_error_polygons.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_deterministic_baseline.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_epsilon_parm.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_identifiable.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_identifiable_corrected.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_identifiable_v1.log" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_parm.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_physics_regularized_v2.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/train_simple_supervised.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_comprehensive_results.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_error_progression.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_parm_pentagon_comparison_v2.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_parm_pentagons.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_parm_training_curves.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_parm_training_summary.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ml-pipeline/visualize_parm_training_with_ecm_baseline.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/package-lock.json" beforeDir="false" afterPath="$PROJECT_DIR$/package-lock.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/package.json" beforeDir="false" afterPath="$PROJECT_DIR$/package.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/circuit_api.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/circuit_computation.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/config_serializer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/metadata.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/test.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/test.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/train.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/train.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/val.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/cgan_dataset/val.pt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_1_standard_fit/distribution_report.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_1_standard_fit/parameter_distribution_radar.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_1_standard_fit/results.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_1_standard_fit/results.pkl" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_1_standard_fit/summary.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/distribution_report.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/parameter_distribution_radar.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/parameter_distribution_violin.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/parameter_histograms.png" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/results.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/results.pkl" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/data/fitting_results/example_3_fast_fit/summary.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/python-scripts/frequency_serializer.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/scripts/run_foveated_exploration.sh" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tailwind.config.ts" beforeDir="false" afterPath="$PROJECT_DIR$/tailwind.config.ts" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tsconfig.json" beforeDir="false" afterPath="$PROJECT_DIR$/tsconfig.json" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;tkpepper15&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/tkpepper15/nei-viz-project.git&quot;,
+    &quot;accountId&quot;: &quot;cf1adec6-df11-4003-8a6e-c178da6539df&quot;
+  }
+}</component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="ProjectErrors" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 0
+}</component>
+  <component name="ProjectId" id="2zQ7kWHdFnLsXKPZWysyk42rZlg" />
+  <component name="ProjectLevelVcsManager">
+    <ConfirmationsSetting value="1" id="Add" />
+  </component>
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python tests.Python tests in test_radar_plot.py.executor&quot;: &quot;Run&quot;,
+    &quot;Python.circuit_computation.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config_code.executor&quot;: &quot;Run&quot;,
+    &quot;Python.config_serializer.executor&quot;: &quot;Run&quot;,
+    &quot;Python.hierarchical_fitting.executor&quot;: &quot;Run&quot;,
+    &quot;Python.hierarchical_fitting_penalized.executor&quot;: &quot;Run&quot;,
+    &quot;Python.inference.executor&quot;: &quot;Run&quot;,
+    &quot;Python.parameter_fitting.executor&quot;: &quot;Run&quot;,
+    &quot;Python.utils.executor&quot;: &quot;Run&quot;,
+    &quot;Python.visualize_mdn_solutions.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/tejjaskaul/nei-viz-project&quot;,
+    &quot;run.code.analysis.last.selected.profile&quot;: &quot;aDefault&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;reference.settings.ide.settings.notifications&quot;
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/docs" />
+      <recent name="$PROJECT_DIR$/ml-pipeline" />
+      <recent name="$PROJECT_DIR$/ml-pipeline/data" />
+      <recent name="$PROJECT_DIR$/ml-pipeline/checkpoints/v2_5param_pending" />
+      <recent name="$PROJECT_DIR$/docs/reference" />
+    </key>
+  </component>
+  <component name="RunManager" selected="Python.visualize_mdn_solutions">
+    <configuration name="utils" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="nei-viz-project" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/python-scripts/fitting-analysis" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/python-scripts/fitting-analysis/utils.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="visualize_mdn_solutions" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="nei-viz-project" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/ml-pipeline/src" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/ml-pipeline/src/visualize_mdn_solutions.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.visualize_mdn_solutions" />
+        <item itemvalue="Python.utils" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-1fd13f53cab9-64d779b69b7a-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.29188.40" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="81b73922-0479-4fd2-8b83-4b20fd4ff23e" name="Changes" comment="" />
+      <created>1751651586181</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1751651586181</updated>
+    </task>
+    <servers />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
+</project>

@@ -1,0 +1,24 @@
+{
+  "min_freq": 10.0,
+  "max_freq": 1000.0,
+  "n_points": 100,
+  "spacing": "linear",
+  "measurement_type": "impedance",
+  "complex_format": "rectangular",
+  "precision": "double",
+  "units": {
+    "frequency": "Hz",
+    "impedance": "ohm",
+    "phase": "degrees",
+    "time": "seconds"
+  },
+  "name": "Linear Frequency Sweep",
+  "description": "Linear spacing for specific applications",
+  "created_by": "system",
+  "version": "1.0",
+  "_metadata": {
+    "file_version": "1.0",
+    "config_type": "measurement",
+    "generated_by": "measurement_config.py"
+  }
+}

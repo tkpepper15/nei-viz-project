@@ -1,0 +1,8 @@
+cd ml-pipeline/
+python physics_transformer_api.py
+
+cd ml-pipeline/openevolve
+python run_evolution.py
+npm run dev
+
+
