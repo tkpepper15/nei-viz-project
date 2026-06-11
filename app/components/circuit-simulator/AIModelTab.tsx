@@ -202,6 +202,8 @@ interface TimeSeriesResult {
   // FFBS posterior summary + mechanism analysis (populated at done event)
   posteriorSummary: Record<string, PosteriorParamSummary> | null;
   mechanism: Mechanism | null;
+  // Which pipeline stages were active when this result was computed
+  activePipeline?: { useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean };
 }
 
 // ---- Cold ECM baseline path (from done event) ----
@@ -1219,6 +1221,7 @@ export const AIModelTab: React.FC<AIModelTabProps> = ({ groundTruthParams, minFr
           mdnPredictions: Object.fromEntries(PARAM_KEYS.map(k => [k, { mean: [...acc.mdnPredictions[k].mean], q25: [...acc.mdnPredictions[k].q25], q75: [...acc.mdnPredictions[k].q75] }])) as Record<ParameterKey, DerivedSeries>,
           mdnEntropy: [...acc.mdnEntropy], kalman: acc.kalman, changepoints: [...acc.changepoints], admissibility: acc.admissibility, relabelingFrac: [...acc.relabelingFrac],
           posteriorSummary: acc.posteriorSummary, mechanism: acc.mechanism,
+          activePipeline: { useTransformer: cfg2.useTransformer, useRBPF: cfg2.useRBPF, useKalman: cfg2.useKalman, useEcm: cfg2.useEcm },
         });
         const response = await fetch(`${ML_API_BASE}/mc_temporal_analysis_stream`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1876,6 +1879,15 @@ function InlineSparkline({ values, color }: { values: number[]; color: string })
 
 // ---- Pipeline mini-graph ----
 
+// Shared stage colors — referenced by both the pipeline mini-graph and the trajectory chart legend
+const STAGE_COLOR = {
+  mdn:    '#56B4E9',
+  rbpf:   '#6469a0',
+  rts:    '#009E73',
+  ecm:    '#E69F00',
+  output: '#c4a040',
+} as const;
+
 interface PipelinePos { x: number; y: number; }
 
 interface PipeStage {
@@ -1887,12 +1899,12 @@ interface PipeStage {
 }
 
 const PIPE_STAGES: PipeStage[] = [
-  { id: 'input',  short: 'Z(ω,t)',  sub: 'input',        color: '#454558', cfgKey: null            },
-  { id: 'mdn',    short: 'MDN',     sub: 'transformer',  color: '#56B4E9', cfgKey: 'useTransformer' },
-  { id: 'rbpf',   short: 'RBPF',    sub: 'particle',     color: '#6469a0', cfgKey: 'useRBPF'        },
-  { id: 'rts',    short: 'RTS',     sub: 'smoother',     color: '#009E73', cfgKey: 'useKalman'      },
-  { id: 'ecm',    short: 'ECM',     sub: 'baseline',     color: '#E69F00', cfgKey: 'useEcm'         },
-  { id: 'output', short: 'θ̂(t)',    sub: 'ensemble',     color: '#c4a040', cfgKey: null             },
+  { id: 'input',  short: 'Z(ω,t)',  sub: 'input',        color: '#454558',          cfgKey: null            },
+  { id: 'mdn',    short: 'MDN',     sub: 'transformer',  color: STAGE_COLOR.mdn,    cfgKey: 'useTransformer' },
+  { id: 'rbpf',   short: 'RBPF',    sub: 'particle',     color: STAGE_COLOR.rbpf,   cfgKey: 'useRBPF'        },
+  { id: 'rts',    short: 'RTS',     sub: 'smoother',     color: STAGE_COLOR.rts,    cfgKey: 'useKalman'      },
+  { id: 'ecm',    short: 'ECM',     sub: 'baseline',     color: STAGE_COLOR.ecm,    cfgKey: 'useEcm'         },
+  { id: 'output', short: 'θ̂(t)',    sub: 'ensemble',     color: STAGE_COLOR.output, cfgKey: null             },
 ];
 
 const PIPE_W = 54;
@@ -2797,6 +2809,7 @@ function VizTrajectoryBody({ node, inputData, inputData2, onConfigChange }: Node
                 ecmResnorm={activeResult?.ecmResnorm}
                 colors={HYP_COLORS}
                 kalman={activeResult?.kalman}
+                activePipeline={activeResult?.activePipeline}
                 view={cfg.view}
                 useLogScale={useLogScale}
                 chartHeight={node.height - NODE_CHROME.headerH - NODE_CHROME.ctrlBarH - NODE_CHROME.chartPadH}/>
@@ -2912,13 +2925,36 @@ interface HypothesisTrajectoryChartProps {
   chartHeight?: number;
   view?: TrajView;
   useLogScale: boolean;
+  activePipeline?: { useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean };
 }
 
+// Derive stage color from trajectory label so chart colors stay in sync with pipeline nodes
+function stageColorForTraj(label: string, fallback: string): string {
+  const l = label.toLowerCase();
+  if (l.includes('smooth') || l.includes('fitted')) return STAGE_COLOR.rts;
+  if (l.includes('rbpf') || l.includes('particle') || l.includes('mdn/rbpf')) return STAGE_COLOR.rbpf;
+  if (l.includes('mdn')) return STAGE_COLOR.mdn;
+  return fallback;
+}
 
-function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTruth, timeMin, atpLo, atpHi, ecmResnorm, colors = HYP_COLORS, kalman, chartHeight, view = 'trajectory', useLogScale }: HypothesisTrajectoryChartProps) {
+function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTruth, timeMin, atpLo, atpHi, ecmResnorm, colors = HYP_COLORS, kalman, chartHeight, view = 'trajectory', useLogScale, activePipeline }: HypothesisTrajectoryChartProps) {
   const localH = chartHeight ?? H_TRAJ;
-  const CHART_ECM_COLOR = '#4b5563';
+  const CHART_ECM_COLOR = STAGE_COLOR.ecm;
   const CHART_GT_COLOR  = '#4ade80';
+
+  // Filter trajectories whose stage is toggled off in the pipeline
+  const visTrajectories = React.useMemo(() => {
+    if (!activePipeline) return trajectories;
+    return trajectories.filter(traj => {
+      const l = traj.label.toLowerCase();
+      if ((l.includes('smooth') || l.includes('fitted')) && !activePipeline.useKalman) return false;
+      if ((l.includes('rbpf') || l.includes('particle')) && !activePipeline.useRBPF) return false;
+      if (l.includes('mdn') && !l.includes('rbpf') && !activePipeline.useTransformer) return false;
+      return true;
+    });
+  }, [trajectories, activePipeline]);
+
+  const showEcmPath = ecmColdPath.length > 0 && (activePipeline?.useEcm !== false);
   // hiddenLines: set of keys ('hyp0'..'hyp3', 'ecm', 'gt') that are toggled off
   const [hiddenLines, setHiddenLines] = React.useState<ReadonlySet<string>>(new Set<string>());
   const [hoverIdx, setHoverIdx] = React.useState<number | null>(null);
@@ -2929,22 +2965,22 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
     return next;
   });
 
-  if (trajectories.length === 0 && ecmColdPath.length === 0) return null;
+  if (visTrajectories.length === 0 && !showEcmPath) return null;
 
   const pw = W_TRAJ - MG_TRAJ.left - MG_TRAJ.right;
   const ph = localH - MG_TRAJ.top - MG_TRAJ.bottom;
 
   // Y-range from trajectory medians only — IQR bounds excluded to prevent axis stretch
   const trajVals: number[] = [];
-  for (const traj of trajectories) {
+  for (const traj of visTrajectories) {
     if (hiddenLines.has(`hyp${traj.hypothesis}`)) continue;
     for (const pt of traj.path) {
       const v = trajDisplayValue(param, extractSmoothedValue(param, pt));
       if (isFinite(v) && v > 0) trajVals.push(v);
     }
   }
-  // Include Fitted (ECM) cold path values in range when visible
-  if (!hiddenLines.has('ecm')) {
+  // Include ECM cold path values in range when visible
+  if (showEcmPath && !hiddenLines.has('ecm')) {
     for (const pt of ecmColdPath) {
       const raw = extractEcmValue(param, pt);
       const v = trajDisplayValue(param, raw);
@@ -3011,10 +3047,17 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
 
     const sharedLegend = (
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-3 pt-2 border-t border-neutral-900">
-        {trajectories.map(traj => {
+        {visTrajectories.map(traj => {
           const lineKey = `hyp${traj.hypothesis}`;
           const isVis = !hiddenLines.has(lineKey);
-          const color = colors[traj.hypothesis % colors.length];
+          const color = stageColorForTraj(traj.label, stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]));
+          const shortLabel = (() => {
+            const l = traj.label.toLowerCase();
+            if (l.includes('smooth') || l.includes('fitted')) return 'RTS (smoothed)';
+            if (l.includes('rbpf') || l.includes('particle') || l.includes('mdn/rbpf')) return 'RBPF';
+            if (l.includes('mdn')) return 'MDN';
+            return traj.label;
+          })();
           return (
             <button key={traj.hypothesis} onClick={() => toggleLine(lineKey)}
               className="flex items-center gap-1.5 select-none focus:outline-none" style={{ opacity: isVis ? 1 : 0.35 }}>
@@ -3024,13 +3067,13 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
                   strokeWidth={traj.rank === 0 ? 2.2 : 1.4} strokeDasharray={traj.rank !== 0 ? '4,2' : undefined} />
               </svg>
               <span className="text-[9.5px] text-neutral-400">
-                {traj.label.replace(/ECM/g, 'Fitted')}
+                {shortLabel}
                 <span className="ml-1 font-semibold" style={{ color }}>{(traj.probability * 100).toFixed(0)}%</span>
               </span>
             </button>
           );
         })}
-        {ecmColdPath.length > 0 && (() => {
+        {showEcmPath && (() => {
           const isVis = !hiddenLines.has('ecm');
           return (
             <button onClick={() => toggleLine('ecm')} className="flex items-center gap-1.5 select-none focus:outline-none" style={{ opacity: isVis ? 1 : 0.35 }}>
@@ -3038,7 +3081,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
               <svg width="20" height="7" style={{ flexShrink: 0 }}>
                 <line x1="0" y1="3.5" x2="20" y2="3.5" stroke={CHART_ECM_COLOR} strokeWidth={1.4} strokeDasharray="5,3" opacity={0.8} />
               </svg>
-              <span className="text-[9.5px] text-neutral-500">Fitted</span>
+              <span className="text-[9.5px]" style={{ color: CHART_ECM_COLOR }}>ECM baseline</span>
             </button>
           );
         })()}
@@ -3055,7 +3098,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         );
       }
       const errRows: Array<{ hyp: number; rank: number; prob: number; color: string; pts: Array<[number,number]> }> = [];
-      for (const traj of trajectories) {
+      for (const traj of visTrajectories) {
         if (hiddenLines.has(`hyp${traj.hypothesis}`)) continue;
         const pts: Array<[number,number]> = [];
         for (let i = 0; i < traj.path.length; i++) {
@@ -3064,10 +3107,10 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           if (rbpf > 0 && gt > 0 && isFinite(rbpf) && isFinite(gt))
             pts.push([traj.path[i].time_min, Math.abs(rbpf - gt) / gt * 100]);
         }
-        errRows.push({ hyp: traj.hypothesis, rank: traj.rank, prob: traj.probability, color: colors[traj.hypothesis % colors.length], pts });
+        errRows.push({ hyp: traj.hypothesis, rank: traj.rank, prob: traj.probability, color: stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]), pts });
       }
       const ecmErrPts: Array<[number,number]> = [];
-      if (!hiddenLines.has('ecm')) {
+      if (showEcmPath && !hiddenLines.has('ecm')) {
         for (let i = 0; i < ecmColdPath.length; i++) {
           const v = trajDisplayValue(param, extractEcmValue(param, ecmColdPath[i]));
           const gt = gtVals[i];
@@ -3117,10 +3160,10 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
 
     // ---- Derivative view ----
     if (view === 'derivative') {
-      if (ecmColdPath.length < 2) {
+      if (!showEcmPath || ecmColdPath.length < 2) {
         return (
           <div className="flex items-center justify-center" style={{ height: localH }}>
-            <p className="text-neutral-700 text-xs">Enable Fitted (ECM) to show derivative residual</p>
+            <p className="text-neutral-700 text-xs">Enable ECM baseline stage to show derivative residual</p>
           </div>
         );
       }
@@ -3152,7 +3195,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         }
       }
       const allRes: number[] = [];
-      for (const traj of trajectories) {
+      for (const traj of visTrajectories) {
         if (hiddenLines.has(`hyp${traj.hypothesis}`)) continue;
         for (let i = 0; i < traj.path.length; i++) {
           const pt = traj.path[i];
@@ -3197,9 +3240,9 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
                 <line key={r} x1={MG_TRAJ.left} y1={syD(r)} x2={MG_TRAJ.left + pw} y2={syD(r)}
                   stroke="#374151" strokeWidth={0.5} strokeDasharray="3,3" />
               ))}
-              {trajectories.map(traj => {
+              {visTrajectories.map(traj => {
                 if (hiddenLines.has(`hyp${traj.hypothesis}`)) return null;
-                const color = colors[traj.hypothesis % colors.length];
+                const color = stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]);
                 const pts = traj.path.map((pt, i) => {
                   const v = trajDisplayValue(param, extractSmoothedValue(param, pt));
                   if (!(v > 0)) return null;
@@ -3248,7 +3291,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
 
     // ---- Uncertainty (IQR spread) view ----
     const iqrRows: Array<{ hyp: number; rank: number; prob: number; color: string; pts: Array<[number,number]> }> = [];
-    for (const traj of trajectories) {
+    for (const traj of visTrajectories) {
       if (hiddenLines.has(`hyp${traj.hypothesis}`)) continue;
       const pts: Array<[number,number]> = [];
       for (const pt of traj.path) {
@@ -3259,7 +3302,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           if (isFinite(w) && w > 0) pts.push([pt.time_min, w]);
         }
       }
-      iqrRows.push({ hyp: traj.hypothesis, rank: traj.rank, prob: traj.probability, color: colors[traj.hypothesis % colors.length], pts });
+      iqrRows.push({ hyp: traj.hypothesis, rank: traj.rank, prob: traj.probability, color: stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]), pts });
     }
     const allWidths = iqrRows.flatMap(d => d.pts.map(p => p[1]));
     const iqrMax = allWidths.length > 0 ? Math.max(...allWidths) * 1.15 : 1;
@@ -3473,19 +3516,19 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         const unit = TRAJ_PARAM_LABELS[param].match(/\(([^)]+)\)/)?.[1] ?? '';
         const rows: { label: string; color: string; val: number | null }[] = [];
         // RBPF trajectories
-        for (const traj of trajectories) {
+        for (const traj of visTrajectories) {
           if (hiddenLines.has(`hyp${traj.hypothesis}`)) continue;
           const pt = traj.path[hoverIdx];
           if (!pt) continue;
           const raw = extractSmoothedValue(param, pt);
           const v = trajDisplayValue(param, raw);
-          rows.push({ label: traj.label.replace(/ECM/g, 'Fitted'), color: colors[traj.hypothesis % colors.length], val: isFinite(v) && v > 0 ? v : null });
+          rows.push({ label: traj.label.replace(/ECM/g, 'Fitted'), color: stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]), val: isFinite(v) && v > 0 ? v : null });
         }
         // Baseline
-        if (!hiddenLines.has('ecm') && ecmColdPath[hoverIdx]) {
+        if (showEcmPath && !hiddenLines.has('ecm') && ecmColdPath[hoverIdx]) {
           const raw = extractEcmValue(param, ecmColdPath[hoverIdx]);
           const v = trajDisplayValue(param, raw);
-          rows.push({ label: 'Fitted', color: CHART_ECM_COLOR, val: isFinite(v) && v > 0 ? v : null });
+          rows.push({ label: 'ECM', color: CHART_ECM_COLOR, val: isFinite(v) && v > 0 ? v : null });
         }
         // GT
         if (gtVals && !hiddenLines.has('gt')) {
@@ -3587,7 +3630,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         )}
 
         {/* ECM: probabilistic band + median line */}
-        {ecmDisplayPts.length > 0 && !hiddenLines.has('ecm') && (
+        {showEcmPath && ecmDisplayPts.length > 0 && !hiddenLines.has('ecm') && (
           <g>
             {/* Uncertainty band (width ∝ ecmResnorm) */}
             <polygon
@@ -3606,11 +3649,11 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         )}
 
         {/* Per-hypothesis: envelope band + median line + per-point distribution markers */}
-        {trajectories.map((traj) => {
+        {visTrajectories.map((traj) => {
           const lineKey = `hyp${traj.hypothesis}`;
           if (hiddenLines.has(lineKey)) return null;
 
-          const color = colors[traj.hypothesis % colors.length];
+          const color = stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]);
           const baseOpacity = Math.max(0.35, traj.probability);
           const opacity = baseOpacity;
           const strokeW = traj.rank === 0 ? 1.8 : 1.1;
@@ -3713,13 +3756,13 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
               <line x1={hx} y1={MG_TRAJ.top} x2={hx} y2={MG_TRAJ.top + ph}
                 stroke="#6b7280" strokeWidth={0.8} opacity={0.5} strokeDasharray="3,2" />
               {/* Trajectory dots */}
-              {trajectories.map(traj => {
+              {visTrajectories.map(traj => {
                 if (hiddenLines.has(`hyp${traj.hypothesis}`)) return null;
                 const pt = traj.path[hoverIdx];
                 if (!pt) return null;
                 const v = trajDisplayValue(param, extractSmoothedValue(param, pt));
                 if (!(v > 0)) return null;
-                const color = colors[traj.hypothesis % colors.length];
+                const color = stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]);
                 return (
                   <circle key={traj.hypothesis}
                     cx={hx} cy={syClip(v)} r={4}
@@ -3727,7 +3770,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
                 );
               })}
               {/* ECM dot */}
-              {!hiddenLines.has('ecm') && ecmColdPath[hoverIdx] && (() => {
+              {showEcmPath && !hiddenLines.has('ecm') && ecmColdPath[hoverIdx] && (() => {
                 const v = trajDisplayValue(param, extractEcmValue(param, ecmColdPath[hoverIdx]));
                 if (!(v > 0)) return null;
                 return <circle cx={hx} cy={syClip(v)} r={3.5} fill={CHART_ECM_COLOR} stroke="none" opacity={0.9} />;
@@ -3785,10 +3828,10 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
 
       {/* Checkbox legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pb-3 pt-2">
-        {trajectories.map(traj => {
+        {visTrajectories.map(traj => {
           const lineKey = `hyp${traj.hypothesis}`;
           const isVisible = !hiddenLines.has(lineKey);
-          const color = colors[traj.hypothesis % colors.length];
+          const color = stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]);
           return (
             <button
               key={traj.hypothesis}
@@ -3821,7 +3864,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         })}
 
         {/* ECM checkbox */}
-        {ecmDisplayPts.length > 0 && (() => {
+        {showEcmPath && ecmDisplayPts.length > 0 && (() => {
           const isVisible = !hiddenLines.has('ecm');
           return (
             <button
