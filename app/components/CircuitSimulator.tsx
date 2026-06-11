@@ -34,7 +34,7 @@ import { AuthModal } from './auth/AuthModal';
 import { useAuth } from './auth/AuthProvider';
 import { SlimNavbar } from './circuit-simulator/SlimNavbar';
 import { ModelInfoModal } from './model-info/ModelInfoModal';
-import { PILL_BASE, DIVIDER, ICON_BTN, MONO_VALUE, LABEL_BTN_DISABLED, LABEL_BTN_ACTIVE, LABEL_BTN_INACTIVE, ICON } from './circuit-simulator/ui/tokens';
+import { PILL_BASE, DIVIDER, ICON_BTN, MONO_VALUE, LABEL_BTN_DISABLED, ICON } from './circuit-simulator/ui/tokens';
 
 // Remove empty interface and replace with type
 type CircuitSimulatorProps = Record<string, never>;

@@ -686,7 +686,7 @@ function saveGraph(nodes: GraphNode[], edges: GraphEdge[], nextId: number) {
 // ---- Compare layouts — source-data node groups (synthetic mode) ----
 
 
-export const AIModelTab: React.FC<AIModelTabProps> = ({ groundTruthParams, minFreq, maxFreq, numPoints, onZoomChange, zoomActionsRef }) => {
+export const AIModelTab: React.FC<AIModelTabProps> = ({ groundTruthParams, minFreq: _minFreq, maxFreq: _maxFreq, numPoints: _numPoints, onZoomChange, zoomActionsRef }) => {
   const [nodes, setNodes] = useState<GraphNode[]>([]);
   const [edges, setEdges] = useState<GraphEdge[]>([]);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
@@ -1540,22 +1540,6 @@ const DATA_PARAM_LABELS: Record<string, string> = {
   R1: 'R1', R2: 'R2', C1: 'C1',
 };
 
-function MiniSparkline({ label, values, color }: { label: string; values: number[]; color: string }) {
-  if (values.length < 2) return null;
-  const W = 80; const H = 12;
-  const min = Math.min(...values); const max = Math.max(...values);
-  const range = max - min || 1;
-  const toY = (v: number) => H - 1 - ((v - min) / range) * (H - 2);
-  const pts = values.map((v, i) => `${((i / (values.length - 1)) * W).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-[7px] font-mono w-8 flex-shrink-0 text-right" style={{ color }}>{label}</span>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-1 overflow-visible">
-        <polyline points={pts} fill="none" stroke={color} strokeWidth="1" strokeLinejoin="round" opacity="0.85"/>
-      </svg>
-    </div>
-  );
-}
 
 function DataPreview({ output }: { output: Extract<NodeOutput, { kind: 'impedance-series' }> }) {
   const T = output.sequences.length;
@@ -1753,39 +1737,6 @@ function SourceDataBody({ node, realSamples, isLoadingSamples, sampleLoadError, 
 }
 
 
-// ---- Sparkline for per-timepoint diagnostics ----
-function Sparkline({ values, color, label, threshold }: { values: number[]; color: string; label: string; threshold?: number }) {
-  if (values.length < 2) return null;
-  const W = 100; const H = 18;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const step = W / (values.length - 1);
-  const toY = (v: number) => H - ((v - min) / range) * (H - 2) - 1;
-  const pts = values.map((v, i) => `${(i * step).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
-  const first = values[0].toFixed(1);
-  const last = values[values.length - 1].toFixed(1);
-  const threshY = threshold !== undefined ? toY(threshold) : null;
-  return (
-    <div className="flex items-center gap-1.5 w-full">
-      <span className="text-[7px] font-mono text-[#3a3a45] flex-shrink-0 w-12 truncate">{label}</span>
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="flex-shrink-0 overflow-visible">
-        {threshY !== null && threshY >= 0 && threshY <= H && (
-          <line x1="0" y1={threshY.toFixed(1)} x2={W} y2={threshY.toFixed(1)}
-            stroke="#3a3a45" strokeWidth="0.8" strokeDasharray="3,2" opacity="0.6"/>
-        )}
-        <polyline points={pts} fill="none" stroke={color} strokeWidth="1" strokeLinejoin="round" opacity="0.7"/>
-        <circle cx={(0).toString()} cy={toY(values[0]).toFixed(1)} r="1.5" fill={color} opacity="0.5"/>
-        <circle cx={W.toString()} cy={toY(values[values.length-1]).toFixed(1)} r="1.5" fill={color} opacity="0.8"/>
-      </svg>
-      <div className="flex gap-1 text-[7px] font-mono text-[#3a3a45] tabular-nums flex-shrink-0">
-        <span>{first}</span>
-        <span className="text-[#2a2a33]">→</span>
-        <span>{last}</span>
-      </div>
-    </div>
-  );
-}
 
 const KALMAN_STATE_PARAMS: Array<{
   idx: number; label: string; unit: string; toDisplay: (linear: number) => number;
@@ -1820,45 +1771,6 @@ function arrayMean(arr: number[]): number {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
-function PipelineStep({ label, desc, enabled, onToggle, badge, diag }: {
-  label: string; desc: string; enabled: boolean; onToggle: () => void; badge?: string; diag?: React.ReactNode;
-}) {
-  return (
-    <div className={`rounded border transition-colors duration-150 ${enabled ? 'border-[#2a2a33] bg-[#131316]' : 'border-[#1e1e24]/50 opacity-35'}`}>
-      <div className="flex items-center gap-2 px-2.5 py-1.5">
-        <button onClick={onToggle}
-          className={`w-3 h-3 rounded flex-shrink-0 border flex items-center justify-center transition-colors duration-100 focus:outline-none ${enabled ? 'bg-[#c4a040] border-[#9a7e35]' : 'bg-[#0d0d0f] border-[#1e1e24]'}`}>
-          {enabled && <svg className="w-2 h-2" viewBox="0 0 10 10" fill="none" stroke="#1a1a1a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1.5,5.5 4,8 8.5,2"/></svg>}
-        </button>
-        <span className="text-[10px] text-[#dddde2] flex-1">{label}</span>
-        {badge && <span className="text-[9px] text-[#454549] font-mono tabular-nums">{badge}</span>}
-      </div>
-      <div className="px-2.5 pb-1 text-[9px] text-[#454549] font-mono">{desc}</div>
-      {diag && <div className="px-2.5 pb-1.5">{diag}</div>}
-    </div>
-  );
-}
-
-const PARAM_MAE_LABELS: Record<string, string> = {
-  tau_big: 'τ_b', tau_small: 'τ_a', TER: 'TER', TEC: 'TEC', Rsh: 'Rsh',
-};
-
-function fmtStateVal(v: number): string {
-  if (v >= 100) return v.toFixed(0);
-  if (v >= 10)  return v.toFixed(1);
-  return v.toFixed(2);
-}
-
-function trendDir(values: number[]): 'rising' | 'falling' | 'stable' {
-  if (values.length < 2) return 'stable';
-  const first = values[0], last = values[values.length - 1];
-  if (last > first * 1.05) return 'rising';
-  if (last < first / 1.05) return 'falling';
-  return 'stable';
-}
-
-const TREND_ARROW  = { rising: '↗', falling: '↘', stable: '→' } as const;
-const TREND_COLOR  = { rising: '#009E73', falling: '#CC79A7', stable: '#3d3d48' } as const;
 
 const SECTION_LABEL  = 'text-[11px] font-mono font-medium text-[#6b6b76] tracking-[0.1em] uppercase';
 const NODE_DIVIDER   = 'h-px bg-[#1a1a22] my-3';
@@ -3783,7 +3695,6 @@ function VizDiagnosticsBody({ node, inputData, onConfigChange }: NodeBodyProps) 
                 const sy = (v: number) => MG.top + (1 - Math.min(Math.max(v, 0), 1)) * pH;
                 const pts = vals.map((v, i) => `${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ');
                 const areaBot = 50 - MG.bottom;
-                const area = `M${sx(0).toFixed(1)},${sy(vals[0]).toFixed(1)} ${pts.slice(pts.indexOf(',') + 1 + pts.indexOf(' '))} L${sx(vals.length-1).toFixed(1)},${areaBot} L${sx(0).toFixed(1)},${areaBot} Z`;
                 return (
                   <>
                     <polygon points={`${sx(0).toFixed(1)},${sy(vals[0]).toFixed(1)} ${vals.map((v,i)=>`${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ')} ${sx(vals.length-1).toFixed(1)},${areaBot} ${sx(0).toFixed(1)},${areaBot}`}
@@ -4022,7 +3933,7 @@ function VizDiagnosticsBody({ node, inputData, onConfigChange }: NodeBodyProps) 
 
 
 // ---- ObservabilityBody ----
-function ObservabilityBody({ node, inputData, onRun, onStop }: NodeBodyProps) {
+function ObservabilityBody({ node: _node, inputData, onRun: _onRun, onStop: _onStop }: NodeBodyProps) {
   const [obsResult, setObsResult] = React.useState<ObservabilityResult | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -4364,7 +4275,7 @@ function SpiderTornadoCanvas({ models, axisConfig, showVertGrid, annotations, ti
       ctx.beginPath();
       for (let j = 0; j <= 5; j++) {
         const p = proj(Math.cos(PENTA_ANGLES[j % 5]) * r, Math.sin(PENTA_ANGLES[j % 5]) * r, 0);
-        j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+        if (j === 0) { ctx.moveTo(p.sx, p.sy); } else { ctx.lineTo(p.sx, p.sy); }
       }
       ctx.stroke();
     }
@@ -4404,7 +4315,7 @@ function SpiderTornadoCanvas({ models, axisConfig, showVertGrid, annotations, ti
       ctx.beginPath();
       for (let j = 0; j <= 5; j++) {
         const p = proj(Math.cos(PENTA_ANGLES[j % 5]), Math.sin(PENTA_ANGLES[j % 5]), gz);
-        j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+        if (j === 0) { ctx.moveTo(p.sx, p.sy); } else { ctx.lineTo(p.sx, p.sy); }
       }
       ctx.stroke();
     }
@@ -4423,7 +4334,7 @@ function SpiderTornadoCanvas({ models, axisConfig, showVertGrid, annotations, ti
         ctx.beginPath();
         for (let j = 0; j <= 5; j++) {
           const p = proj(Math.cos(PENTA_ANGLES[j % 5]), Math.sin(PENTA_ANGLES[j % 5]), zPos);
-          j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+          if (j === 0) { ctx.moveTo(p.sx, p.sy); } else { ctx.lineTo(p.sx, p.sy); }
         }
         ctx.closePath();
         ctx.fillStyle = hexToRGBA(ann.color, 0.28);
@@ -4459,7 +4370,7 @@ function SpiderTornadoCanvas({ models, axisConfig, showVertGrid, annotations, ti
           ctx.beginPath();
           for (let j = 0; j <= 5; j++) {
             const p = proj(Math.cos(PENTA_ANGLES[j % 5]), Math.sin(PENTA_ANGLES[j % 5]), gz);
-            j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+            if (j === 0) { ctx.moveTo(p.sx, p.sy); } else { ctx.lineTo(p.sx, p.sy); }
           }
           ctx.stroke();
         }
@@ -4560,7 +4471,7 @@ function SpiderTornadoCanvas({ models, axisConfig, showVertGrid, annotations, ti
       ctx.beginPath();
       for (let j = 0; j <= 5; j++) {
         const p = proj(Math.cos(PENTA_ANGLES[j % 5]), Math.sin(PENTA_ANGLES[j % 5]), zPos);
-        j === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy);
+        if (j === 0) { ctx.moveTo(p.sx, p.sy); } else { ctx.lineTo(p.sx, p.sy); }
       }
       ctx.stroke();
       ctx.setLineDash([]);
