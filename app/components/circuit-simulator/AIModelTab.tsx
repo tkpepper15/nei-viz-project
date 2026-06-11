@@ -357,7 +357,8 @@ interface ObservabilityResult {
 
 type NodeType =
   | 'source-data'           // Load real or synthetic data
-  | 'process-ml'            // Sequential ML pipeline (MDN + RBPF + Kalman)
+  | 'process-ml'            // Inference: constraints + model config
+  | 'viz-results'           // Results panel: posteriors, mechanism, confidence
   | 'viz-trajectory'        // Trajectory line chart
   | 'viz-diagnostics'       // Filter health: ESS + identifiability + Kalman dynamics
   | 'source-observability'  // Data quality + frequency coverage + event detection
@@ -412,11 +413,16 @@ const NODE_DEFS: Record<NodeType, NodeDef> = {
   },
   'process-ml': {
     label: 'Inference', category: 'process', portColor: C_PROCESS,
-    defaultWidth: 320, defaultHeight: 720,
+    defaultWidth: 340, defaultHeight: 620,
     ports: [
       { id: 'in',     side: 'in',  kind: 'impedance-series', dataClass: 'source',  label: 'Z(ω, t)',    yFrac: 0.5 },
       { id: 'out-ml', side: 'out', kind: 'ml-result',        dataClass: 'process', label: 'θ(t), Σ(t)', yFrac: 0.5 },
     ],
+  },
+  'viz-results': {
+    label: 'Results', category: 'viz', portColor: C_VIZ,
+    defaultWidth: 280, defaultHeight: 620,
+    ports: [{ id: 'in', side: 'in', kind: 'ml-result', dataClass: 'process', label: 'ML Result', yFrac: 0.5 }],
   },
   'viz-trajectory': {
     label: 'Trajectory', category: 'viz', portColor: C_VIZ,
@@ -453,8 +459,99 @@ const NODE_DEFS: Record<NodeType, NodeDef> = {
 
 // Per-node config (discriminated union)
 
+interface ParamConstraint {
+  enabled: boolean;
+  min: number;
+  max: number;
+  ddtMax: number;   // max |Δlog10(param)| per measurement step
+  monotone: 'up' | 'down' | 'free';
+}
+
+const DEFAULT_CONSTRAINTS: Record<string, ParamConstraint> = {
+  Ra:  { enabled: true, min: 10,   max: 50000,   ddtMax: 0.10, monotone: 'free' },
+  Rb:  { enabled: true, min: 10,   max: 50000,   ddtMax: 0.10, monotone: 'free' },
+  Ca:  { enabled: true, min: 1e-9, max: 1e-4,    ddtMax: 0.05, monotone: 'free' },
+  Cb:  { enabled: true, min: 1e-9, max: 1e-4,    ddtMax: 0.05, monotone: 'free' },
+  Rsh: { enabled: true, min: 100,  max: 1000000, ddtMax: 0.05, monotone: 'free' },
+};
+
+function fmtPy(v: number): string {
+  if (Number.isInteger(v) && Math.abs(v) < 1e6) return String(v);
+  const s = v.toExponential();
+  const [m, eStr] = s.split('e');
+  const e = parseInt(eStr);
+  const mf = parseFloat(m);
+  return Math.abs(mf - Math.round(mf)) < 0.0001 ? `${Math.round(mf)}e${e}` : v.toExponential(1);
+}
+
+function constraintsToCode(c: Record<string, ParamConstraint>, cfg: { useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean }): string {
+  const rows = Object.entries(c).map(([name, p]) => {
+    const pad = name.length < 3 ? ' '.repeat(3 - name.length) : '';
+    const comment = p.enabled ? '' : '  # disabled';
+    return `    '${name}':${pad} Param(min=${fmtPy(p.min)}, max=${fmtPy(p.max)}, ddt_max=${p.ddtMax.toFixed(2)}, direction='${p.monotone}'),${comment}`;
+  }).join('\n');
+  return `from circuit_filter import Param, FilterConfig
+
+# Per-parameter biological constraints
+# ddt_max: max |Δlog10(param)| per measurement step
+# direction: 'free' | 'up' | 'down'
+constraints = {
+${rows}
+}
+
+# Symmetry: enforce Ra > Rb (apical > basolateral convention)
+canonical = 'Ra_gt_Rb'
+
+config = FilterConfig(
+    use_transformer = ${cfg.useTransformer ? 'True' : 'False'},
+    use_rbpf        = ${cfg.useRBPF ? 'True' : 'False'},
+    use_kalman      = ${cfg.useKalman ? 'True' : 'False'},
+    use_ecm         = ${cfg.useEcm ? 'True' : 'False'},
+)
+`;
+}
+
+function codeToConstraints(code: string, prev: { useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean; constraints: Record<string, ParamConstraint> }): { constraints: Record<string, ParamConstraint>; useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean } {
+  const constraints: Record<string, ParamConstraint> = {};
+  for (const [name, def] of Object.entries(DEFAULT_CONSTRAINTS)) {
+    const re = new RegExp(`'${name}'\\s*:\\s*Param\\(([^)]+)\\)`);
+    const m = code.match(re);
+    if (!m) { constraints[name] = { ...def }; continue; }
+    const args = m[1];
+    const getN = (key: string, fallback: number) => { const r = args.match(new RegExp(`${key}=([0-9e.+\\-]+)`)); return r ? parseFloat(r[1]) : fallback; };
+    const dirM = args.match(/direction='(free|up|down)'/);
+    const disabledLine = new RegExp(`'${name}'[^\\n]*#\\s*disabled`).test(code);
+    constraints[name] = {
+      enabled: !disabledLine,
+      min: getN('min', def.min),
+      max: getN('max', def.max),
+      ddtMax: getN('ddt_max', def.ddtMax),
+      monotone: (dirM?.[1] as 'free' | 'up' | 'down') ?? def.monotone,
+    };
+  }
+  const boolFlag = (key: string, fallback: boolean) => { const m = code.match(new RegExp(`${key}\\s*=\\s*(True|False)`)); return m ? m[1] === 'True' : fallback; };
+  return {
+    constraints,
+    useTransformer: boolFlag('use_transformer', prev.useTransformer),
+    useRBPF:        boolFlag('use_rbpf',        prev.useRBPF),
+    useKalman:      boolFlag('use_kalman',       prev.useKalman),
+    useEcm:         boolFlag('use_ecm',          prev.useEcm),
+  };
+}
+
 interface SourceDataCfg         { kind: 'source-data';           selection: string; syntheticTrajIdx: number | null; }
-interface ProcessMLCfg          { kind: 'process-ml'; useTransformer: boolean; useRBPF: boolean; useKalman: boolean; useEcm: boolean; modelOverride?: string; }
+interface ProcessMLCfg {
+  kind: 'process-ml';
+  useTransformer: boolean;
+  useRBPF: boolean;
+  useKalman: boolean;
+  useEcm: boolean;
+  modelOverride?: string;
+  constraints: Record<string, ParamConstraint>;
+  editMode: 'visual' | 'code';
+  modelCode: string;
+}
+interface VizResultsCfg         { kind: 'viz-results'; }
 interface VizTrajectoryCfg      { kind: 'viz-trajectory';        param: TrajectoryParam; view: TrajView; }
 interface VizDiagnosticsCfg     { kind: 'viz-diagnostics';       paramIdx: number; }
 interface SourceObservabilityCfg{ kind: 'source-observability';  _placeholder: true; }
@@ -465,6 +562,7 @@ interface VizSpiderplotCfg { kind: 'viz-spiderplot'; showVertGrid: boolean; anno
 type NodeConfig =
   | SourceDataCfg
   | ProcessMLCfg
+  | VizResultsCfg
   | VizTrajectoryCfg
   | VizDiagnosticsCfg
   | SourceObservabilityCfg
@@ -543,8 +641,12 @@ function pendingEdgePath(p1: { x: number; y: number }, p2: { x: number; y: numbe
 
 function makeDefaultConfig(type: NodeType, _refParams: CircuitParameters): NodeConfig {
   switch (type) {
-    case 'source-data':           return { kind: 'source-data', selection: 'real:0', syntheticTrajIdx: null };
-    case 'process-ml':            return { kind: 'process-ml', useTransformer: true, useRBPF: true, useKalman: true, useEcm: true };
+    case 'source-data': return { kind: 'source-data', selection: 'real:0', syntheticTrajIdx: null };
+    case 'process-ml': {
+      const base = { useTransformer: true, useRBPF: true, useKalman: true, useEcm: true };
+      return { kind: 'process-ml', ...base, modelOverride: undefined, constraints: { ...DEFAULT_CONSTRAINTS }, editMode: 'visual', modelCode: constraintsToCode(DEFAULT_CONSTRAINTS, base) };
+    }
+    case 'viz-results':           return { kind: 'viz-results' };
     case 'viz-trajectory':        return { kind: 'viz-trajectory', param: 'TER', view: 'trajectory' };
     case 'viz-diagnostics':       return { kind: 'viz-diagnostics', paramIdx: 0 };
     case 'source-observability':  return { kind: 'source-observability', _placeholder: true };
@@ -630,7 +732,7 @@ function emptyResult(): TimeSeriesResult {
 
 // ---- Main component ----
 
-const GRAPH_STORAGE_KEY = 'ai-model-graph-v1';
+const GRAPH_STORAGE_KEY = 'ai-model-graph-v2';
 
 function loadGraph(): { nodes: GraphNode[]; edges: GraphEdge[]; nextId: number } | null {
   if (typeof window === 'undefined') return null;
@@ -1120,7 +1222,13 @@ export const AIModelTab: React.FC<AIModelTabProps> = ({ groundTruthParams, minFr
         });
         const response = await fetch(`${ML_API_BASE}/mc_temporal_analysis_stream`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sequences: inputData.sequences, n_samples: 2000, n_display: 50, include_ecm: cfg2.useEcm, use_sequential: cfg2.useRBPF !== false, canonical_mode: 'Ra_gt_Rb', sample_id: `n${nodeId}_${Date.now()}`, model_override: cfg2.modelOverride || undefined }),
+          body: JSON.stringify((() => {
+            const paramOrder = ['Ra', 'Rb', 'Ca', 'Cb', 'Rsh'];
+            const active = cfg2.constraints ? paramOrder.filter(p => cfg2.constraints[p]?.enabled) : [];
+            const rbpfBounds = active.length > 0 ? { params: active, low: active.map(p => cfg2.constraints[p].min), high: active.map(p => cfg2.constraints[p].max) } : undefined;
+            const ddtConstraints = active.length > 0 ? { params: active, max: active.map(p => cfg2.constraints[p].ddtMax), direction: active.map(p => cfg2.constraints[p].monotone) } : undefined;
+            return { sequences: inputData.sequences, n_samples: 2000, n_display: 50, include_ecm: cfg2.useEcm, use_sequential: cfg2.useRBPF !== false, canonical_mode: 'Ra_gt_Rb', sample_id: `n${nodeId}_${Date.now()}`, model_override: cfg2.modelOverride || undefined, rbpf_bounds: rbpfBounds, ddt_constraints: ddtConstraints };
+          })()),
           signal: ctrl.signal,
         });
         if (!response.ok) throw new Error(`API ${response.status}`);
@@ -1490,6 +1598,7 @@ function NodeBody(p: NodeBodyProps) {
   switch (p.node.type) {
     case 'source-data':          return <SourceDataBody          {...p}/>;
     case 'process-ml':           return <ProcessMLBody           {...p}/>;
+    case 'viz-results':          return <ResultsBody             {...p}/>;
     case 'viz-trajectory':       return <VizTrajectoryBody       {...p}/>;
     case 'viz-diagnostics':      return <VizDiagnosticsBody      {...p}/>;
     case 'source-observability': return <ObservabilityBody       {...p}/>;
@@ -1765,6 +1874,196 @@ function InlineSparkline({ values, color }: { values: number[]; color: string })
   );
 }
 
+// ---- Pipeline mini-graph ----
+
+interface PipelinePos { x: number; y: number; }
+
+interface PipeStage {
+  id: string;
+  short: string;
+  sub: string;
+  color: string;
+  cfgKey: keyof Pick<ProcessMLCfg, 'useTransformer' | 'useRBPF' | 'useKalman' | 'useEcm'> | null;
+}
+
+const PIPE_STAGES: PipeStage[] = [
+  { id: 'input',  short: 'Z(ω,t)',  sub: 'input',        color: '#454558', cfgKey: null            },
+  { id: 'mdn',    short: 'MDN',     sub: 'transformer',  color: '#56B4E9', cfgKey: 'useTransformer' },
+  { id: 'rbpf',   short: 'RBPF',    sub: 'particle',     color: '#6469a0', cfgKey: 'useRBPF'        },
+  { id: 'rts',    short: 'RTS',     sub: 'smoother',     color: '#009E73', cfgKey: 'useKalman'      },
+  { id: 'ecm',    short: 'ECM',     sub: 'baseline',     color: '#E69F00', cfgKey: 'useEcm'         },
+  { id: 'output', short: 'θ̂(t)',    sub: 'ensemble',     color: '#c4a040', cfgKey: null             },
+];
+
+const PIPE_W = 54;
+const PIPE_H = 26;
+const PIPE_CW = 308;
+const PIPE_CH = 148;
+
+const PIPE_DEFAULT_POS: Record<string, PipelinePos> = {
+  input:  { x: 2,   y: 61 },
+  mdn:    { x: 66,  y: 10 },
+  rbpf:   { x: 135, y: 10 },
+  rts:    { x: 204, y: 10 },
+  ecm:    { x: 135, y: 112 },
+  output: { x: 252, y: 61 },
+};
+
+interface PipeDragState {
+  id: string; ox: number; oy: number; sx: number; sy: number; moved: boolean;
+}
+
+function PipelineView({ cfg, onConfigChange }: { cfg: ProcessMLCfg; onConfigChange: (c: ProcessMLCfg) => void }) {
+  const [pos, setPos] = useState<Record<string, PipelinePos>>(() => ({ ...PIPE_DEFAULT_POS }));
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<PipeDragState | null>(null);
+
+  const isOn = (id: string): boolean => {
+    const s = PIPE_STAGES.find(x => x.id === id);
+    if (!s?.cfgKey) return true;
+    if (s.cfgKey === 'useKalman') return !!(cfg.useKalman && cfg.useRBPF);
+    return !!(cfg[s.cfgKey]);
+  };
+
+  const toggle = (stage: PipeStage) => {
+    if (!stage.cfgKey) return;
+    if (stage.cfgKey === 'useKalman') {
+      if (cfg.useRBPF) onConfigChange({ ...cfg, useKalman: !cfg.useKalman });
+    } else if (stage.cfgKey === 'useRBPF') {
+      onConfigChange({ ...cfg, useRBPF: !cfg.useRBPF, useKalman: cfg.useRBPF ? false : cfg.useKalman });
+    } else {
+      onConfigChange({ ...cfg, [stage.cfgKey]: !(cfg[stage.cfgKey] as boolean) });
+    }
+  };
+
+  const rx = (id: string) => (pos[id]?.x ?? 0) + PIPE_W;
+  const lx = (id: string) => (pos[id]?.x ?? 0);
+  const my = (id: string) => (pos[id]?.y ?? 0) + PIPE_H / 2;
+
+  const bez = (x1: number, y1: number, x2: number, y2: number) => {
+    const cx = (x1 + x2) / 2;
+    return `M${x1} ${y1} C${cx} ${y1} ${cx} ${y2} ${x2} ${y2}`;
+  };
+
+  const rbpfOn = isOn('rbpf');
+  const mdnOn  = isOn('mdn');
+  const rtsOn  = isOn('rts');
+  const ecmOn  = isOn('ecm');
+
+  const edges: Array<{ from: string; to: string; active: boolean; dashed?: boolean }> = [
+    { from: 'input',  to: 'mdn',    active: mdnOn                       },
+    { from: 'input',  to: 'rbpf',   active: rbpfOn && !mdnOn, dashed: true },
+    { from: 'mdn',    to: 'rbpf',   active: mdnOn && rbpfOn             },
+    { from: 'rbpf',   to: 'rts',    active: rbpfOn && rtsOn             },
+    { from: 'rbpf',   to: 'output', active: rbpfOn && !rtsOn            },
+    { from: 'rts',    to: 'output', active: rtsOn                       },
+    { from: 'input',  to: 'ecm',    active: ecmOn                       },
+    { from: 'ecm',    to: 'output', active: ecmOn                       },
+  ];
+
+  const onMouseDown = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    dragRef.current = { id, ox: pos[id]?.x ?? 0, oy: pos[id]?.y ?? 0, sx: e.clientX - rect.left, sy: e.clientY - rect.top, moved: false };
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!dragRef.current || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const dx = (e.clientX - rect.left) - dragRef.current.sx;
+    const dy = (e.clientY - rect.top)  - dragRef.current.sy;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      dragRef.current.moved = true;
+      const nx = Math.max(0, Math.min(PIPE_CW - PIPE_W, dragRef.current.ox + dx));
+      const ny = Math.max(0, Math.min(PIPE_CH - PIPE_H, dragRef.current.oy + dy));
+      setPos(p => ({ ...p, [dragRef.current!.id]: { x: nx, y: ny } }));
+    }
+  };
+
+  const onMouseUp = () => { dragRef.current = null; };
+
+  const onNodeMouseUp = (stage: PipeStage) => {
+    if (!dragRef.current?.moved) toggle(stage);
+    dragRef.current = null;
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-[10px] text-[#6b6b76] uppercase tracking-widest">Pipeline</span>
+        <button
+          onClick={() => setPos({ ...PIPE_DEFAULT_POS })}
+          className="font-mono text-[9px] text-[#2a2a38] hover:text-[#4a4a58] transition-colors focus:outline-none"
+          title="Reset layout"
+        >
+          reset
+        </button>
+      </div>
+      <div
+        ref={containerRef}
+        className="relative rounded-sm bg-[#050508] border border-[#16161e] overflow-hidden"
+        style={{ width: PIPE_CW, height: PIPE_CH, cursor: 'default', userSelect: 'none' }}
+        onMouseMove={onMouseMove}
+        onMouseUp={onMouseUp}
+        onMouseLeave={onMouseUp}
+      >
+        <svg className="absolute inset-0 pointer-events-none" width={PIPE_CW} height={PIPE_CH}>
+          {edges.map((e, i) => (
+            <path
+              key={i}
+              d={bez(rx(e.from), my(e.from), lx(e.to), my(e.to))}
+              fill="none"
+              stroke={e.active ? '#33334a' : '#161620'}
+              strokeWidth={e.active ? 1.5 : 1}
+              strokeDasharray={e.dashed ? '3 2' : undefined}
+              strokeLinecap="round"
+            />
+          ))}
+        </svg>
+        {PIPE_STAGES.map(stage => {
+          const p = pos[stage.id] ?? PIPE_DEFAULT_POS[stage.id];
+          const on = isOn(stage.id);
+          const toggleable = !!stage.cfgKey;
+          return (
+            <div
+              key={stage.id}
+              style={{
+                position: 'absolute',
+                left: p.x,
+                top: p.y,
+                width: PIPE_W,
+                height: PIPE_H,
+                background: on ? '#0e0e14' : '#08080b',
+                border: `1px solid ${on ? stage.color + '44' : '#1a1a22'}`,
+                borderRadius: 4,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: on ? 1 : 0.3,
+                cursor: toggleable ? 'pointer' : 'grab',
+                userSelect: 'none',
+                transition: 'opacity 0.15s, border-color 0.15s',
+              }}
+              onMouseDown={e => onMouseDown(e, stage.id)}
+              onMouseUp={() => onNodeMouseUp(stage)}
+            >
+              <span style={{ fontFamily: 'monospace', fontSize: 10, color: on ? stage.color : '#3a3a48', fontWeight: 600, lineHeight: 1 }}>
+                {stage.short}
+              </span>
+              <span style={{ fontFamily: 'monospace', fontSize: 7, color: on ? '#38384a' : '#222230', lineHeight: 1, marginTop: 2 }}>
+                {stage.sub}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ---- Process: Sequential ML ----
 function arrayMean(arr: number[]): number {
   if (arr.length === 0) return 0;
@@ -1777,10 +2076,11 @@ const NODE_DIVIDER   = 'h-px bg-[#1a1a22] my-3';
 
 function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeBodyProps) {
   const cfg = node.config as ProcessMLCfg;
-  const result = node.output?.kind === 'ml-result' ? node.output.result : null;
   const [activeModel, setActiveModel] = useState<ActiveModelInfo | null>(null);
   const [availableModels, setAvailableModels] = useState<AvailableModel[]>([]);
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [codeError, setCodeError] = useState<string | null>(null);
+
   useEffect(() => {
     fetch(`${ML_API_BASE}/model_info`)
       .then(r => r.ok ? r.json() : null)
@@ -1792,88 +2092,44 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
       .catch(() => {});
   }, []);
 
-  const isRunning = node.status === 'running';
-  const [showWhy, setShowWhy] = useState(false);
-
-  const smcEss     = result?.smcEss ?? [];
-  const meanEss    = smcEss.length > 0 ? arrayMean(smcEss) : null;
-  const nClusters  = result?.clusterPaths.length ?? 0;
-  const resampCount = smcEss.filter(e => e < 0.5).length;
-
-  const posteriorSummary = result?.posteriorSummary ?? null;
-  const mechanism        = result?.mechanism ?? null;
-
+  const constraints = cfg.constraints ?? { ...DEFAULT_CONSTRAINTS };
   const provenanceLabel = inputData?.kind === 'impedance-series' ? inputData.label : null;
 
-  const fmtV = (v: number) => v >= 100 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3);
+  const switchToCode = () => {
+    const code = constraintsToCode(constraints, cfg);
+    onConfigChange({ ...cfg, editMode: 'code', modelCode: code });
+    setCodeError(null);
+  };
 
-  // Primary finding: TER is the most clinically important RPE parameter
-  const primaryPs       = posteriorSummary?.TER ?? null;
-  const primaryHalfWidth = primaryPs ? (primaryPs.q95 - primaryPs.q05) / 2 : null;
-  const primaryConfidence = primaryPs
-    ? primaryPs.identifiability > 0.7 ? 'High' : primaryPs.identifiability > 0.4 ? 'Moderate' : 'Low'
-    : null;
-  const primaryConfidenceColor = primaryPs
-    ? primaryPs.identifiability > 0.7 ? '#4ade80' : primaryPs.identifiability > 0.4 ? '#c4a040' : '#f97316'
-    : '#5a5a66';
-
-  // TER trend: prefer Kalman-smoothed net_change (log10 displacement), fall back to raw prediction endpoints
-  const terTrend = (() => {
-    if (!result) return null;
-    const k = result.kalman;
-    if (k?.trends && k.param_names) {
-      const idx = k.param_names.indexOf('TER');
-      if (idx >= 0) {
-        const t = k.trends[idx];
-        const pct = Math.round((Math.pow(10, Math.abs(t.net_change)) - 1) * 100);
-        return { pct, direction: t.direction };
-      }
+  const switchToVisual = () => {
+    try {
+      const parsed = codeToConstraints(cfg.modelCode ?? '', cfg);
+      onConfigChange({ ...cfg, editMode: 'visual', ...parsed });
+      setCodeError(null);
+    } catch (e) {
+      setCodeError(e instanceof Error ? e.message : 'Parse error');
     }
-    const vals = result.predictions.TER.mean;
-    if (vals.length < 2 || vals[0] <= 0) return null;
-    const rawPct = ((vals[vals.length - 1] - vals[0]) / vals[0]) * 100;
-    return {
-      pct: Math.round(Math.abs(rawPct)),
-      direction: rawPct > 2 ? 'rising' as const : rawPct < -2 ? 'falling' as const : 'stable' as const,
-    };
-  })();
+  };
 
-  // Filter quality classification
-  const totalT     = result?.time_min.length ?? 0;
-  const resampFrac = totalT > 0 ? resampCount / totalT : 0;
-  const filterQuality = !result ? null
-    : (meanEss != null && meanEss > 0.5 && resampFrac < 0.2) ? 'GOOD'
-    : (meanEss != null && meanEss > 0.3) ? 'FAIR'
-    : 'POOR';
-  const filterQualityColor = filterQuality === 'GOOD' ? '#4ade80' : filterQuality === 'FAIR' ? '#c4a040' : '#f97316';
-  const filterDesc = filterQuality === 'GOOD'
-    ? 'Particle diversity maintained. Posterior stable.'
-    : filterQuality === 'FAIR'
-    ? 'Moderate particle collapse. Treat estimates with caution.'
-    : filterQuality === 'POOR'
-    ? 'Filter degenerated. Results may be unreliable.'
-    : '';
+  const updateConstraint = (param: string, field: keyof ParamConstraint, value: ParamConstraint[keyof ParamConstraint]) => {
+    const updated = { ...constraints, [param]: { ...constraints[param], [field]: value } };
+    onConfigChange({ ...cfg, constraints: updated });
+  };
 
-  const POSTERIOR_PARAMS: Array<{ key: string; label: string; color: string; unit: string }> = [
-    { key: 'TER', label: 'TER', color: '#009E73', unit: 'kΩ' },
-    { key: 'Rsh', label: 'Rsh', color: '#6469a0', unit: 'kΩ' },
-    { key: 'TEC', label: 'TEC', color: '#CC79A7', unit: 'µF' },
-    { key: 'Ra',  label: 'Ra',  color: '#56B4E9', unit: 'kΩ' },
-    { key: 'Rb',  label: 'Rb',  color: '#E69F00', unit: 'kΩ' },
-  ];
-
-  const methodToggles = [
-    { label: 'particle', title: 'Rao-Blackwellized Particle Filter — sequential Monte Carlo over time', enabled: cfg.useRBPF, onToggle: () => onConfigChange({ ...cfg, useRBPF: !cfg.useRBPF, useKalman: !cfg.useRBPF ? cfg.useKalman : false }) },
-    { label: 'smoother', title: 'Rauch-Tung-Striebel backward pass — requires particle filter', enabled: cfg.useKalman && cfg.useRBPF, onToggle: () => cfg.useRBPF && onConfigChange({ ...cfg, useKalman: !cfg.useKalman }) },
-    { label: 'baseline', title: 'Classical equivalent circuit model fit — independent per timepoint', enabled: cfg.useEcm, onToggle: () => onConfigChange({ ...cfg, useEcm: !cfg.useEcm }) },
+  const PARAM_META: Array<{ name: string; unit: string }> = [
+    { name: 'Ra',  unit: 'Ω' },
+    { name: 'Rb',  unit: 'Ω' },
+    { name: 'Ca',  unit: 'F' },
+    { name: 'Cb',  unit: 'F' },
+    { name: 'Rsh', unit: 'Ω' },
   ];
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 pt-3 pb-1 flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 pt-3 pb-1 flex flex-col gap-3">
 
-        {/* MODEL SELECTOR */}
-        <div className="relative mb-3">
+        {/* Model selector */}
+        <div className="relative">
           <button
             onClick={() => setShowModelPicker(v => !v)}
             onBlur={() => setTimeout(() => setShowModelPicker(false), 150)}
@@ -1914,346 +2170,94 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
           )}
         </div>
 
-        {/* METHOD TOGGLES */}
-        <div className="flex items-center gap-2 mb-5">
-          {methodToggles.map(m => (
-            <div key={m.label} className="relative group">
-              <button onClick={m.onToggle}
-                className={`font-mono text-[10px] px-2.5 py-1 rounded border transition-colors duration-100 focus:outline-none ${m.enabled ? 'text-[#9a9aa2] border-[#2a2a33] bg-[#1e1e24]' : 'text-[#2a2a33] border-[#1a1a22]'}`}>
-                {m.label}
-              </button>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-[#1a1a22] border border-[#2a2a33] rounded text-[9px] font-mono text-[#9a9aa2] whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                {m.title}
-                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#2a2a33]"/>
-              </div>
-            </div>
-          ))}
-        </div>
+        <PipelineView cfg={cfg} onConfigChange={onConfigChange}/>
 
-        <div className={NODE_DIVIDER}/>
+        <div className="h-px bg-[#1a1a22]"/>
 
-        {/* ① PRIMARY FINDING ─ what happened? */}
-        <div className="mt-4">
-          <div className={SECTION_LABEL}>Primary finding</div>
-          {primaryPs ? (
-            <div className="mt-3 px-3 py-3 rounded-sm bg-[#0f0f12] border border-[#1e1e24]">
-              <div className="font-mono text-[11px] mb-1" style={{ color: '#009E73' }}>TER</div>
-              <div className="flex items-baseline gap-2 mb-2">
-                <span className="font-mono text-[26px] font-semibold text-[#dddde2] tabular-nums leading-none">
-                  {fmtV(primaryPs.median)}
-                </span>
-                {primaryHalfWidth != null && (
-                  <span className="font-mono text-[12px] text-[#4a4a56] tabular-nums">± {fmtV(primaryHalfWidth)}</span>
-                )}
-                <span className="font-mono text-[11px] text-[#3d3d48]">kΩ</span>
-              </div>
-              <div className="flex items-center gap-3">
-                {terTrend && terTrend.direction !== 'stable' && (
-                  <span className="font-mono text-[11px] tabular-nums" style={{ color: terTrend.direction === 'rising' ? '#4ade80' : '#f97316' }}>
-                    {terTrend.direction === 'rising' ? '↑' : '↓'} {terTrend.pct}%
-                  </span>
-                )}
-                <span className="font-mono text-[10px] text-[#3d3d48]">Confidence</span>
-                <span className="font-mono text-[10px] font-medium" style={{ color: primaryConfidenceColor }}>
-                  {primaryConfidence}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
-          )}
-        </div>
-
-        <div className={NODE_DIVIDER}/>
-
-        {/* ② PARAMETER POSTERIORS ─ how sure are we? */}
-        <div className="mt-4">
-          <div className={SECTION_LABEL}>Parameter posteriors</div>
-          {posteriorSummary ? (
-            <div className="mt-3 flex flex-col gap-3">
-              {POSTERIOR_PARAMS.map(({ key, label, color, unit }) => {
-                const ps = posteriorSummary[key];
-                if (!ps) return null;
-                const halfWidth = (ps.q95 - ps.q05) / 2;
-                // Coefficient of variation: wider CI relative to median = wider bar
-                const cv = ps.median > 0 ? (ps.q95 - ps.q05) / ps.median : 0;
-                const barWidth = Math.min(100, cv * 100);
-                const ident = ps.identifiability;
-                const barColor = ident > 0.7 ? '#4ade80' : ident > 0.4 ? '#c4a040' : '#f97316';
-                return (
-                  <div key={key} className="flex items-start gap-2">
-                    <span className="font-mono text-[11px] w-8 flex-shrink-0 pt-px" style={{ color }}>{label}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-baseline gap-1.5">
-                        <span className="font-mono text-[13px] font-semibold text-[#dddde2] tabular-nums">{fmtV(ps.median)}</span>
-                        <span className="font-mono text-[10px] text-[#4a4a56] tabular-nums">± {fmtV(halfWidth)}</span>
-                        <span className="font-mono text-[9px] text-[#3a3a48]">{unit}</span>
-                      </div>
-                      {/* Uncertainty width bar — narrower bar = tighter posterior */}
-                      <div className="mt-1 h-0.5 bg-[#1a1a22] rounded overflow-hidden">
-                        <div style={{ width: `${barWidth}%`, height: '100%', background: barColor, opacity: 0.4 }} className="rounded"/>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
-          )}
-        </div>
-
-        <div className={NODE_DIVIDER}/>
-
-        {/* ③ MECHANISTIC INTERPRETATION ─ why does the model think that? */}
-        <div className="mt-4">
-          <div className={SECTION_LABEL}>Mechanistic interpretation</div>
-          {mechanism ? (
-            <div className="mt-3">
-              {mechanism.hypotheses[0] && (
-                <div className="mb-4">
-                  <div className="font-mono text-[10px] text-[#4a4a56] mb-1.5">Most likely</div>
-                  <div className="font-mono text-[15px] font-medium text-[#dddde2] leading-tight mb-1">
-                    {mechanism.hypotheses[0].label.split(' (')[0]}
-                  </div>
-                  <div className="font-mono text-[11px]" style={{ color: '#4ade80' }}>
-                    {Math.round(mechanism.hypotheses[0].probability * 100)}% confidence
-                  </div>
-                </div>
-              )}
-              <div className="flex flex-col gap-2.5">
-                {mechanism.hypotheses.slice(0, 3).map(h => (
-                  <div key={h.name}>
-                    <div className="flex items-baseline justify-between mb-1">
-                      <span className="font-mono text-[10px] text-[#6b6b76] truncate flex-1">{h.label.split(' (')[0]}</span>
-                      <span className="font-mono text-[10px] tabular-nums text-[#4a4a56] flex-shrink-0 ml-2">{(h.probability * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="h-1 bg-[#1a1a22] rounded overflow-hidden">
-                      <div style={{ width: `${h.probability * 100}%`, height: '100%', background: '#6469a0', opacity: 0.55 }}/>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {(mechanism.established.length > 0 || mechanism.ambiguous.length > 0) && (
-                <div className="mt-3 flex flex-col gap-1.5">
-                  {mechanism.established.length > 0 && (
-                    <div className="flex items-start gap-2">
-                      <span className="font-mono text-[9px] text-[#4a4a56] flex-shrink-0 w-16 pt-px">established</span>
-                      <span className="font-mono text-[10px] text-[#8a8a96]">{mechanism.established.join(' · ')}</span>
-                    </div>
-                  )}
-                  {mechanism.ambiguous.length > 0 && (
-                    <div className="flex items-start gap-2">
-                      <span className="font-mono text-[9px] text-[#4a4a56] flex-shrink-0 w-16 pt-px">ambiguous</span>
-                      <span className="font-mono text-[10px] text-[#4a4a56]">{mechanism.ambiguous.join(' · ')}</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
-          )}
-        </div>
-
-        <div className={NODE_DIVIDER}/>
-
-        {/* ④ MODEL CONFIDENCE ─ can I trust it? */}
-        <div className="mt-4">
-          <div className={SECTION_LABEL}>Model confidence</div>
-          {result ? (
-            <div className="mt-3">
-              {filterQuality && (
-                <>
-                  <div className="font-mono text-[20px] font-semibold leading-none mb-1.5" style={{ color: filterQualityColor }}>
-                    {filterQuality}
-                  </div>
-                  <div className="font-mono text-[10px] text-[#4a4a56] mb-4 leading-relaxed">{filterDesc}</div>
-                </>
-              )}
-              <div className="grid grid-cols-3 gap-3">
-                {meanEss != null && (
-                  <div className="flex flex-col gap-1">
-                    <span className="font-mono text-[10px] text-[#5a5a66]">ESS</span>
-                    <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{Math.round(meanEss * 64)}</span>
-                  </div>
-                )}
-                {nClusters > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <span className="font-mono text-[10px] text-[#5a5a66]">Clusters</span>
-                    <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{nClusters}</span>
-                  </div>
-                )}
-                {smcEss.length > 0 && (
-                  <div className="flex flex-col gap-1">
-                    <span className="font-mono text-[10px] text-[#5a5a66]">Resamples</span>
-                    <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{resampCount}</span>
-                  </div>
-                )}
-              </div>
-              {result.dlResnorm.length > 0 && (
-                <div className="mt-3 flex items-baseline gap-2">
-                  <span className="font-mono text-[10px] text-[#5a5a66]">Impedance MAE</span>
-                  <span className="font-mono text-[12px] text-[#dddde2] tabular-nums">{arrayMean(result.dlResnorm).toFixed(3)}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
-          )}
-          {isRunning && node.progress && (
-            <div className="mt-3 flex items-center gap-2">
-              <div className="flex-1 h-0.5 rounded-full bg-[#1e1e24] overflow-hidden">
-                <div className="h-full bg-[#c4a040]/60 transition-all duration-200 rounded-full"
-                  style={{ width: `${(node.progress.done / node.progress.total) * 100}%` }}/>
-              </div>
-              <span className="font-mono text-[10px] text-[#454549] tabular-nums flex-shrink-0">{node.progress.done}/{node.progress.total}</span>
-            </div>
-          )}
-        </div>
-
-        {/* ⑤ VALIDATION ─ how does it compare to reality? */}
-        {result && result.groundTruth && node.status === 'done' && (() => {
-          const gt = result.groundTruth!;
-          const preds = result.predictions;
-          if (result.time_min.length === 0) return null;
-          const logMAE = (predArr: number[], gtArr: number[]) => {
-            let sum = 0; let n = 0;
-            for (let i = 0; i < Math.min(predArr.length, gtArr.length); i++) {
-              const p = predArr[i]; const g = gtArr[i];
-              if (p > 0 && g > 0) { sum += Math.abs(Math.log10(p) - Math.log10(g)); n++; }
-            }
-            return n > 0 ? sum / n : null;
-          };
-          const qualityLabel = (mae: number) =>
-            mae < 0.05 ? 'Excellent' : mae < 0.15 ? 'Good' : mae < 0.40 ? 'Moderate' : 'Poor';
-          const rows: Array<{ label: string; color: string; mae: number | null }> = [
-            { label: 'TER', color: '#009E73', mae: logMAE(preds.TER.mean, gt.TER ?? []) },
-            { label: 'TEC', color: '#CC79A7', mae: logMAE(preds.TEC.mean, gt.TEC ?? []) },
-            { label: 'Rsh', color: '#6469a0', mae: logMAE(preds.R2.mean,  gt.R2  ?? []) },
-          ].filter(r => r.mae !== null);
-          if (rows.length === 0) return null;
-          return (
-            <div className="mt-4">
-              <div className={NODE_DIVIDER}/>
-              <div className="mt-4">
-                <div className={SECTION_LABEL}>Validation</div>
-                <div className="mt-3 flex flex-col gap-3">
-                  {rows.map(r => (
-                    <div key={r.label}>
-                      <div className="flex items-baseline justify-between mb-1">
-                        <span className="font-mono text-[12px]" style={{ color: r.color }}>{r.label} error</span>
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-mono text-[10px] tabular-nums text-[#dddde2]">{r.mae!.toFixed(3)}</span>
-                          <span className="font-mono text-[9px]" style={{
-                            color: r.mae! < 0.05 ? '#4ade80' : r.mae! < 0.15 ? '#4ade80' : r.mae! < 0.40 ? '#c4a040' : '#f97316'
-                          }}>{qualityLabel(r.mae!)}</span>
-                        </div>
-                      </div>
-                      <div className="h-1 bg-[#1a1a22] rounded overflow-hidden">
-                        <div style={{
-                          width: `${Math.max(4, (1 - Math.min(r.mae!, 1.0))) * 100}%`,
-                          height: '100%',
-                          background: r.mae! < 0.15 ? '#4ade80' : r.mae! < 0.40 ? '#c4a040' : '#f97316',
-                          opacity: 0.55,
-                        }}/>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <span className="font-mono text-[9px] text-[#2a2a33] mt-1.5 block">log₁₀ MAE vs ground truth</span>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ⑥ WHY THIS CONCLUSION? ─ expandable evidence */}
-        {(mechanism || result?.admissibility) && node.status === 'done' && (
-          <div className="mt-4">
-            <div className={NODE_DIVIDER}/>
-            <button
-              onClick={() => setShowWhy(v => !v)}
-              className="w-full flex items-center justify-between py-3 focus:outline-none group"
-            >
-              <span className="font-mono text-[11px] text-[#5a5a66] group-hover:text-[#8a8a96] transition-colors">
-                Why this conclusion?
-              </span>
-              <svg className={`w-3 h-3 text-[#3a3a48] group-hover:text-[#5a5a66] transition-transform duration-150 ${showWhy ? 'rotate-180' : ''}`}
-                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
-              </svg>
+        {/* Edit mode toggle */}
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] text-[#6b6b76] uppercase tracking-widest">Constraints</span>
+          <div className="flex rounded overflow-hidden border border-[#1e1e24]">
+            <button onClick={() => cfg.editMode === 'code' ? switchToVisual() : null}
+              className={`font-mono text-[9px] px-2 py-0.5 transition-colors focus:outline-none ${cfg.editMode === 'visual' ? 'bg-[#1e1e24] text-[#9a9aa2]' : 'text-[#3a3a48] hover:text-[#6b6b76]'}`}>
+              visual
             </button>
-            {showWhy && (
-              <div className="flex flex-col gap-5 pb-2">
-                {/* Evidence time windows */}
-                {mechanism?.evidence_time && mechanism.evidence_time.length > 0 && (
-                  <div>
-                    <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Evidence windows</div>
-                    <div className="flex flex-col gap-2">
-                      {mechanism.evidence_time.slice(0, 4).map((ev, i) => (
-                        <div key={i}>
-                          <div className="flex items-baseline justify-between mb-1">
-                            <span className="font-mono text-[10px] text-[#6b6b76] truncate flex-1">{ev.label}</span>
-                            <span className="font-mono text-[9px] tabular-nums text-[#4a4a56] flex-shrink-0 ml-2">
-                              {ev.t_start.toFixed(0)}–{ev.t_end.toFixed(0)} min
-                            </span>
-                          </div>
-                          <div className="h-0.5 bg-[#1a1a22] rounded overflow-hidden">
-                            <div style={{ width: `${Math.min(100, ev.contribution * 100)}%`, height: '100%', background: '#6469a0', opacity: 0.55 }}/>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {/* Admissibility claim language */}
-                {result?.admissibility?.claim_language && (
-                  <div>
-                    <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Parameter claims</div>
-                    <div className="flex flex-col gap-2.5">
-                      {Object.entries(result.admissibility.claim_language)
-                        .filter(([, v]) => v.tier === 'supported' || v.tier === 'hedged')
-                        .slice(0, 5)
-                        .map(([param, claim]) => {
-                          const tierColor = claim.tier === 'supported' ? '#4ade80' : '#c4a040';
-                          return (
-                            <div key={param}>
-                              <div className="flex items-center gap-1.5 mb-0.5">
-                                <span className="font-mono text-[11px] text-[#8a8a96] w-8 flex-shrink-0">{param}</span>
-                                <span className="font-mono text-[9px] rounded px-1 py-px leading-tight"
-                                  style={{ color: tierColor, background: `${tierColor}1a` }}>
-                                  {claim.tier}
-                                </span>
-                              </div>
-                              <p className="font-mono text-[9px] text-[#4a4a56] leading-relaxed pl-10">{claim.text}</p>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </div>
-                )}
-                {/* Kalman change points */}
-                {result?.changepoints && result.changepoints.length > 0 && (
-                  <div>
-                    <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Detected changes</div>
-                    <div className="flex flex-col gap-1.5">
-                      {result.changepoints.slice(0, 3).map((cp, i) => (
-                        <div key={i} className="flex items-start gap-2">
-                          <span className="font-mono text-[9px] text-[#3a3a48] tabular-nums flex-shrink-0 w-12">
-                            {cp.time_min != null ? `${cp.time_min.toFixed(0)} min` : `t${cp.timepoint}`}
-                          </span>
-                          <span className="font-mono text-[9px] text-[#4a4a56] leading-tight">{cp.interpretation}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+            <button onClick={() => cfg.editMode === 'visual' ? switchToCode() : null}
+              className={`font-mono text-[9px] px-2 py-0.5 transition-colors focus:outline-none ${cfg.editMode === 'code' ? 'bg-[#1e1e24] text-[#9a9aa2]' : 'text-[#3a3a48] hover:text-[#6b6b76]'}`}>
+              code
+            </button>
+          </div>
+        </div>
+
+        {cfg.editMode === 'visual' ? (
+          <div className="flex flex-col gap-0">
+            {/* Table header */}
+            <div className="grid gap-1 mb-1" style={{ gridTemplateColumns: '2rem 1fr 1fr 2.5rem 1.8rem' }}>
+              <span/>
+              <span className="font-mono text-[8px] text-[#3a3a48] uppercase tracking-widest text-center">min</span>
+              <span className="font-mono text-[8px] text-[#3a3a48] uppercase tracking-widest text-center">max</span>
+              <span className="font-mono text-[8px] text-[#3a3a48] uppercase tracking-widest text-center">∂/∂t</span>
+              <span className="font-mono text-[8px] text-[#3a3a48] uppercase tracking-widest text-center">dir</span>
+            </div>
+            {PARAM_META.map(({ name, unit }) => {
+              const c = constraints[name] ?? DEFAULT_CONSTRAINTS[name];
+              return (
+                <div key={name} className="grid gap-1 items-center py-0.5" style={{ gridTemplateColumns: '2rem 1fr 1fr 2.5rem 1.8rem' }}>
+                  <button
+                    onClick={() => updateConstraint(name, 'enabled', !c.enabled)}
+                    className="flex items-center gap-1 focus:outline-none group"
+                    title={c.enabled ? 'Disable' : 'Enable'}>
+                    <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 transition-colors ${c.enabled ? 'bg-[#c4a040]' : 'bg-[#2a2a33]'}`}/>
+                    <span className={`font-mono text-[10px] ${c.enabled ? 'text-[#9a9aa2]' : 'text-[#3a3a48]'}`}>{name}</span>
+                  </button>
+                  <input type="text" defaultValue={fmtPy(c.min)}
+                    onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateConstraint(name, 'min', v); }}
+                    disabled={!c.enabled}
+                    title={unit}
+                    className="font-mono text-[9px] text-center bg-[#0a0a0c] border border-[#1a1a22] rounded px-1 py-0.5 text-[#6b6b76] focus:outline-none focus:border-[#2a2a33] disabled:opacity-30 w-full"/>
+                  <input type="text" defaultValue={fmtPy(c.max)}
+                    onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateConstraint(name, 'max', v); }}
+                    disabled={!c.enabled}
+                    title={unit}
+                    className="font-mono text-[9px] text-center bg-[#0a0a0c] border border-[#1a1a22] rounded px-1 py-0.5 text-[#6b6b76] focus:outline-none focus:border-[#2a2a33] disabled:opacity-30 w-full"/>
+                  <input type="text" defaultValue={c.ddtMax.toFixed(2)}
+                    onBlur={e => { const v = parseFloat(e.target.value); if (!isNaN(v)) updateConstraint(name, 'ddtMax', v); }}
+                    disabled={!c.enabled}
+                    title="max |Δlog10(param)| per step"
+                    className="font-mono text-[9px] text-center bg-[#0a0a0c] border border-[#1a1a22] rounded px-1 py-0.5 text-[#6b6b76] focus:outline-none focus:border-[#2a2a33] disabled:opacity-30 w-full"/>
+                  <select value={c.monotone}
+                    onChange={e => updateConstraint(name, 'monotone', e.target.value as 'up' | 'down' | 'free')}
+                    disabled={!c.enabled}
+                    className="font-mono text-[9px] bg-[#0a0a0c] border border-[#1a1a22] rounded px-0.5 py-0.5 text-[#6b6b76] focus:outline-none focus:border-[#2a2a33] disabled:opacity-30 w-full">
+                    <option value="free">↕</option>
+                    <option value="up">↑</option>
+                    <option value="down">↓</option>
+                  </select>
+                </div>
+              );
+            })}
+            <p className="font-mono text-[8px] text-[#2a2a33] mt-1.5">units: Ω / F · ∂/∂t in log₁₀ decades/step</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <textarea
+              value={cfg.modelCode ?? ''}
+              onChange={e => onConfigChange({ ...cfg, modelCode: e.target.value })}
+              spellCheck={false}
+              className="font-mono text-[9px] leading-relaxed text-[#9a9aa2] bg-[#07070a] border border-[#1a1a22] rounded p-2 resize-none focus:outline-none focus:border-[#2a2a33] w-full"
+              style={{ height: '280px', tabSize: 4 }}
+            />
+            {codeError && (
+              <span className="font-mono text-[9px] text-[#7a3a3a]">{codeError}</span>
             )}
+            <button
+              onClick={switchToVisual}
+              className="self-end font-mono text-[9px] px-2 py-0.5 rounded border border-[#2a2a33] text-[#6b6b76] hover:text-[#9a9aa2] hover:border-[#3a3a46] transition-colors focus:outline-none">
+              apply
+            </button>
           </div>
         )}
 
-        {node.errorMsg && <p className="text-[10px] text-[#7a3a3a] leading-tight mt-4">{node.errorMsg}</p>}
       </div>
 
       {/* Footer */}
@@ -2264,7 +2268,7 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
           className="w-full justify-center text-center"
         />
         <div className="font-mono text-[10px] text-[#3d3d48] truncate">
-          {isRunning
+          {node.status === 'running'
             ? <span className="text-[#c4a040]/60">{node.progress ? `${node.progress.done}/${node.progress.total} timepoints` : 'initializing...'}</span>
             : provenanceLabel ?? '← connect dataset'}
         </div>
@@ -2272,6 +2276,348 @@ function ProcessMLBody({ node, inputData, onRun, onStop, onConfigChange }: NodeB
     </div>
   );
 }
+
+
+// ---- Viz: Results ----
+function ResultsBody({ node, inputData }: NodeBodyProps) {
+  const result = inputData?.kind === 'ml-result' ? inputData.result : null;
+  const [showWhy, setShowWhy] = useState(false);
+
+  const smcEss      = result?.smcEss ?? [];
+  const meanEss     = smcEss.length > 0 ? arrayMean(smcEss) : null;
+  const nClusters   = result?.clusterPaths.length ?? 0;
+  const resampCount = smcEss.filter(e => e < 0.5).length;
+
+  const posteriorSummary = result?.posteriorSummary ?? null;
+  const mechanism        = result?.mechanism ?? null;
+
+  const fmtV = (v: number) => v >= 100 ? v.toFixed(1) : v >= 1 ? v.toFixed(2) : v.toFixed(3);
+
+  const primaryPs          = posteriorSummary?.TER ?? null;
+  const primaryHalfWidth   = primaryPs ? (primaryPs.q95 - primaryPs.q05) / 2 : null;
+  const primaryConfidence  = primaryPs ? primaryPs.identifiability > 0.7 ? 'High' : primaryPs.identifiability > 0.4 ? 'Moderate' : 'Low' : null;
+  const primaryConfidenceColor = primaryPs ? primaryPs.identifiability > 0.7 ? '#4ade80' : primaryPs.identifiability > 0.4 ? '#c4a040' : '#f97316' : '#5a5a66';
+
+  const terTrend = (() => {
+    if (!result) return null;
+    const k = result.kalman;
+    if (k?.trends && k.param_names) {
+      const idx = k.param_names.indexOf('TER');
+      if (idx >= 0) {
+        const t = k.trends[idx];
+        const pct = Math.round((Math.pow(10, Math.abs(t.net_change)) - 1) * 100);
+        return { pct, direction: t.direction };
+      }
+    }
+    const vals = result.predictions.TER.mean;
+    if (vals.length < 2 || vals[0] <= 0) return null;
+    const rawPct = ((vals[vals.length - 1] - vals[0]) / vals[0]) * 100;
+    return { pct: Math.round(Math.abs(rawPct)), direction: rawPct > 2 ? 'rising' as const : rawPct < -2 ? 'falling' as const : 'stable' as const };
+  })();
+
+  const totalT     = result?.time_min.length ?? 0;
+  const resampFrac = totalT > 0 ? resampCount / totalT : 0;
+  const filterQuality = !result ? null : (meanEss != null && meanEss > 0.5 && resampFrac < 0.2) ? 'GOOD' : (meanEss != null && meanEss > 0.3) ? 'FAIR' : 'POOR';
+  const filterQualityColor = filterQuality === 'GOOD' ? '#4ade80' : filterQuality === 'FAIR' ? '#c4a040' : '#f97316';
+  const filterDesc = filterQuality === 'GOOD' ? 'Particle diversity maintained. Posterior stable.' : filterQuality === 'FAIR' ? 'Moderate particle collapse. Treat estimates with caution.' : filterQuality === 'POOR' ? 'Filter degenerated. Results may be unreliable.' : '';
+
+  const POSTERIOR_PARAMS: Array<{ key: string; label: string; color: string; unit: string }> = [
+    { key: 'TER', label: 'TER', color: '#009E73', unit: 'kΩ' },
+    { key: 'Rsh', label: 'Rsh', color: '#6469a0', unit: 'kΩ' },
+    { key: 'TEC', label: 'TEC', color: '#CC79A7', unit: 'µF' },
+    { key: 'Ra',  label: 'Ra',  color: '#56B4E9', unit: 'kΩ' },
+    { key: 'Rb',  label: 'Rb',  color: '#E69F00', unit: 'kΩ' },
+  ];
+
+  if (!result) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center px-4">
+        <span className="font-mono text-[10px] text-[#2a2a33] text-center">connect an Inference node and run to see results</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto px-3 pt-3 pb-4">
+
+      {/* PRIMARY FINDING */}
+      <div>
+        <div className={SECTION_LABEL}>Primary finding</div>
+        {primaryPs ? (
+          <div className="mt-3 px-3 py-3 rounded-sm bg-[#0f0f12] border border-[#1e1e24]">
+            <div className="font-mono text-[11px] mb-1" style={{ color: '#009E73' }}>TER</div>
+            <div className="flex items-baseline gap-2 mb-2">
+              <span className="font-mono text-[26px] font-semibold text-[#dddde2] tabular-nums leading-none">{fmtV(primaryPs.median)}</span>
+              {primaryHalfWidth != null && <span className="font-mono text-[12px] text-[#4a4a56] tabular-nums">± {fmtV(primaryHalfWidth)}</span>}
+              <span className="font-mono text-[11px] text-[#3d3d48]">kΩ</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {terTrend && terTrend.direction !== 'stable' && (
+                <span className="font-mono text-[11px] tabular-nums" style={{ color: terTrend.direction === 'rising' ? '#4ade80' : '#f97316' }}>
+                  {terTrend.direction === 'rising' ? '↑' : '↓'} {terTrend.pct}%
+                </span>
+              )}
+              <span className="font-mono text-[10px] text-[#3d3d48]">Confidence</span>
+              <span className="font-mono text-[10px] font-medium" style={{ color: primaryConfidenceColor }}>{primaryConfidence}</span>
+            </div>
+          </div>
+        ) : (
+          <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
+        )}
+      </div>
+
+      <div className={NODE_DIVIDER}/>
+
+      {/* PARAMETER POSTERIORS */}
+      <div>
+        <div className={SECTION_LABEL}>Parameter posteriors</div>
+        {posteriorSummary ? (
+          <div className="mt-3 flex flex-col gap-3">
+            {POSTERIOR_PARAMS.map(({ key, label, color, unit }) => {
+              const ps = posteriorSummary[key];
+              if (!ps) return null;
+              const halfWidth = (ps.q95 - ps.q05) / 2;
+              const cv = ps.median > 0 ? (ps.q95 - ps.q05) / ps.median : 0;
+              const barWidth = Math.min(100, cv * 100);
+              const ident = ps.identifiability;
+              const barColor = ident > 0.7 ? '#4ade80' : ident > 0.4 ? '#c4a040' : '#f97316';
+              return (
+                <div key={key} className="flex items-start gap-2">
+                  <span className="font-mono text-[11px] w-8 flex-shrink-0 pt-px" style={{ color }}>{label}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="font-mono text-[13px] font-semibold text-[#dddde2] tabular-nums">{fmtV(ps.median)}</span>
+                      <span className="font-mono text-[10px] text-[#4a4a56] tabular-nums">± {fmtV(halfWidth)}</span>
+                      <span className="font-mono text-[9px] text-[#3a3a48]">{unit}</span>
+                    </div>
+                    <div className="mt-1 h-0.5 bg-[#1a1a22] rounded overflow-hidden">
+                      <div style={{ width: `${barWidth}%`, height: '100%', background: barColor, opacity: 0.4 }} className="rounded"/>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
+        )}
+      </div>
+
+      <div className={NODE_DIVIDER}/>
+
+      {/* MECHANISTIC INTERPRETATION */}
+      <div>
+        <div className={SECTION_LABEL}>Mechanistic interpretation</div>
+        {mechanism ? (
+          <div className="mt-3">
+            {mechanism.hypotheses[0] && (
+              <div className="mb-4">
+                <div className="font-mono text-[10px] text-[#4a4a56] mb-1.5">Most likely</div>
+                <div className="font-mono text-[15px] font-medium text-[#dddde2] leading-tight mb-1">{mechanism.hypotheses[0].label.split(' (')[0]}</div>
+                <div className="font-mono text-[11px]" style={{ color: '#4ade80' }}>{Math.round(mechanism.hypotheses[0].probability * 100)}% confidence</div>
+              </div>
+            )}
+            <div className="flex flex-col gap-2.5">
+              {mechanism.hypotheses.slice(0, 3).map(h => (
+                <div key={h.name}>
+                  <div className="flex items-baseline justify-between mb-1">
+                    <span className="font-mono text-[10px] text-[#6b6b76] truncate flex-1">{h.label.split(' (')[0]}</span>
+                    <span className="font-mono text-[10px] tabular-nums text-[#4a4a56] flex-shrink-0 ml-2">{(h.probability * 100).toFixed(0)}%</span>
+                  </div>
+                  <div className="h-1 bg-[#1a1a22] rounded overflow-hidden">
+                    <div style={{ width: `${h.probability * 100}%`, height: '100%', background: '#6469a0', opacity: 0.55 }}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {(mechanism.established.length > 0 || mechanism.ambiguous.length > 0) && (
+              <div className="mt-3 flex flex-col gap-1.5">
+                {mechanism.established.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <span className="font-mono text-[9px] text-[#4a4a56] flex-shrink-0 w-16 pt-px">established</span>
+                    <span className="font-mono text-[10px] text-[#8a8a96]">{mechanism.established.join(' · ')}</span>
+                  </div>
+                )}
+                {mechanism.ambiguous.length > 0 && (
+                  <div className="flex items-start gap-2">
+                    <span className="font-mono text-[9px] text-[#4a4a56] flex-shrink-0 w-16 pt-px">ambiguous</span>
+                    <span className="font-mono text-[10px] text-[#4a4a56]">{mechanism.ambiguous.join(' · ')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <span className="mt-2 block font-mono text-[10px] text-[#2a2a33]">run to populate</span>
+        )}
+      </div>
+
+      <div className={NODE_DIVIDER}/>
+
+      {/* MODEL CONFIDENCE */}
+      <div>
+        <div className={SECTION_LABEL}>Model confidence</div>
+        <div className="mt-3">
+          {filterQuality && (
+            <>
+              <div className="font-mono text-[20px] font-semibold leading-none mb-1.5" style={{ color: filterQualityColor }}>{filterQuality}</div>
+              <div className="font-mono text-[10px] text-[#4a4a56] mb-4 leading-relaxed">{filterDesc}</div>
+            </>
+          )}
+          <div className="grid grid-cols-3 gap-3">
+            {meanEss != null && (
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] text-[#5a5a66]">ESS</span>
+                <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{Math.round(meanEss * 64)}</span>
+              </div>
+            )}
+            {nClusters > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] text-[#5a5a66]">Clusters</span>
+                <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{nClusters}</span>
+              </div>
+            )}
+            {smcEss.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="font-mono text-[10px] text-[#5a5a66]">Resamples</span>
+                <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{resampCount}</span>
+              </div>
+            )}
+          </div>
+          {result.dlResnorm.length > 0 && (
+            <div className="mt-3 flex items-baseline gap-2">
+              <span className="font-mono text-[10px] text-[#5a5a66]">Impedance MAE</span>
+              <span className="font-mono text-[12px] text-[#dddde2] tabular-nums">{arrayMean(result.dlResnorm).toFixed(3)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* VALIDATION */}
+      {result.groundTruth && (() => {
+        const gt = result.groundTruth!;
+        const preds = result.predictions;
+        if (result.time_min.length === 0) return null;
+        const logMAE = (predArr: number[], gtArr: number[]) => {
+          let sum = 0; let n = 0;
+          for (let i = 0; i < Math.min(predArr.length, gtArr.length); i++) {
+            const p = predArr[i]; const g = gtArr[i];
+            if (p > 0 && g > 0) { sum += Math.abs(Math.log10(p) - Math.log10(g)); n++; }
+          }
+          return n > 0 ? sum / n : null;
+        };
+        const qualityLabel = (mae: number) => mae < 0.05 ? 'Excellent' : mae < 0.15 ? 'Good' : mae < 0.40 ? 'Moderate' : 'Poor';
+        const rows = [
+          { label: 'TER', color: '#009E73', mae: logMAE(preds.TER.mean, gt.TER ?? []) },
+          { label: 'TEC', color: '#CC79A7', mae: logMAE(preds.TEC.mean, gt.TEC ?? []) },
+          { label: 'Rsh', color: '#6469a0', mae: logMAE(preds.R2.mean,  gt.R2  ?? []) },
+        ].filter(r => r.mae !== null);
+        if (rows.length === 0) return null;
+        return (
+          <>
+            <div className={NODE_DIVIDER}/>
+            <div>
+              <div className={SECTION_LABEL}>Validation</div>
+              <div className="mt-3 flex flex-col gap-3">
+                {rows.map(r => (
+                  <div key={r.label}>
+                    <div className="flex items-baseline justify-between mb-1">
+                      <span className="font-mono text-[12px]" style={{ color: r.color }}>{r.label} error</span>
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono text-[10px] tabular-nums text-[#dddde2]">{r.mae!.toFixed(3)}</span>
+                        <span className="font-mono text-[9px]" style={{ color: r.mae! < 0.05 ? '#4ade80' : r.mae! < 0.15 ? '#4ade80' : r.mae! < 0.40 ? '#c4a040' : '#f97316' }}>{qualityLabel(r.mae!)}</span>
+                      </div>
+                    </div>
+                    <div className="h-1 bg-[#1a1a22] rounded overflow-hidden">
+                      <div style={{ width: `${Math.max(4, (1 - Math.min(r.mae!, 1.0))) * 100}%`, height: '100%', background: r.mae! < 0.15 ? '#4ade80' : r.mae! < 0.40 ? '#c4a040' : '#f97316', opacity: 0.55 }}/>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <span className="font-mono text-[9px] text-[#2a2a33] mt-1.5 block">log₁₀ MAE vs ground truth</span>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* WHY THIS CONCLUSION */}
+      {(mechanism || result.admissibility) && (
+        <>
+          <div className={NODE_DIVIDER}/>
+          <button
+            onClick={() => setShowWhy(v => !v)}
+            className="flex items-center gap-1.5 group focus:outline-none">
+            <span className="font-mono text-[10px] text-[#5a5a66] group-hover:text-[#7a7a86] transition-colors">Why this conclusion?</span>
+            <svg className={`w-3 h-3 text-[#3a3a48] group-hover:text-[#5a5a66] transition-transform duration-150 ${showWhy ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+            </svg>
+          </button>
+          {showWhy && (
+            <div className="flex flex-col gap-5 pb-2">
+              {mechanism?.evidence_time && mechanism.evidence_time.length > 0 && (
+                <div>
+                  <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Evidence windows</div>
+                  <div className="flex flex-col gap-2">
+                    {mechanism.evidence_time.slice(0, 4).map((ev, i) => (
+                      <div key={i}>
+                        <div className="flex items-baseline justify-between mb-1">
+                          <span className="font-mono text-[10px] text-[#6b6b76] truncate flex-1">{ev.label}</span>
+                          <span className="font-mono text-[9px] tabular-nums text-[#4a4a56] flex-shrink-0 ml-2">{ev.t_start.toFixed(0)}–{ev.t_end.toFixed(0)} min</span>
+                        </div>
+                        <div className="h-0.5 bg-[#1a1a22] rounded overflow-hidden">
+                          <div style={{ width: `${Math.min(100, ev.contribution * 100)}%`, height: '100%', background: '#6469a0', opacity: 0.55 }}/>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {result.admissibility?.claim_language && (
+                <div>
+                  <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Parameter claims</div>
+                  <div className="flex flex-col gap-2.5">
+                    {Object.entries(result.admissibility.claim_language)
+                      .filter(([, v]) => v.tier === 'supported' || v.tier === 'hedged')
+                      .slice(0, 5)
+                      .map(([param, claim]) => {
+                        const tierColor = claim.tier === 'supported' ? '#4ade80' : '#c4a040';
+                        return (
+                          <div key={param}>
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="font-mono text-[11px] text-[#8a8a96] w-8 flex-shrink-0">{param}</span>
+                              <span className="font-mono text-[9px] rounded px-1 py-px leading-tight" style={{ color: tierColor, background: `${tierColor}1a` }}>{claim.tier}</span>
+                            </div>
+                            <p className="font-mono text-[9px] text-[#4a4a56] leading-relaxed pl-10">{claim.text}</p>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+              {result.changepoints && result.changepoints.length > 0 && (
+                <div>
+                  <div className="font-mono text-[10px] text-[#5a5a66] mb-2">Detected changes</div>
+                  <div className="flex flex-col gap-1.5">
+                    {result.changepoints.slice(0, 3).map((cp, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className="font-mono text-[9px] text-[#3a3a48] tabular-nums flex-shrink-0 w-12">{cp.time_min != null ? `${cp.time_min.toFixed(0)} min` : `t${cp.timepoint}`}</span>
+                        <span className="font-mono text-[9px] text-[#4a4a56] leading-tight">{cp.interpretation}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      {node.errorMsg && <p className="text-[10px] text-[#7a3a3a] leading-tight mt-4">{node.errorMsg}</p>}
+    </div>
+  );
+}
+
 
 
 
