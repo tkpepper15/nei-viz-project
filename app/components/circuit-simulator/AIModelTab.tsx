@@ -2068,10 +2068,18 @@ function PipelineView({ cfg, onConfigChange, selectedStage, onSelectStage }: {
 
   const onNodeMouseUp = (stage: PipeStage) => {
     if (!dragRef.current?.moved) {
-      toggle(stage);
+      // Click = select/deselect for snippet only. Toggle is handled by the power dot.
       onSelectStage(selectedStage === stage.id ? null : stage.id);
     }
     dragRef.current = null;
+  };
+
+  const resetLayout = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setPos(Object.fromEntries(
+      Object.entries(PIPE_DEFAULT_POS).map(([k, v]) => [k, { x: v.x, y: v.y }])
+    ));
   };
 
   return (
@@ -2079,9 +2087,10 @@ function PipelineView({ cfg, onConfigChange, selectedStage, onSelectStage }: {
       <div className="flex items-center justify-between">
         <span className="font-mono text-[10px] text-[#6b6b76] uppercase tracking-widest">Pipeline</span>
         <button
-          onClick={() => setPos({ ...PIPE_DEFAULT_POS })}
-          className="font-mono text-[9px] text-[#2a2a38] hover:text-[#4a4a58] transition-colors focus:outline-none"
-          title="Reset layout"
+          onMouseDown={e => e.stopPropagation()}
+          onClick={resetLayout}
+          className="font-mono text-[9px] text-[#454558] hover:text-[#9a9aa2] transition-colors focus:outline-none"
+          title="Reset node positions"
         >
           reset
         </button>
@@ -2128,8 +2137,7 @@ function PipelineView({ cfg, onConfigChange, selectedStage, onSelectStage }: {
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                opacity: on ? 1 : 0.3,
-                cursor: toggleable ? 'pointer' : 'grab',
+                cursor: 'pointer',
                 userSelect: 'none',
                 transition: 'opacity 0.15s, border-color 0.15s, background 0.15s',
                 boxShadow: sel ? `0 0 0 1px ${stage.color}33` : undefined,
@@ -2143,6 +2151,25 @@ function PipelineView({ cfg, onConfigChange, selectedStage, onSelectStage }: {
               <span style={{ fontFamily: 'monospace', fontSize: 7, color: on ? '#38384a' : '#222230', lineHeight: 1, marginTop: 2 }}>
                 {stage.sub}
               </span>
+              {/* Power dot — click to toggle on/off without selecting snippet */}
+              {toggleable && (
+                <div
+                  onMouseDown={e => { e.stopPropagation(); e.preventDefault(); toggle(stage); }}
+                  style={{
+                    position: 'absolute',
+                    top: 3,
+                    right: 3,
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: on ? stage.color : '#2a2a38',
+                    opacity: on ? 0.7 : 0.4,
+                    cursor: 'pointer',
+                    transition: 'background 0.15s, opacity 0.15s',
+                  }}
+                  title={on ? 'Disable stage' : 'Enable stage'}
+                />
+              )}
             </div>
           );
         })}
