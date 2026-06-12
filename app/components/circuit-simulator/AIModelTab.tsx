@@ -2435,7 +2435,7 @@ function ResultsBody({ node, inputData }: NodeBodyProps) {
 
   const totalT     = result?.time_min.length ?? 0;
   const resampFrac = totalT > 0 ? resampCount / totalT : 0;
-  const filterQuality = !result ? null : (meanEss != null && meanEss > 0.5 && resampFrac < 0.2) ? 'GOOD' : (meanEss != null && meanEss > 0.3) ? 'FAIR' : 'POOR';
+  const filterQuality = !result ? null : meanEss === null ? null : (meanEss > 0.5 && resampFrac < 0.2) ? 'GOOD' : meanEss > 0.3 ? 'FAIR' : 'POOR';
   const filterQualityColor = filterQuality === 'GOOD' ? '#4ade80' : filterQuality === 'FAIR' ? '#c4a040' : '#f97316';
   const filterDesc = filterQuality === 'GOOD' ? 'Particle diversity maintained. Posterior stable.' : filterQuality === 'FAIR' ? 'Moderate particle collapse. Treat estimates with caution.' : filterQuality === 'POOR' ? 'Filter degenerated. Results may be unreliable.' : '';
 
@@ -2586,7 +2586,7 @@ function ResultsBody({ node, inputData }: NodeBodyProps) {
             {meanEss != null && (
               <div className="flex flex-col gap-1">
                 <span className="font-mono text-[10px] text-[#5a5a66]">ESS</span>
-                <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{Math.round(meanEss * 64)}</span>
+                <span className="font-mono text-[14px] font-semibold text-[#dddde2] tabular-nums">{(meanEss * 100).toFixed(0)}%</span>
               </div>
             )}
             {nClusters > 0 && (
@@ -3125,6 +3125,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
   // ---- Non-trajectory view branches — rendered before expensive Kalman setup ----
   if (view !== 'trajectory') {
     const nT = timeMin.length;
+    if (nT === 0) return null;
     const altTMin = Math.min(...timeMin);
     const altTMax = Math.max(...timeMin);
     const altXRange = altTMax - altTMin || 1;
@@ -3151,7 +3152,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
         {visTrajectories.map(traj => {
           const lineKey = `hyp${traj.hypothesis}`;
           const isVis = !hiddenLines.has(lineKey);
-          const color = stageColorForTraj(traj.label, stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]));
+          const color = stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]);
           const shortLabel = (() => {
             const l = traj.label.toLowerCase();
             if (l.includes('smooth') || l.includes('fitted')) return 'RTS (smoothed)';
@@ -3626,7 +3627,7 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           if (v >= 0.01) return v.toFixed(4);
           return v.toExponential(2);
         };
-        const unit = TRAJ_PARAM_LABELS[param].match(/\(([^)]+)\)/)?.[1] ?? '';
+        const unit = TRAJ_PARAM_LABELS[param]?.match(/\(([^)]+)\)/)?.[1] ?? '';
         const rows: { label: string; color: string; val: number | null }[] = [];
         // RBPF trajectories
         for (const traj of visTrajectories) {
@@ -3637,9 +3638,12 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           const v = trajDisplayValue(param, raw);
           rows.push({ label: traj.label.replace(/ECM/g, 'Fitted'), color: stageColorForTraj(traj.label, colors[traj.hypothesis % colors.length]), val: isFinite(v) && v > 0 ? v : null });
         }
-        // Kalman smoother
-        if (kalMeasPts.length > hoverIdx && !hiddenLines.has('kal') && kalMeasPts[hoverIdx]) {
-          rows.push({ label: 'RTS', color: STAGE_COLOR.rts, val: kalMeasPts[hoverIdx].v > 0 ? kalMeasPts[hoverIdx].v : null });
+        // Kalman smoother — find by time (kalMeasPts may be sparser than timeMin)
+        const kalHoverPt = !hiddenLines.has('kal')
+          ? kalMeasPts.find(p => Math.abs(p.t - timeMin[hoverIdx]) < 0.05) ?? null
+          : null;
+        if (kalHoverPt) {
+          rows.push({ label: 'RTS', color: STAGE_COLOR.rts, val: kalHoverPt.v > 0 ? kalHoverPt.v : null });
         }
         // Baseline
         if (showEcmPath && !hiddenLines.has('ecm') && ecmColdPath[hoverIdx]) {
@@ -3883,11 +3887,12 @@ function HypothesisTrajectoryChart({ trajectories, ecmColdPath, param, groundTru
           );
         })()}
 
-        {/* Kalman hover dot */}
-        {hoverIdx !== null && kalMeasPts[hoverIdx] && !hiddenLines.has('kal') && (
-          <circle cx={sx(kalMeasPts[hoverIdx].t)} cy={syClip(kalMeasPts[hoverIdx].v)}
-            r={4.5} fill={STAGE_COLOR.rts} stroke="#07070a" strokeWidth={1.5} opacity={0.95}/>
-        )}
+        {/* Kalman hover dot — find by time to handle sparse kalMeasPts */}
+        {hoverIdx !== null && !hiddenLines.has('kal') && (() => {
+          const kpt = kalMeasPts.find(p => Math.abs(p.t - timeMin[hoverIdx]) < 0.05);
+          if (!kpt) return null;
+          return <circle cx={sx(kpt.t)} cy={syClip(kpt.v)} r={4.5} fill={STAGE_COLOR.rts} stroke="#07070a" strokeWidth={1.5} opacity={0.95}/>;
+        })()}
 
         {/* Changepoint annotations — vertical dashed marker + param label */}
         {changepoints && changepoints.map((cp, i) => {
